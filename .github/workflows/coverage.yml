@@ -1,0 +1,41 @@
+name: Running Code Coverage
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.13.0]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run the tests
+        run: npm test -- --coverage
+        env:
+          PRIVATE_KEY: ${{secrets.PRIVATE_KEY}}
+          PUBLIC_KEY: ${{secrets.PUBLIC_KEY}}
+          FROM_ADDRESS: ${{secrets.FROM_ADDRESS}}
+          TO_ADDRESS: ${{secrets.TO_ADDRESS}}
+          WALLET_ADDRESS: ${{secrets.WALLET_ADDRESS}}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}

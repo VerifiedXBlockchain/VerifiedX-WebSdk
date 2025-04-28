@@ -1,0 +1,79 @@
+{
+  "name": "vfx-web-sdk",
+  "version": "1.0.0",
+  "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
+  "main": "lib/index.js",
+  "browser": "lib/browser.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "yarn build:node",
+    "build:node": "tsc -p tsconfig.json",
+    "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --outfile=lib/esbuild/browser.js && browserify lib/esbuild/browser.js > ./lib/browser.js && yarn examples && yarn cleanup",
+    "examples": "cp ./lib/browser.js ./example/browser-example/rbx.js",
+    "cleanup": "rm -rf lib/esbuild && cp lib/index.d.ts lib/browser.d.ts",
+    "format": "prettier --write \"src/**/*.(js|ts)\"",
+    "lint": "eslint src --ext .js,.ts",
+    "lint:fix": "eslint src --fix --ext .js,.ts",
+    "test": "jest --config jest.config.js --silent='false'",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm test && npm run lint && cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
+    "preversion": "npm run lint",
+    "version": "npm run format && git add -A src",
+    "postversion": "git push && git push --tags"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ReserveBlockIO/rbx-js-sdk"
+  },
+  "keywords": [
+    "boilerplate",
+    "typescript"
+  ],
+  "author": "Tyler Savery",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ReserveBlockIO/rbx-js-sdk/issues"
+  },
+  "homepage": "https://github.com/ReserveBlockIO/rbx-js-sdk#readme",
+  "dependencies": {
+    "axios": "^1.9.0",
+    "bip32": "3.0.1",
+    "bip39": "3.0.2",
+    "browser-crypto": "^2.0.0",
+    "bs58": "^5.0.0",
+    "create-hash": "^1.2.0",
+    "crypto-browserify": "^3.12.0",
+    "crypto-js": "^3.1.9-1",
+    "elliptic": "^6.5.4",
+    "hdkey": "^2.1.0",
+    "secp256k1": "^5.0.0",
+    "tiny-secp256k1": "1.1.6"
+  },
+  "devDependencies": {
+    "@types/create-hash": "^1.2.2",
+    "@types/crypto-js": "^4.1.1",
+    "@types/elliptic": "^6.4.14",
+    "@types/hdkey": "^2.0.1",
+    "@types/jest": "29.2.4",
+    "@types/secp256k1": "^4.0.3",
+    "@types/tiny-secp256k1": "1.0.0",
+    "@typescript-eslint/eslint-plugin": "5.46.0",
+    "@typescript-eslint/parser": "5.47.1",
+    "browserify": "^17.0.0",
+    "dotenv": "^16.0.3",
+    "esbuild": "^0.17.10",
+    "eslint": "8.30.0",
+    "eslint-plugin-jest": "27.1.7",
+    "jest": "29.3.1",
+    "prettier": "2.8.1",
+    "ts-jest": "29.0.3",
+    "typescript": "4.9.4"
+  },
+  "files": [
+    "lib/**/*"
+  ],
+  "engines": {
+    "npm": "8.19.3",
+    "node": "18.13.0"
+  }
+}
