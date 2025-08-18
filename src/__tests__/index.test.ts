@@ -144,6 +144,12 @@ describe("address checks", () => {
     const exists = await addressApiClient.domainAvailable("test.vfx");
     expect(exists).toEqual(false);
   })
+
+  test("lookup domain", async () => {
+    const address = await addressApiClient.lookupDomain("test.vfx");
+    expect(address).toBeTruthy();
+    expect(typeof address).toBe("string");
+  })
 })
 
 describe('transaction checks', () => {

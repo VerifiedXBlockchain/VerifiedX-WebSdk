@@ -43,4 +43,13 @@ export class AddressApiClient extends BaseApiClient {
         }
     }
 
+    public lookupDomain = async (domain: string): Promise<string | null> => {
+        try {
+            const result = await this.makeJsonRequest(`/adnr/${domain}/`);
+            return result?.address || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
 }
