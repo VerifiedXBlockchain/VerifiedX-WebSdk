@@ -145,7 +145,7 @@ describe("address checks", () => {
   })
 
   test("lookup domain", async () => {
-    const address = await addressApiClient.lookupDomain("test.vfx");
+    const address = await client.lookupDomain("test.vfx");
     expect(address).toBeTruthy();
     expect(typeof address).toBe("string");
   })

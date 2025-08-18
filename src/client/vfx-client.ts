@@ -65,6 +65,10 @@ export class VfxClient {
         return await txBuilder.process(this.dryRun);
     }
 
+    public lookupDomain = async (domain: string): Promise<string | null> => {
+        return this.addressApiClient.lookupDomain(domain);
+    }
+
     public buyVfxDomain = async (keypair: Keypair, domain: string): Promise<string | null> => {
 
         domain = cleanVfxDomain(domain);
