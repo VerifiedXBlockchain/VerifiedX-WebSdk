@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { KeypairService, RawTransactionBuilder } from "./index";
+import { VfxClient } from "./index";
 
-(window as any).vfx = { KeypairService, RawTransactionBuilder };
+(window as any).vfx = { VfxClient };

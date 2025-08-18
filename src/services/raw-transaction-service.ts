@@ -1,6 +1,7 @@
-import { Keypair, KeypairService } from "..";
 import { RawTransactionApiClient } from "../client/raw-transaction-api-client";
 import { Network } from "../constants";
+import { Keypair } from "../types";
+import KeypairService from "./keypair-service";
 
 
 export interface IRawTransactionServiceOptions {

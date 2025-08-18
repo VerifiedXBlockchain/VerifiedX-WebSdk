@@ -1,6 +1,10 @@
 import { Network } from "../constants";
 import { VfxAddress } from "../types";
+import { addressWithoutActivity } from "../utils";
 import { BaseApiClient } from "./base-api-client";
+
+
+
 
 
 export class AddressApiClient extends BaseApiClient {
@@ -14,8 +18,7 @@ export class AddressApiClient extends BaseApiClient {
             const result = await this.makeJsonRequest(`/${address}`);
 
             if (result) {
-
-                const address: VfxAddress = {
+                return {
                     address: result.address,
                     balance: result.balance,
                     balanceTotal: result.balance_total,
@@ -23,13 +26,11 @@ export class AddressApiClient extends BaseApiClient {
                     adnr: result.adnr,
                     activated: result.activated
                 }
-
-                return address;
             }
 
-            return null;
+            return addressWithoutActivity(address);
         } catch (e) {
-            return null;
+            return addressWithoutActivity(address);
         }
 
     }

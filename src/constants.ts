@@ -25,3 +25,6 @@ export const DOMAIN_PURCHASE_COST = 5.0;
 export const DOMAIN_TRANSFER_COST = 5.0;
 export const DOMAIN_DELETE_COST = 5.0;
 
+export const VFX_API_BASE_URL_TESTNET = "https://data-testnet.verifiedx.io/api"
+export const VFX_API_BASE_URL_MAINNET = "https://data.verifiedx.io/api"
+

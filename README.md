@@ -23,8 +23,6 @@ Create a `test.env` file in the root directory and include the following entries
 PRIVATE_KEY=
 FROM_ADDRESS=
 TO_ADDRESS=
-VFX_API_BASE_URL_TESTNET=https://data-testnet.verifiedx.io/api
-VFX_API_BASE_URL_MAINNET=https://data.verifiedx.io/api
 ```
 
 
