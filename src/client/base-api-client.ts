@@ -1,5 +1,5 @@
 import axios, { AxiosRequestConfig, Method } from 'axios';
-import { Network } from '../constants';
+import { Network, VFX_API_BASE_URL_MAINNET, VFX_API_BASE_URL_TESTNET } from '../constants';
 
 interface IBaseApiClientOptions {
     network: Network;
@@ -20,7 +20,7 @@ export class BaseApiClient {
         method: Method = 'GET',
         params: Record<string, any> = {}
     ) {
-        const url = `${this.network == Network.Testnet ? process.env.VFX_API_BASE_URL_TESTNET : process.env.VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
+        const url = `${this.network == Network.Testnet ? VFX_API_BASE_URL_TESTNET : VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
         let config: AxiosRequestConfig = {
             url,
             method,
@@ -70,7 +70,7 @@ export class BaseApiClient {
         path: string,
         files: FormData
     ): Promise<any> {
-        const url = `${this.network == Network.Testnet ? process.env.VFX_API_BASE_URL_TESTNET : process.env.VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
+        const url = `${this.network == Network.Testnet ? VFX_API_BASE_URL_TESTNET : VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
 
         const response = await axios.post(url, files, {
             headers: {

@@ -1,6 +1,7 @@
 
 import CryptoJS from "crypto-js";
 import { Network } from "./constants";
+import { VfxAddress } from "./types";
 
 
 export function generateRandomInteger(min: number, max: number): number {
@@ -214,4 +215,15 @@ export function domainWithoutSuffix(domain: string): string {
         return domain.split('.')[0];
     }
     return domain;
+}
+
+export const addressWithoutActivity = (address: string): VfxAddress => {
+    return {
+        address: address,
+        balance: 0,
+        balanceTotal: 0,
+        balanceLocked: 0,
+        adnr: null,
+        activated: false
+    }
 }

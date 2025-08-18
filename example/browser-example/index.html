@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
 
-    <script src="./rbx.js"></script>
+    <script src="./vfx.js"></script>
 </head>
+
 <body>
 
     <h2>Keypairs</h2>
-    
+
     <textarea id="result" rows="10" cols="60"></textarea>
     <br />
     <button onClick="generateAddress()">Generate Address</button>
@@ -24,38 +26,21 @@
     <input type="text" id="addressResult" />
 
 
-    <hr />
-
-    <h2>Transactions</h2>
-
-    <input type="text" id="fromAddress" placeholder="From Address" value="" />
-    <input type="text" id="toAddress" placeholder="To Address" value="" />
-    <input type="text" id="txPrivateKey" placeholder="Private Key"value="" />
-    <input type="number" id="amount" placeholder="Amount"value="" />
 
 
-    <button onClick="sendTestTx()">Send Test TX</button>
-
-    <h2>Explorer</h2>
-
-    <button onClick="getBlockHeight()">Latest Block Height</button>
-
-    
 </body>
 
 <script>
 
-    const keypairService = new rbx.KeypairService();
-    const txService = new rbx.TransactionService("http://localhost:3001/http://127.0.0.1:7292");
-    const explorerService = new rbx.ExplorerService("http://localhost:3001/https://data.rbx.network/api");
+    const keypairService = new vfx.KeypairService("testnet");
 
 
     function generateAddress() {
-        
+
         const privateKey = keypairService.generatePrivateKey();
         const publicKey = keypairService.publicFromPrivate(privateKey);
         const address = keypairService.addressFromPrivate(privateKey);
-        
+
         const result = "Private Key:\n" + privateKey + "\n\n" + "Public Key:\n" + publicKey + "\n\n" + "Address:\n" + address;
         document.getElementById("result").value = result;
     }
@@ -63,36 +48,13 @@
     function importPrivateKey() {
         const privateKey = document.getElementById("privateKey").value;
         const address = keypairService.addressFromPrivate(privateKey);
-        
+
         document.getElementById("addressResult").value = address;
     }
 
-    function sendTestTx() {
 
-
-        const privateKey = document.getElementById('txPrivateKey').value;
-        const fromAddress = document.getElementById('fromAddress').value;
-        const toAddress = document.getElementById('toAddress').value;
-        const amount = parseFloat(document.getElementById('amount').value);
-
-        const options = {
-            fromAddress: fromAddress,
-            toAddress: toAddress,
-            amount: amount,
-            type: 0,
-        }
-
-        txService.buildAndSendTransaction(options, privateKey, true).then(function(hash){
-            alert("Success. Hash:" + hash);
-        });
-    }
-
-    function getBlockHeight() {
-        explorerService.latestBlock().then(function(block) {
-            alert(block.height);
-        })
-    }
 
 
 </script>
+
 </html>

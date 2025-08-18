@@ -31,7 +31,7 @@ export class KeypairService {
         return bip39.generateMnemonic(words == 12 ? 128 : 256);
     }
 
-    public privateKeyFromMneumonic(mnemonic: string, nonce: number): string {
+    public privateKeyFromMneumonic(mnemonic: string, index: number): string {
 
         const seed = bip39.mnemonicToSeedSync(mnemonic);
 
@@ -39,7 +39,7 @@ export class KeypairService {
 
         const root = bip32.fromSeed(seed);
 
-        const account = root.derivePath(`m/0'/0'/${nonce}'`);
+        const account = root.derivePath(`m/0'/0'/${index}'`);
         if (account.privateKey) {
             return account.privateKey.toString('hex');
         }
@@ -85,7 +85,7 @@ export class KeypairService {
         return base54Address;
     }
 
-    public getSignature(message: string, privateKeyHex: string) {
+    public getSignature(message: string, privateKeyHex: string): string {
         const data = CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
 
         const privateKey = Buffer.from(privateKeyHex, 'hex');
