@@ -76,13 +76,11 @@ You may encounter an error building to the browser due to cipher-base. Open this
 
 And replace the imports with the following:
 
-````
-
+```
 var Buffer = require('safe-buffer').Buffer
 var Transform = require('readable-stream').Transform // replacing instead of "stream"
 var StringDecoder = require('string_decoder').StringDecoder
 var inherits = require('inherits')
-
 ```
 
 > Note: this is automated by the postinstall script when building from source but it may be something you run into.
