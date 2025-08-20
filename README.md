@@ -102,5 +102,3 @@ Contributions, issues and feature requests are welcome!<br />Feel free to check 
 ## 📝 License
 
 This project is [MIT](LICENSE) licensed.
-```
-````
