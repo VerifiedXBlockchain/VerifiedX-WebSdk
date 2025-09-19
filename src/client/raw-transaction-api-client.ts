@@ -16,7 +16,7 @@ export class RawTransactionApiClient extends BaseApiClient {
         return Number(text);
     }
 
-    async getFee(txData: Record<string, any>): Promise<number> {
+    async getFee(txData: Record<string, unknown>): Promise<number> {
         const params = { transaction: txData };
         const response = await this.makeJsonRequest('/fee/', 'POST', params);
 
@@ -27,7 +27,7 @@ export class RawTransactionApiClient extends BaseApiClient {
         throw new Error(`Unexpected getFee() result: ${JSON.stringify(response)}`);
     }
 
-    async getHash(txData: Record<string, any>): Promise<string> {
+    async getHash(txData: Record<string, unknown>): Promise<string> {
         const params = { transaction: txData };
         const response = await this.makeJsonRequest('/hash/', 'POST', params);
 
@@ -42,14 +42,14 @@ export class RawTransactionApiClient extends BaseApiClient {
         return this.makeBoolRequest(`/validate-signature/${message}/${address}/${signature}/`, 'POST');
     }
 
-    async verifyTransaction(txData: Record<string, any>): Promise<boolean> {
+    async verifyTransaction(txData: Record<string, unknown>): Promise<boolean> {
         const params = { transaction: txData };
         const response = await this.makeJsonRequest('/verify/', 'POST', params);
 
         return response?.Result === 'Success';
     }
 
-    async sendTransaction(txData: Record<string, any>): Promise<boolean> {
+    async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
         const params = { transaction: txData };
         const response = await this.makeJsonRequest('/send/', 'POST', params);
 

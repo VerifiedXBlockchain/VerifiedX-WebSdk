@@ -114,7 +114,7 @@ export class VfxClient {
         return await txBuilder.process(this.dryRun);
     }
 
-    public listTransactionsForAddress = async (address: string, page: number = 1, limit: number = 10,): Promise<PaginatedResponse<Transaction> | null> => {
+    public listTransactionsForAddress = async (address: string, page = 1, limit = 10,): Promise<PaginatedResponse<Transaction> | null> => {
         return this.transactionApiClient.listTransactionsForAddress(address, page, limit);
     }
 

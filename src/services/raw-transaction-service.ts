@@ -10,7 +10,7 @@ export interface IRawTransactionServiceOptions {
     toAddress: string;
     txType?: number;
     amount?: number;
-    data?: Record<string, any> | null;
+    data?: Record<string, unknown> | null;
 }
 
 export class RawTransactionService {
@@ -19,7 +19,7 @@ export class RawTransactionService {
     private toAddress: string;
     private txType: number;
     private amount: number;
-    private data: Record<string, any> | null;
+    private data: Record<string, unknown> | null;
     private fromAddress: string;
 
     private hash: string | null = null;
@@ -38,7 +38,7 @@ export class RawTransactionService {
         this.fromAddress = this.keypair.address;
     }
 
-    private updateTransactionData(): Record<string, any> {
+    private updateTransactionData(): Record<string, unknown> {
         return {
             Hash: this.hash || '',
             ToAddress: this.toAddress,
@@ -55,7 +55,7 @@ export class RawTransactionService {
         };
     }
 
-    async process(dryRun: boolean = false): Promise<string | null> {
+    async process(dryRun = false): Promise<string | null> {
         const client = new RawTransactionApiClient(this.network);
         const keypairService = new KeypairService(this.network);
 

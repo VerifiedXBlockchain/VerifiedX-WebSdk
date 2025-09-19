@@ -9,7 +9,7 @@ dotenv.config({ path: 'test.env' })
 
 
 const network: Network = Network.Testnet;
-const dryRun: boolean = true;
+const dryRun = true;
 
 
 describe('test env vars', () => {
@@ -126,9 +126,9 @@ describe("address checks", () => {
 
 
     keypair = {
-      privateKey: process.env.PRIVATE_KEY!,
-      publicKey: client.publicFromPrivate(process.env.PRIVATE_KEY!),
-      address: client.addressFromPrivate(process.env.PRIVATE_KEY!),
+      privateKey: process.env.PRIVATE_KEY as string,
+      publicKey: client.publicFromPrivate(process.env.PRIVATE_KEY as string),
+      address: client.addressFromPrivate(process.env.PRIVATE_KEY as string),
     }
   })
 
@@ -166,14 +166,14 @@ describe('transaction checks', () => {
     vfxClient = new VfxClient(Network.Testnet, dryRun)
 
     keypair = {
-      privateKey: process.env.PRIVATE_KEY!,
-      publicKey: vfxClient.publicFromPrivate(process.env.PRIVATE_KEY!),
-      address: vfxClient.addressFromPrivate(process.env.PRIVATE_KEY!)
+      privateKey: process.env.PRIVATE_KEY as string,
+      publicKey: vfxClient.publicFromPrivate(process.env.PRIVATE_KEY as string),
+      address: vfxClient.addressFromPrivate(process.env.PRIVATE_KEY as string)
     }
   })
 
   test("send coin", async () => {
-    const hash = await vfxClient.sendCoin(keypair, process.env.TO_ADDRESS!, 1.0);
+    const hash = await vfxClient.sendCoin(keypair, process.env.TO_ADDRESS as string, 1.0);
     expect(hash).toBeTruthy();
   })
 

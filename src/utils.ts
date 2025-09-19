@@ -26,7 +26,7 @@ export function wordArrayToByteArray(
 }
 
 export function byteArrayToWordArray(ba: Uint8Array): CryptoJS.lib.WordArray {
-    const wa: any[] = [];
+    const wa: number[] = [];
 
     for (let i = 0; i < ba.length; i++) {
         wa[(i / 4) | 0] |= ba[i] << (24 - 8 * i);

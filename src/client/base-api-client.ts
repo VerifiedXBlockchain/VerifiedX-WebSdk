@@ -18,10 +18,10 @@ export class BaseApiClient {
     private async _makeRequest(
         path: string,
         method: Method = 'GET',
-        params: Record<string, any> = {}
+        params: Record<string, unknown> = {}
     ) {
         const url = `${this.network == Network.Testnet ? VFX_API_BASE_URL_TESTNET : VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
-        let config: AxiosRequestConfig = {
+        const config: AxiosRequestConfig = {
             url,
             method,
         };
@@ -42,8 +42,8 @@ export class BaseApiClient {
     async makeJsonRequest(
         path: string,
         method: Method = 'GET',
-        params: Record<string, any> = {}
-    ): Promise<any> {
+        params: Record<string, unknown> = {}
+    ): Promise<unknown> {
         const response = await this._makeRequest(path, method, params);
         return response.data;
     }
@@ -51,7 +51,7 @@ export class BaseApiClient {
     async makeTextRequest(
         path: string,
         method: Method = 'GET',
-        params: Record<string, any> = {}
+        params: Record<string, unknown> = {}
     ): Promise<string> {
         const response = await this._makeRequest(path, method, params);
         return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -60,7 +60,7 @@ export class BaseApiClient {
     async makeBoolRequest(
         path: string,
         method: Method = 'GET',
-        params: Record<string, any> = {}
+        params: Record<string, unknown> = {}
     ): Promise<boolean> {
         const text = await this.makeTextRequest(path, method, params);
         return text.trim() === 'true';
@@ -69,7 +69,7 @@ export class BaseApiClient {
     async makeMultipartRequest(
         path: string,
         files: FormData
-    ): Promise<any> {
+    ): Promise<unknown> {
         const url = `${this.network == Network.Testnet ? VFX_API_BASE_URL_TESTNET : VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
 
         const response = await axios.post(url, files, {

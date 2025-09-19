@@ -32,9 +32,9 @@ export interface Transaction {
     data: string | null
     date_crafted: string // ISO string
     signature: string
-    nft: any
+    nft: unknown
     unlock_time: string | null
-    callback_details: any
-    recovery_details: any
+    callback_details: unknown
+    recovery_details: unknown
 }
 
