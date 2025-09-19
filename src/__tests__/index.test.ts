@@ -149,6 +149,12 @@ describe("address checks", () => {
     expect(address).toBeTruthy();
     expect(typeof address).toBe("string");
   })
+
+  test("lookup btc domain", async () => {
+    const btcAddress = await client.lookupBtcDomain("test.vfx");
+    expect(btcAddress).toBeTruthy();
+    expect(typeof btcAddress).toBe("string");
+  })
 })
 
 describe('transaction checks', () => {

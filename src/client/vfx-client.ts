@@ -4,6 +4,7 @@ import { RawTransactionService } from "../services/raw-transaction-service";
 import { Keypair, PaginatedResponse, Transaction, VfxAddress } from "../types";
 import { cleanVfxDomain, domainWithoutSuffix, isValidVfxDomain } from "../utils";
 import { AddressApiClient } from "./address-api-client";
+import { AdnrApiClient } from "./adnr-client";
 import { TransactionApiClient } from "./transaction-api.client";
 
 
@@ -14,6 +15,7 @@ export class VfxClient {
     private dryRun: boolean;
     private keypairService: KeypairService;
     private addressApiClient: AddressApiClient;
+    private adnrApiClient: AdnrApiClient;
     private transactionApiClient: TransactionApiClient;
 
     constructor(network: Network, dryRun = false) {
@@ -21,6 +23,7 @@ export class VfxClient {
         this.dryRun = dryRun;
         this.keypairService = new KeypairService(this.network);
         this.addressApiClient = new AddressApiClient(this.network);
+        this.adnrApiClient = new AdnrApiClient(this.network);
         this.transactionApiClient = new TransactionApiClient(this.network);
     }
 
@@ -67,6 +70,10 @@ export class VfxClient {
 
     public lookupDomain = async (domain: string): Promise<string | null> => {
         return this.addressApiClient.lookupDomain(domain);
+    }
+
+    public lookupBtcDomain = async (domain: string): Promise<string | null> => {
+        return this.adnrApiClient.lookupBtcDomain(domain);
     }
 
     public buyVfxDomain = async (keypair: Keypair, domain: string): Promise<string | null> => {
