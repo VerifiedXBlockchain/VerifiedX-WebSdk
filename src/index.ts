@@ -1,5 +1,3 @@
-import { VfxClient } from "./client/vfx-client";
+import { VfxClient } from './client/vfx-client';
 
 export { VfxClient };
-
-

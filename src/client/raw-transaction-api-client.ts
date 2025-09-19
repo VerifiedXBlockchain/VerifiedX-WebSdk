@@ -1,58 +1,58 @@
-import { Network } from "../constants";
-import { BaseApiClient } from "./base-api-client";
+import { Network } from '../constants';
+import { BaseApiClient } from './base-api-client';
 
 export class RawTransactionApiClient extends BaseApiClient {
-    constructor(network: Network) {
-        super({ basePath: '/raw', network: network });
+  constructor(network: Network) {
+    super({ basePath: '/raw', network: network });
+  }
+
+  async getTimestamp(): Promise<number> {
+    const text = await this.makeTextRequest('/timestamp/', 'POST');
+    return Number(text);
+  }
+
+  async getNonce(address: string): Promise<number> {
+    const text = await this.makeTextRequest(`/nonce/${address}/`, 'POST');
+    return Number(text);
+  }
+
+  async getFee(txData: Record<string, unknown>): Promise<number> {
+    const params = { transaction: txData };
+    const response = await this.makeJsonRequest('/fee/', 'POST', params);
+
+    if (response?.Result === 'Success' && response?.Fee != null) {
+      return Number(response.Fee);
     }
 
-    async getTimestamp(): Promise<number> {
-        const text = await this.makeTextRequest('/timestamp/', 'POST');
-        return Number(text);
+    throw new Error(`Unexpected getFee() result: ${JSON.stringify(response)}`);
+  }
+
+  async getHash(txData: Record<string, unknown>): Promise<string> {
+    const params = { transaction: txData };
+    const response = await this.makeJsonRequest('/hash/', 'POST', params);
+
+    if (response?.Result === 'Success' && response?.Hash != null) {
+      return response.Hash;
     }
 
-    async getNonce(address: string): Promise<number> {
-        const text = await this.makeTextRequest(`/nonce/${address}/`, 'POST');
-        return Number(text);
-    }
+    throw new Error(`Unexpected getHash() result: ${JSON.stringify(response)}`);
+  }
 
-    async getFee(txData: Record<string, unknown>): Promise<number> {
-        const params = { transaction: txData };
-        const response = await this.makeJsonRequest('/fee/', 'POST', params);
+  async validateSignature(message: string, address: string, signature: string): Promise<boolean> {
+    return this.makeBoolRequest(`/validate-signature/${message}/${address}/${signature}/`, 'POST');
+  }
 
-        if (response?.Result === 'Success' && response?.Fee != null) {
-            return Number(response.Fee);
-        }
+  async verifyTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    const params = { transaction: txData };
+    const response = await this.makeJsonRequest('/verify/', 'POST', params);
 
-        throw new Error(`Unexpected getFee() result: ${JSON.stringify(response)}`);
-    }
+    return response?.Result === 'Success';
+  }
 
-    async getHash(txData: Record<string, unknown>): Promise<string> {
-        const params = { transaction: txData };
-        const response = await this.makeJsonRequest('/hash/', 'POST', params);
+  async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    const params = { transaction: txData };
+    const response = await this.makeJsonRequest('/send/', 'POST', params);
 
-        if (response?.Result === 'Success' && response?.Hash != null) {
-            return response.Hash;
-        }
-
-        throw new Error(`Unexpected getHash() result: ${JSON.stringify(response)}`);
-    }
-
-    async validateSignature(message: string, address: string, signature: string): Promise<boolean> {
-        return this.makeBoolRequest(`/validate-signature/${message}/${address}/${signature}/`, 'POST');
-    }
-
-    async verifyTransaction(txData: Record<string, unknown>): Promise<boolean> {
-        const params = { transaction: txData };
-        const response = await this.makeJsonRequest('/verify/', 'POST', params);
-
-        return response?.Result === 'Success';
-    }
-
-    async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
-        const params = { transaction: txData };
-        const response = await this.makeJsonRequest('/send/', 'POST', params);
-
-        return response?.Result === 'Success';
-    }
+    return response?.Result === 'Success';
+  }
 }
