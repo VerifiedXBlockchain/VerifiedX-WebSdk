@@ -1,20 +1,23 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/index.js",
+  "browser": "lib/browser.js",
   "types": "lib/index.d.ts",
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
+      "browser": "./lib/browser.js",
       "import": "./lib/index.js",
       "require": "./lib/index.js",
       "default": "./lib/index.js"
     }
   },
   "scripts": {
-    "build": "npm run build:node && npm run apply-browser-fixes",
+    "build": "npm run build:node && npm run build:browser && npm run apply-browser-fixes",
     "build:node": "tsc -p tsconfig.json",
+    "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --outfile=lib/esbuild/browser.js && browserify lib/esbuild/browser.js > ./lib/browser.js",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
