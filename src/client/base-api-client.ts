@@ -43,7 +43,7 @@ export class BaseApiClient {
         path: string,
         method: Method = 'GET',
         params: Record<string, unknown> = {}
-    ): Promise<unknown> {
+    ): Promise<any> {
         const response = await this._makeRequest(path, method, params);
         return response.data;
     }
@@ -69,7 +69,7 @@ export class BaseApiClient {
     async makeMultipartRequest(
         path: string,
         files: FormData
-    ): Promise<unknown> {
+    ): Promise<any> {
         const url = `${this.network == Network.Testnet ? VFX_API_BASE_URL_TESTNET : VFX_API_BASE_URL_MAINNET}${this.basePath}${path}`;
 
         const response = await axios.post(url, files, {
