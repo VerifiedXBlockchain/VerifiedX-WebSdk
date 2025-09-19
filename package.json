@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/index.js",
   "browser": "lib/browser.js",
@@ -31,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ReserveBlockIO/rbx-js-sdk"
+    "url": "git+https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk"
   },
   "keywords": [
     "boilerplate",
@@ -40,9 +40,9 @@
   "author": "Tyler Savery",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/ReserveBlockIO/rbx-js-sdk/issues"
+    "url": "https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk/issues"
   },
-  "homepage": "https://github.com/ReserveBlockIO/rbx-js-sdk#readme",
+  "homepage": "https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk#readme",
   "dependencies": {
     "axios": "^1.9.0",
     "bip32": "3.0.1",
