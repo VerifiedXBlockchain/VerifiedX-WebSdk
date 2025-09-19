@@ -6,13 +6,13 @@ Although yarn is used here, npm can be use instead. Simply replace `yarn build:n
 ### Using
 
 ```
-yarn add rbx-js-sdk #or npm install rbx-js-sdk --save
+npm install vfx-web-sdk --save
 ```
 
 #### Install Packages
 
 ```bash
-yarn
+npm install
 ```
 
 #### Testing
@@ -29,19 +29,19 @@ TO_ADDRESS=
 Then run:
 
 ```bash
-yarn test
+npm run test
 ```
 
 #### build for node
 
 ```bash
-yarn build:node
+npm run build:node
 ```
 
 #### build for browser
 
 ```bash
-yarn build:browser
+npm run build:browser
 ```
 
 This will create a file called `lib/browser.js` which can be included in your project.
@@ -60,9 +60,9 @@ See the folder `example/node-example` for a basic overview of how to integrate w
 
 ```
 cd example/node-example
-yarn
-yarn build
-yarn start
+npm
+npm run build
+npm run start
 ```
 
 Then head to `http://localhost:8080` in your browser.
@@ -90,7 +90,7 @@ Add these two lines to your `scripts` section of your package.json:
 
 ```
     "postinstall": "yarn fix:cipher",
-    "fix:cipher": "cp ./node_modules/rbx-js-sdk/lib/cipher-fix.js ./node_modules/cipher-base/index.js"
+    "fix:cipher": "cp ./node_modules/vfx-web-sdk/lib/cipher-fix.js ./node_modules/cipher-base/index.js"
 ```
 
 
