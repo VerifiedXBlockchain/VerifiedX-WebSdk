@@ -5,11 +5,19 @@
   "main": "lib/index.js",
   "browser": "lib/browser.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "browser": "./lib/browser.js",
+      "node": "./lib/index.js",
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
   "scripts": {
-    "build": "yarn build:node",
+    "build": "npm run build:node",
     "build:node": "tsc -p tsconfig.json",
-    "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --outfile=lib/esbuild/browser.js && browserify lib/esbuild/browser.js > ./lib/browser.js",
-    "examples": "cp ./lib/browser.js ./example/browser-example/rbx.js",
+    "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --outfile=lib/esbuild/browser.js && browserify lib/esbuild/browser.js > ./lib/browser.js && npm run examples",
+    "examples": "cp ./lib/browser.js ./example/browser-example/vfx.js",
     "cleanup": "rm -rf lib/esbuild && cp lib/index.d.ts lib/browser.d.ts",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
