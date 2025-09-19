@@ -78,7 +78,8 @@
     "typescript": "4.9.4"
   },
   "files": [
-    "lib/**/*"
+    "lib/**/*",
+    "README.md"
   ],
   "engines": {
     "npm": "8.19.3",
