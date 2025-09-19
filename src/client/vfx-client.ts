@@ -15,13 +15,18 @@ export class VfxClient {
   private adnrApiClient: AdnrApiClient;
   private transactionApiClient: TransactionApiClient;
 
-  constructor(network: Network, dryRun = false) {
-    this.network = network;
+  constructor(network: Network | 'mainnet' | 'testnet', dryRun = false) {
+    // Convert string literals to Network enum values
+    const networkEnum = typeof network === 'string'
+      ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet)
+      : network;
+
+    this.network = networkEnum;
     this.dryRun = dryRun;
-    this.keypairService = new KeypairService(this.network);
-    this.addressApiClient = new AddressApiClient(this.network);
-    this.adnrApiClient = new AdnrApiClient(this.network);
-    this.transactionApiClient = new TransactionApiClient(this.network);
+    this.keypairService = new KeypairService(networkEnum);
+    this.addressApiClient = new AddressApiClient(networkEnum);
+    this.adnrApiClient = new AdnrApiClient(networkEnum);
+    this.transactionApiClient = new TransactionApiClient(networkEnum);
   }
 
   // Keypairs
