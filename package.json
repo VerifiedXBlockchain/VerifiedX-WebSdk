@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -12,7 +12,7 @@
       "browser": "./lib/browser.js",
       "import": "./lib/esm/index.js",
       "require": "./lib/cjs/index.js",
-      "default": "./lib/esm/index.js"
+      "default": "./lib/browser.js"
     }
   },
   "scripts": {
