@@ -21,6 +21,7 @@
     "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
     "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\(\\.[^']*\\)';$/from '\\1.js';/g\" {} \\;",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
+    "postinstall": "node -e \"const fs = require('fs'); const path = './node_modules/math-intrinsics/sign.js'; if (fs.existsSync(path)) { const content = fs.readFileSync(path, 'utf8').replace('var \\$isNaN = require(\\'./isNaN\\');', 'var \\$isNaN = Number.isNaN || function isNaN(a) { return a !== a; };'); fs.writeFileSync(path, content); }\"",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
     "lint:fix": "eslint src --fix --ext .js,.ts",
@@ -85,6 +86,11 @@
     "node": ">=18.13.0"
   },
   "overrides": {
-    "math-intrinsics": "1.0.0"
+    "math-intrinsics": "1.1.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "math-intrinsics": "1.1.0"
+    }
   }
 }
