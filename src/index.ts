@@ -13,3 +13,6 @@ export type {
   Transaction,
   PaginatedResponse
 } from './types';
+
+// Default export for better bundler compatibility
+export default VfxClient;
