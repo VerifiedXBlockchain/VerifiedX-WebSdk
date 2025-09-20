@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -19,7 +19,7 @@
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json && npm run fix-esm-extensions",
     "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
-    "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\([^']*\\)';$/from '\\1.js';/g\" {} \\;",
+    "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\(\\.[^']*\\)';$/from '\\1.js';/g\" {} \\;",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
@@ -51,8 +51,6 @@
     "bip39": "3.0.2",
     "browser-crypto": "^2.0.0",
     "bs58": "^5.0.0",
-    "create-hash": "^1.2.0",
-    "crypto-browserify": "^3.12.0",
     "crypto-js": "^3.1.9-1",
     "elliptic": "^6.5.4",
     "hdkey": "^2.1.0",
@@ -60,7 +58,6 @@
     "tiny-secp256k1": "1.1.6"
   },
   "devDependencies": {
-    "@types/create-hash": "^1.2.2",
     "@types/crypto-js": "^4.1.1",
     "@types/elliptic": "^6.4.14",
     "@types/hdkey": "^2.0.1",
@@ -84,7 +81,10 @@
     "README.md"
   ],
   "engines": {
-    "npm": "8.19.3",
-    "node": "18.13.0"
+    "npm": ">=8.19.3",
+    "node": ">=18.13.0"
+  },
+  "overrides": {
+    "math-intrinsics": "1.0.0"
   }
 }
