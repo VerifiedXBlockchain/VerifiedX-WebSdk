@@ -6,6 +6,9 @@ import type { Keypair, VfxAddress, Transaction, PaginatedResponse } from './inde
 export { VfxClient, Network, TxType };
 export type { Keypair, VfxAddress, Transaction, PaginatedResponse };
 
+// Default export for better bundler compatibility
+export default VfxClient;
+
 // Export to global window object for browser usage
 declare global {
   interface Window {
