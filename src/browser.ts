@@ -1,9 +1,9 @@
 // Browser-compatible exports with global window object support
-import { VfxClient, Network, TxType } from './index';
+import { VfxClient, Network, TxType, btc } from './index';
 import type { Keypair, VfxAddress, Transaction, PaginatedResponse } from './index';
 
 // Export for module bundlers
-export { VfxClient, Network, TxType };
+export { VfxClient, Network, TxType, btc };
 export type { Keypair, VfxAddress, Transaction, PaginatedResponse };
 
 // Default export for better bundler compatibility
@@ -17,6 +17,7 @@ declare global {
       Network: typeof Network;
       TxType: typeof TxType;
     };
+    btc: typeof btc;
   }
 }
 
@@ -27,4 +28,5 @@ if (typeof window !== 'undefined') {
     Network,
     TxType,
   };
+  window.btc = btc;
 }

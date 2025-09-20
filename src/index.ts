@@ -1,12 +1,12 @@
 import { VfxClient } from './client/vfx-client';
 
-// Export main client
+// Export main VFX client
 export { VfxClient };
 
-// Export enums
+// Export VFX enums
 export { Network, TxType } from './constants';
 
-// Export types
+// Export VFX types
 export type {
   Keypair,
   VfxAddress,
@@ -14,10 +14,13 @@ export type {
   PaginatedResponse
 } from './types';
 
+// Export BTC namespace
+export * as btc from './btc';
+
 // Default export for better bundler compatibility
 export default VfxClient;
 
-// Also export as a namespace for better compatibility
+// Export as namespaces for better compatibility
 export const vfx = {
   VfxClient,
 };

@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -47,14 +47,18 @@
   },
   "homepage": "https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk#readme",
   "dependencies": {
+    "@bitcoinerlab/secp256k1": "^1.2.0",
     "axios": "^1.9.0",
     "bip32": "^4.0.0",
     "bip39": "3.0.2",
+    "bitcoinjs-lib": "^6.1.7",
     "browser-crypto": "^2.0.0",
     "bs58": "^5.0.0",
     "crypto-js": "^3.1.9-1",
+    "ecpair": "^2.1.0",
     "elliptic": "^6.5.4",
     "hdkey": "^2.1.0",
+    "regtest-client": "^0.2.1",
     "secp256k1": "^5.0.0",
     "tiny-secp256k1": "1.1.6"
   },
