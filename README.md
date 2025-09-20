@@ -125,11 +125,9 @@ lookupDomain(domain: string): Promise<string>
 lookupBtcDomain(domain: string): Promise<string>
 ```
 
-### Bitcoin Namespace
+### Bitcoin Client
 
-The `btc` namespace provides comprehensive Bitcoin functionality:
-
-#### BtcClient
+The `btc` namespace provides comprehensive Bitcoin functionality through the `BtcClient`:
 
 ```typescript
 // Initialize Bitcoin client
@@ -162,65 +160,6 @@ sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate?: n
 getRawTransaction(txId: string): Promise<Buffer>
 ```
 
-#### KeypairService
-
-```typescript
-const keypairService = new btc.KeypairService(isTestnet: boolean)
-
-// Generate random keypair
-keypairFromRandom(): IBtcKeypair
-
-// Generate random mnemonic keypair
-keypairFromRandomMnemonic(): IBtcKeypair
-
-// Generate from mnemonic
-keypairFromMnemonic(mnemonic: string, index?: number): IBtcKeypair
-
-// Generate from private key
-keypairFromPrivateKey(privateKeyString: string): IBtcKeypair
-
-// Generate from email/password (cross-platform compatibility)
-keypairFromEmailPassword(email: string, password: string, index?: number): IBtcKeypair
-
-// Import from WIF
-keypairFromWif(wif: string): IBtcKeypair
-
-// Sign message with WIF
-signMessage(wif: string, message: string): string
-
-// Sign message with private key
-signMessageWithPrivateKey(privateKeyHex: string, message: string): string
-```
-
-#### TransactionService
-
-```typescript
-const transactionService = new btc.TransactionService(isTestnet: boolean)
-
-// Get current fee rates
-getFeeRates(): Promise<IFeeRates | null>
-
-// Create transaction
-createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
-
-// Broadcast transaction
-broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
-
-// Get raw transaction
-getRawTx(txId: string): Promise<Buffer>
-```
-
-#### AccountService
-
-```typescript
-const accountService = new btc.AccountService(isTestnet: boolean)
-
-// Get address information
-addressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>
-
-// Get transaction history
-transactions(address: string): Promise<ITransaction[]>
-```
 
 ## Browser Usage
 
