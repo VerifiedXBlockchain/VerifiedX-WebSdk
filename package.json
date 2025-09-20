@@ -8,17 +8,23 @@
   "exports": {
     ".": {
       "types": "./lib/esm/index.d.ts",
+      "browser": {
+        "import": "./lib/browser.esm.js",
+        "require": "./lib/browser.umd.js",
+        "default": "./lib/browser.esm.js"
+      },
       "import": "./lib/esm/index.js",
       "require": "./lib/cjs/index.js",
-      "browser": "./lib/browser.js",
       "default": "./lib/cjs/index.js"
     }
   },
+  "browser": "./lib/browser.esm.js",
   "scripts": {
-    "build": "npm run build:cjs && npm run build:esm && npm run build:browser && npm run apply-browser-fixes",
+    "build": "npm run build:cjs && npm run build:esm && npm run build:browser && npm run build:browser-optimized && npm run apply-browser-fixes",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json && npm run fix-esm-extensions && echo '{\"type\":\"module\"}' > lib/esm/package.json",
-    "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
+    "build:browser": "./node_modules/.bin/esbuild src/browser/index.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
+    "build:browser-optimized": "node esbuild.browser.js",
     "fix-esm-extensions": "node scripts/fix-esm-extensions.js",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
     "postinstall": "node -e \"const fs = require('fs'); const path = require('path'); try { const dirs = ['./node_modules/math-intrinsics', './node_modules/get-intrinsic/node_modules/math-intrinsics']; dirs.forEach(dir => { if (!fs.existsSync(dir)) return; const roundFile = path.join(dir, 'round.js'); if (!fs.existsSync(roundFile)) { fs.writeFileSync(roundFile, \\\"'use strict';\\\\n\\\\n/** @type {import('./round')} */\\\\nmodule.exports = Math.round;\\\"); } const roundDts = path.join(dir, 'round.d.ts'); if (!fs.existsSync(roundDts)) { fs.writeFileSync(roundDts, \\\"export = round;\\\\ndeclare function round(x: number): number;\\\"); } const pkgFile = path.join(dir, 'package.json'); if (fs.existsSync(pkgFile)) { const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); if (pkg.exports && !pkg.exports['./round']) { pkg.exports['./round'] = './round.js'; fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, '\\\\t')); } } const jsFiles = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => path.join(dir, f)); jsFiles.forEach(file => { if (fs.existsSync(file)) { const content = fs.readFileSync(file, 'utf8'); const fixed = content.replace(/require\\\\('\\\\.\\\\/([^']+)'\\\\)/g, (match, mod) => { if (['isNaN', 'abs', 'floor', 'isFinite'].includes(mod)) { const replacements = { isNaN: 'Number.isNaN || function isNaN(a) { return a !== a; }', abs: 'Math.abs', floor: 'Math.floor', isFinite: 'Number.isFinite || function isFinite(x) { return typeof x === \\\\\\\"number\\\\\\\" && !isNaN(x) && x !== Infinity && x !== -Infinity; }' }; return replacements[mod] || match; } return match; }); if (fixed !== content) fs.writeFileSync(file, fixed); } }); }); } catch (e) { console.warn('postinstall math-intrinsics fix failed:', e.message); }\"",
@@ -48,6 +54,8 @@
   "homepage": "https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk#readme",
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",
+    "@noble/hashes": "^1.8.0",
+    "@noble/secp256k1": "^3.0.0",
     "axios": "^1.9.0",
     "bip32": "^4.0.0",
     "bip39": "3.0.2",

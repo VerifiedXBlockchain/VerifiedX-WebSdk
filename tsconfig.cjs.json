@@ -10,6 +10,7 @@
   "exclude": [
     "node_modules",
     "**/__tests__/**/*",
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "src/browser/**/*"
   ]
 }

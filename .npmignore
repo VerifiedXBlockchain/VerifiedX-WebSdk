@@ -1,0 +1,20 @@
+# Development files
+src/
+examples/
+scripts/
+*.test.ts
+*.test.js
+__tests__/
+
+# Configuration files
+tsconfig*.json
+esbuild*.js
+test-*.js
+.eslintrc*
+prettier*
+
+# Documentation
+docs/
+
+# Build artifacts (keep only lib/)
+*.tsbuildinfo
