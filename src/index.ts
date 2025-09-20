@@ -16,3 +16,8 @@ export type {
 
 // Default export for better bundler compatibility
 export default VfxClient;
+
+// Also export as a namespace for better compatibility
+export const vfx = {
+  VfxClient,
+};
