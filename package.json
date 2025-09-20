@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -19,7 +19,7 @@
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json && npm run fix-esm-extensions",
     "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
-    "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\./from '\\./g\" -e \"s/';$/'.js';/g\" {} \\;",
+    "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\([^']*\\)';$/from '\\1.js';/g\" {} \\;",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
