@@ -13,8 +13,9 @@ esbuild.build({
   define: {
     'process.env.NODE_ENV': '"production"',
     global: 'globalThis',
+    Buffer: 'Buffer',
   },
-  inject: ['./scripts/process-shim.js'],
+  inject: ['./scripts/process-shim.js', './scripts/buffer-shim.js'],
 }).then(() => {
   console.log('✅ Browser ESM build complete');
 }).catch((e) => {
@@ -36,8 +37,9 @@ esbuild.build({
   define: {
     'process.env.NODE_ENV': '"production"',
     global: 'globalThis',
+    Buffer: 'Buffer',
   },
-  inject: ['./scripts/process-shim.js'],
+  inject: ['./scripts/process-shim.js', './scripts/buffer-shim.js'],
 }).then(() => {
   console.log('✅ Browser UMD build complete');
 }).catch((e) => {

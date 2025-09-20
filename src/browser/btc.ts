@@ -16,13 +16,10 @@ export const networks = {
   regtest: { name: 'regtest' }
 };
 
-// Re-export utility functions (these should work in browser as they don't use Node-specific APIs)
-export {
-  publicKeyToAddress,
-  wifToPrivateKey,
-  seedToPrivateKey,
-  hashSeed
-} from '../btc/utils';
+// Note: BTC utility functions contain Node.js Buffer dependencies
+// For full BTC functionality in browser, use the script tag version or
+// implement browser-compatible versions of these utilities
+// export { publicKeyToAddress, wifToPrivateKey, seedToPrivateKey, hashSeed } from '../btc/utils';
 
 // Browser-compatible BTC client that extends the original
 export class BrowserBtcClient extends OriginalBtcClient {
@@ -34,10 +31,12 @@ export class BrowserBtcClient extends OriginalBtcClient {
   // Only override if specific browser-compatibility issues arise
 }
 
-// Re-export other services (they should work in browser environments)
-export { default as KeypairService } from '../btc/keypair';
-export { default as TransactionService } from '../btc/transaction';
-export { default as AccountService } from '../btc/account';
+// Note: BTC services contain Node.js dependencies (Buffer, bitcoinjs-lib)
+// For full BTC functionality in browser, use the IIFE build (lib/browser.js)
+// which includes all necessary polyfills
+// export { default as KeypairService } from '../btc/keypair';
+// export { default as TransactionService } from '../btc/transaction';
+// export { default as AccountService } from '../btc/account';
 
 // Export the browser-compatible client as both named and default export
 export { BrowserBtcClient as BtcClient };
