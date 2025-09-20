@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -21,7 +21,7 @@
     "build:browser": "./node_modules/.bin/esbuild src/browser.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
     "fix-esm-extensions": "find lib/esm -name '*.js' -exec sed -i '' -e \"s/from '\\(\\.[^']*\\)';$/from '\\1.js';/g\" {} \\;",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
-    "postinstall": "node -e \"const fs = require('fs'); const path = './node_modules/math-intrinsics/sign.js'; if (fs.existsSync(path)) { const content = fs.readFileSync(path, 'utf8').replace('var \\$isNaN = require(\\'./isNaN\\');', 'var \\$isNaN = Number.isNaN || function isNaN(a) { return a !== a; };'); fs.writeFileSync(path, content); }\"",
+    "postinstall": "node -e \"const fs = require('fs'); const path = require('path'); try { const dirs = ['./node_modules/math-intrinsics', './node_modules/get-intrinsic/node_modules/math-intrinsics']; dirs.forEach(dir => { if (!fs.existsSync(dir)) return; const roundFile = path.join(dir, 'round.js'); if (!fs.existsSync(roundFile)) { fs.writeFileSync(roundFile, \\\"'use strict';\\\\n\\\\n/** @type {import('./round')} */\\\\nmodule.exports = Math.round;\\\"); } const roundDts = path.join(dir, 'round.d.ts'); if (!fs.existsSync(roundDts)) { fs.writeFileSync(roundDts, \\\"export = round;\\\\ndeclare function round(x: number): number;\\\"); } const pkgFile = path.join(dir, 'package.json'); if (fs.existsSync(pkgFile)) { const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); if (pkg.exports && !pkg.exports['./round']) { pkg.exports['./round'] = './round.js'; fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, '\\\\t')); } } const jsFiles = fs.readdirSync(dir).filter(f => f.endsWith('.js')).map(f => path.join(dir, f)); jsFiles.forEach(file => { if (fs.existsSync(file)) { const content = fs.readFileSync(file, 'utf8'); const fixed = content.replace(/require\\\\('\\\\.\\\\/([^']+)'\\\\)/g, (match, mod) => { if (['isNaN', 'abs', 'floor', 'isFinite'].includes(mod)) { const replacements = { isNaN: 'Number.isNaN || function isNaN(a) { return a !== a; }', abs: 'Math.abs', floor: 'Math.floor', isFinite: 'Number.isFinite || function isFinite(x) { return typeof x === \\\\\\\"number\\\\\\\" && !isNaN(x) && x !== Infinity && x !== -Infinity; }' }; return replacements[mod] || match; } return match; }); if (fixed !== content) fs.writeFileSync(file, fixed); } }); }); } catch (e) { console.warn('postinstall math-intrinsics fix failed:', e.message); }\"",
     "format": "prettier --write \"src/**/*.(js|ts)\"",
     "lint": "eslint src --ext .js,.ts",
     "lint:fix": "eslint src --fix --ext .js,.ts",
