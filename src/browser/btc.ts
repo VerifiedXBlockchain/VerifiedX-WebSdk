@@ -8,19 +8,13 @@ export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER };
 // Re-export types
 export * from '../btc/types';
 
-// For browser compatibility, try to import networks with fallback
-let networks;
-try {
-  networks = require('bitcoinjs-lib').networks;
-} catch {
-  // Fallback for browser environments where bitcoinjs-lib might not work
-  networks = {
-    bitcoin: { name: 'bitcoin' },
-    testnet: { name: 'testnet' },
-    regtest: { name: 'regtest' }
-  };
-}
-export { networks };
+// For browser compatibility, use fallback networks
+// (bitcoinjs-lib networks may not work in all browser environments)
+export const networks = {
+  bitcoin: { name: 'bitcoin' },
+  testnet: { name: 'testnet' },
+  regtest: { name: 'regtest' }
+};
 
 // Re-export utility functions (these should work in browser as they don't use Node-specific APIs)
 export {
