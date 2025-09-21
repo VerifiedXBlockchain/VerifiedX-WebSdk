@@ -3,7 +3,7 @@ import base58 from 'bs58';
 import EC from 'elliptic';
 import * as ecc from 'tiny-secp256k1';
 import * as bip39 from 'bip39';
-import BIP32Factory from 'bip32';
+import { BIP32Factory } from 'bip32';
 import secp256k1 from 'secp256k1';
 import {
   arrayToHex,
