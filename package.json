@@ -23,7 +23,7 @@
     "build": "npm run build:cjs && npm run build:esm && npm run build:browser && npm run build:browser-optimized && npm run apply-browser-fixes",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:esm": "tsc -p tsconfig.esm.json && npm run fix-esm-extensions && echo '{\"type\":\"module\"}' > lib/esm/package.json",
-    "build:browser": "./node_modules/.bin/esbuild src/browser/index.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js",
+    "build:browser": "./node_modules/.bin/esbuild src/browser/index.ts --bundle --sourcemap=external --format=iife --global-name=VfxSDK --outfile=lib/browser.js --platform=browser --alias:stream=readable-stream",
     "build:browser-optimized": "node esbuild.browser.js",
     "fix-esm-extensions": "node scripts/fix-esm-extensions.js",
     "apply-browser-fixes": "cp ./resources/cipher-fix.js ./lib/cipher-fix.js",
@@ -66,6 +66,7 @@
     "ecpair": "^2.1.0",
     "elliptic": "^6.5.4",
     "hdkey": "^2.1.0",
+    "readable-stream": "^4.7.0",
     "regtest-client": "^0.2.1",
     "secp256k1": "^5.0.0",
     "tiny-secp256k1": "1.1.6"

@@ -15,6 +15,9 @@ esbuild.build({
     global: 'globalThis',
     Buffer: 'Buffer',
   },
+  alias: {
+    stream: 'readable-stream',
+  },
   inject: ['./scripts/process-shim.js', './scripts/buffer-shim.js'],
 }).then(() => {
   console.log('✅ Browser ESM build complete');
@@ -38,6 +41,9 @@ esbuild.build({
     'process.env.NODE_ENV': '"production"',
     global: 'globalThis',
     Buffer: 'Buffer',
+  },
+  alias: {
+    stream: 'readable-stream',
   },
   inject: ['./scripts/process-shim.js', './scripts/buffer-shim.js'],
 }).then(() => {
