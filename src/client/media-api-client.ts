@@ -1,6 +1,4 @@
 import { Network } from '../constants';
-import { VfxAddress } from '../types';
-import { addressWithoutActivity } from '../utils';
 import { BaseApiClient } from './base-api-client';
 
 export class MediaApiClient extends BaseApiClient {
@@ -14,7 +12,7 @@ export class MediaApiClient extends BaseApiClient {
 
         if (metadata) {
             for (const key in metadata) {
-                if (metadata.hasOwnProperty(key)) {
+                if (Object.prototype.hasOwnProperty.call(metadata, key)) {
                     formData.append(key, metadata[key]);
                 }
             }

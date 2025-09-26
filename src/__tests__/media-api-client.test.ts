@@ -18,7 +18,7 @@ describe('MediaApiClient', () => {
       expect(fs.existsSync(testImagePath)).toBe(true);
 
       // Read the file and create a File object
-      const fileBuffer = fs.readFileSync(testImagePath);
+      const fileBuffer: any = fs.readFileSync(testImagePath);
       const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
       // Mock the makeMultipartRequest method to avoid actual API calls
@@ -39,7 +39,7 @@ describe('MediaApiClient', () => {
 
     test('should upload a file without metadata', async () => {
       const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
-      const fileBuffer = fs.readFileSync(testImagePath);
+      const fileBuffer: any = fs.readFileSync(testImagePath);
       const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
       const mockResponse = { id: 'test-asset-id-2' };
@@ -56,12 +56,12 @@ describe('MediaApiClient', () => {
 
     test('should handle upload errors gracefully', async () => {
       const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
-      const fileBuffer = fs.readFileSync(testImagePath);
+      const fileBuffer: any = fs.readFileSync(testImagePath);
       const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
       // Mock an error response
       jest.spyOn(mediaClient, 'makeMultipartRequest').mockRejectedValue(new Error('Upload failed'));
-      jest.spyOn(console, 'error').mockImplementation(() => { });
+      jest.spyOn(console, 'error').mockImplementation(() => { console.log("Error") });
 
       const result = await mediaClient.uploadAsset(file);
 
