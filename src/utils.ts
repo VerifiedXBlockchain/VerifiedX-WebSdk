@@ -43,13 +43,13 @@ export function hexToBn(hex: string): bigint {
     bn =
       BigInt(
         '0b' +
-          bn
-            .toString(2)
-            .split('')
-            .map(function (i) {
-              return '0' === i ? 1 : 0;
-            })
-            .join(''),
+        bn
+          .toString(2)
+          .split('')
+          .map(function (i) {
+            return '0' === i ? 1 : 0;
+          })
+          .join(''),
       ) + BigInt(1);
     bn = -bn;
   }
@@ -184,10 +184,23 @@ export function isValidVfxDomain(domain: string): boolean {
   return domainRegex.test(domain.trim().toLowerCase());
 }
 
+export function isValidBtcDomain(domain: string): boolean {
+  const domainRegex = /^[a-z0-9]+\.btc$/;
+  return domainRegex.test(domain.trim().toLowerCase());
+}
+
 export function cleanVfxDomain(domain: string): string {
   let cleaned = domain.trim().toLowerCase();
   if (!cleaned.endsWith('.vfx')) {
     cleaned += '.vfx';
+  }
+  return cleaned;
+}
+
+export function cleanBtcDomain(domain: string): string {
+  let cleaned = domain.trim().toLowerCase();
+  if (!cleaned.endsWith('.btc')) {
+    cleaned += '.btc';
   }
   return cleaned;
 }

@@ -1,8 +1,9 @@
+import BtcClient from '../btc';
 import { DOMAIN_PURCHASE_COST, Network, TxType } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
 import { Keypair, PaginatedResponse, Transaction, VfxAddress } from '../types';
-import { cleanVfxDomain, domainWithoutSuffix, isValidVfxDomain } from '../utils';
+import { cleanBtcDomain, cleanVfxDomain, domainWithoutSuffix, isValidBtcDomain, isValidVfxDomain } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { TransactionApiClient } from './transaction-api.client';
@@ -106,6 +107,54 @@ export class VfxClient {
       Function: 'AdnrCreate()',
       Name: domainWithoutSuffix(domain),
     };
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      keypair: keypair,
+      toAddress: 'Adnr_Base',
+      amount: DOMAIN_PURCHASE_COST,
+      txType: TxType.Adnr,
+      data: data,
+    });
+
+    return await txBuilder.process(this.dryRun);
+  };
+
+  public buyBtcDomain = async (keypair: Keypair, domain: string, btcPrivateKey: string): Promise<string | null> => {
+    domain = cleanBtcDomain(domain);
+
+    if (!isValidBtcDomain(domain)) {
+      throw new Error(`Invalid btc domain: ${domain}`);
+    }
+
+    //TODO: validate btc address
+
+    const addressApiClient = new AddressApiClient(this.network);
+
+    //TODO: do we need to check if the address already has a btc domain?
+    // I don't think so because you should be able to control multiple btc domains from one vfx address
+
+
+    const available = await addressApiClient.domainAvailable(domain);
+
+    if (!available) {
+      throw new Error(`Domain already exists: ${domain}`);
+    }
+
+    const message = `${Math.floor((Date.now() / 1000))}`;
+    const btcClient = new BtcClient(this.network);
+
+    const signature = btcClient.getSignature(message, btcPrivateKey);
+    const btcAccount = btcClient.addressFromPrivate(btcPrivateKey);
+
+    const data = {
+      Function: 'BTCAdnrCreate()',
+      Name: domainWithoutSuffix(domain),
+      BTCAddress: btcAccount.address,
+      Message: message,
+      Signature: signature
+    };
+
 
     const txBuilder = new RawTransactionService({
       network: this.network,

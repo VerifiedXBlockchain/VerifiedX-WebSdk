@@ -150,8 +150,13 @@ describe('transaction checks', () => {
     expect(hash).toBeTruthy();
   });
 
-  test('buy domain', async () => {
+  test('buy vfx domain', async () => {
     const hash = await vfxClient.buyVfxDomain(keypair, 'test123.vfx');
+    expect(hash).toBeTruthy();
+  });
+
+  test('buy btc domain', async () => {
+    const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
     expect(hash).toBeTruthy();
   });
 });

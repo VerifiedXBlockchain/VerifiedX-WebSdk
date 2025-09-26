@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",

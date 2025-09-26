@@ -29,6 +29,7 @@ export class AddressApiClient extends BaseApiClient {
     }
   };
 
+
   public domainAvailable = async (domain: string): Promise<boolean> => {
     try {
       await this.makeJsonRequest(`/adnr/${domain}/`);
