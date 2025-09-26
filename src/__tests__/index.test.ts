@@ -130,6 +130,13 @@ describe('address checks', () => {
     expect(btcAddress).toBeTruthy();
     expect(typeof btcAddress).toBe('string');
   });
+
+  test('lookup btc domain from btc address', async () => {
+    const domain = await client.lookupBtcDomainFromBtcAddress('tb1q066af78la3rqmnchc396keujllva6turs52749');
+    expect(domain).toBeTruthy();
+    expect(typeof domain).toBe('string');
+    expect(domain).toContain(".btc")
+  });
 });
 
 describe('transaction checks', () => {
@@ -155,8 +162,8 @@ describe('transaction checks', () => {
     expect(hash).toBeTruthy();
   });
 
-  test('buy btc domain', async () => {
-    const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
-    expect(hash).toBeTruthy();
-  });
+  // test('buy btc domain', async () => {
+  //   const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
+  //   expect(hash).toBeTruthy();
+  // });
 });

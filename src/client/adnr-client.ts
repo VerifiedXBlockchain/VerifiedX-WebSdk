@@ -14,4 +14,14 @@ export class AdnrApiClient extends BaseApiClient {
       return null;
     }
   };
+
+  public lookupBtcDomainFromBtcAddress = async (address: string): Promise<string | null> => {
+    try {
+      const result = await this.makeJsonRequest(`/btc/${address}/`);
+      return result?.domain || null;
+    } catch (e) {
+      console.log(e)
+      return null;
+    }
+  };
 }

@@ -83,6 +83,10 @@ export class VfxClient {
     return this.adnrApiClient.lookupBtcDomain(domain);
   };
 
+  public lookupBtcDomainFromBtcAddress = async (address: string): Promise<string | null> => {
+    return this.adnrApiClient.lookupBtcDomainFromBtcAddress(address);
+  };
+
   public buyVfxDomain = async (keypair: Keypair, domain: string): Promise<string | null> => {
     domain = cleanVfxDomain(domain);
 
