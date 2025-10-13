@@ -176,6 +176,11 @@ export function isValidAddress(address: string, network: Network): boolean {
     if (address[0] !== 'R') return false;
   }
 
+  const validChars = /^[a-zA-Z0-9]+$/;
+  if (!validChars.test(address)) {
+    return false;
+  }
+
   return true;
 }
 

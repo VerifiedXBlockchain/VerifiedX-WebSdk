@@ -51,6 +51,48 @@ export class KeypairService {
     return '';
   }
 
+  public privateKeyFromEmailPassword(email: string, password: string, index = 0): string {
+    // Normalize email
+    email = email.toLowerCase();
+
+    // Create seed string with entropy
+    let seed = `${email}|${password}|`;
+    seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
+
+    const regChars = /[a-z]+/g;
+    const regUpperChars = /[A-Z]+/g;
+    const regNumbers = /[0-9]+/g;
+
+    const charsMatches = password.match(regChars);
+    const chars = charsMatches ? charsMatches.length : 1;
+
+    const upperCharsMatches = password.match(regUpperChars);
+    const upperChars = upperCharsMatches ? upperCharsMatches.length : 1;
+
+    const numbersMatches = password.match(regNumbers);
+    const numbers = numbersMatches ? numbersMatches.length : 1;
+
+    seed = `${seed}${(chars + upperChars + numbers) * password.length}3571`;
+    seed = `${seed}${seed}`;
+
+    // Hash the seed 50 times
+    for (let i = 0; i <= 50; i++) {
+      seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+    }
+
+    // Derive private key from seed using BIP32 (treat seed string as UTF-8, not hex)
+    const bip32 = BIP32Factory(ecc);
+    const seedBuffer = Buffer.from(seed, 'utf-8');
+    const node = bip32.fromSeed(seedBuffer);
+    const child = node.derivePath(`m/0'/0'/${index}'`);
+
+    if (child.privateKey) {
+      return child.privateKey.toString('hex');
+    }
+
+    throw new Error('Failed to derive private key from email/password');
+  }
+
   public publicFromPrivate(privateKey: string): string {
     const curve = new EC.ec('secp256k1');
 

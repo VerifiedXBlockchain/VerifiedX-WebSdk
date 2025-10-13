@@ -2,6 +2,7 @@
 
 *.env
 example/browser-example/vfx.js
+dart_sdk/
 
 # Logs
 logs
@@ -41,6 +42,7 @@ bower_components
 
 # npm library files
 lib/
+
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release

@@ -39,6 +39,10 @@ export class VfxClient {
     return this.keypairService.generateMnemonic(words);
   };
 
+  public privateKeyFromEmailPassword = (email: string, password: string, index = 0): string => {
+    return this.keypairService.privateKeyFromEmailPassword(email, password, index);
+  };
+
   public privateKeyFromMneumonic = (mnemonic: string, index: number): string => {
     return this.keypairService.privateKeyFromMneumonic(mnemonic, index);
   };

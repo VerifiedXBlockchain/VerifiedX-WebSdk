@@ -79,6 +79,62 @@ export class BrowserKeypairService {
     return hash.toString(CryptoJS.enc.Hex);
   }
 
+  public privateKeyFromEmailPassword(email: string, password: string, index = 0): string {
+    // Normalize email
+    email = email.toLowerCase();
+
+    // Create seed string with entropy
+    let seed = `${email}|${password}|`;
+    seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
+
+    const regChars = /[a-z]+/g;
+    const regUpperChars = /[A-Z]+/g;
+    const regNumbers = /[0-9]+/g;
+
+    const charsMatches = password.match(regChars);
+    const chars = charsMatches ? charsMatches.length : 1;
+
+    const upperCharsMatches = password.match(regUpperChars);
+    const upperChars = upperCharsMatches ? upperCharsMatches.length : 1;
+
+    const numbersMatches = password.match(regNumbers);
+    const numbers = numbersMatches ? numbersMatches.length : 1;
+
+    seed = `${seed}${(chars + upperChars + numbers) * password.length}3571`;
+    seed = `${seed}${seed}`;
+
+    // Hash the seed 50 times
+    for (let i = 0; i <= 50; i++) {
+      seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+    }
+
+    // For browser, we need to use a simplified approach since we don't have full BIP32
+    // Convert the seed string to bytes (treating it as UTF-8, not hex)
+    const seedBytes = new TextEncoder().encode(seed);
+
+    // Simple deterministic derivation based on index
+    const indexBytes = new Uint8Array(4);
+    indexBytes[0] = (index >>> 24) & 0xff;
+    indexBytes[1] = (index >>> 16) & 0xff;
+    indexBytes[2] = (index >>> 8) & 0xff;
+    indexBytes[3] = index & 0xff;
+
+    const combined = new Uint8Array(seedBytes.length + indexBytes.length);
+    combined.set(seedBytes);
+    combined.set(indexBytes, seedBytes.length);
+
+    const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
+    const privateKey = hash.toString(CryptoJS.enc.Hex);
+
+    // Validate private key
+    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
+    if (!isValidPrivateKey(privateKeyWordArray)) {
+      throw new Error('Generated private key is invalid');
+    }
+
+    return privateKey;
+  }
+
   public publicFromPrivate(privateKey: string): string {
     const privateKeyBytes = BufferPolyfill.from(privateKey.toLowerCase(), 'hex');
     const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false); // uncompressed

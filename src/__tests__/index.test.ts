@@ -94,6 +94,38 @@ describe('generate mnemonic and create private key', () => {
   });
 });
 
+describe('generate private key from email and password', () => {
+  test('should generate correct address for test@verifiedx.io', () => {
+    const client = new VfxClient(network, dryRun);
+    const privateKey = client.privateKeyFromEmailPassword('test@verifiedx.io', 'test1234', 0);
+    const address = client.addressFromPrivate(privateKey);
+    expect(address).toBe('xHoSVXZ3cpM25XJC2qif3hCbzUFwYe2MLp');
+  });
+
+  test('private key should be valid', () => {
+    const client = new VfxClient(network, dryRun);
+    const privateKey = client.privateKeyFromEmailPassword('user@example.com', 'MyPassword123', 0);
+    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
+    expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
+  });
+
+  test('address should be valid', () => {
+    const client = new VfxClient(network, dryRun);
+    const privateKey = client.privateKeyFromEmailPassword('user@example.com', 'MyPassword123', 0);
+    const address = client.addressFromPrivate(privateKey);
+    expect(isValidAddress(address, network)).toBe(true);
+  });
+
+  test('should generate different addresses for different indices', () => {
+    const client = new VfxClient(network, dryRun);
+    const privateKey0 = client.privateKeyFromEmailPassword('test@example.com', 'password', 0);
+    const privateKey1 = client.privateKeyFromEmailPassword('test@example.com', 'password', 1);
+    const address0 = client.addressFromPrivate(privateKey0);
+    const address1 = client.addressFromPrivate(privateKey1);
+    expect(address0).not.toBe(address1);
+  });
+});
+
 describe('address checks', () => {
   let keypair: Keypair;
   let client: VfxClient;
