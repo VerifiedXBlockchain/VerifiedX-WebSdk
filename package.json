@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -56,7 +56,6 @@
     "@bitcoinerlab/secp256k1": "^1.2.0",
     "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^3.0.0",
-    "axios": "^1.9.0",
     "bip32": "^4.0.0",
     "bip39": "3.0.2",
     "bitcoinjs-lib": "^6.1.7",
