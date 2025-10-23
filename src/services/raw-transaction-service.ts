@@ -9,7 +9,7 @@ export interface IRawTransactionServiceOptions {
   toAddress: string;
   txType?: number;
   amount?: number;
-  data?: Record<string, unknown> | null;
+  data?: Record<string, unknown> | Array<Record<string, unknown>> | null;
 }
 
 export class RawTransactionService {
@@ -18,7 +18,7 @@ export class RawTransactionService {
   private toAddress: string;
   private txType: number;
   private amount: number;
-  private data: Record<string, unknown> | null;
+  private data: Record<string, unknown> | Array<Record<string, unknown>> | null;
   private fromAddress: string;
 
   private hash: string | null = null;

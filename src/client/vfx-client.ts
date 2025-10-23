@@ -79,6 +79,27 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
+  public sendVbtc = async (keypair: Keypair, toAddress: string, contractUID: string, amount: number): Promise<string | null> => {
+    const data = [
+      {
+        Function: 'TransferCoin()',
+        ContractUID: contractUID,
+        Amount: amount,
+      }
+    ];
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      keypair: keypair,
+      toAddress: toAddress,
+      amount: 0,
+      txType: TxType.TokenizeTx,
+      data: data,
+    });
+
+    return await txBuilder.process(this.dryRun);
+  };
+
   public lookupDomain = async (domain: string): Promise<string | null> => {
     return this.addressApiClient.lookupDomain(domain);
   };
