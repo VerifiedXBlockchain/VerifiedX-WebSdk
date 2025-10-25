@@ -6,6 +6,7 @@ import { Keypair, PaginatedResponse, Transaction, VfxAddress } from '../types';
 import { cleanBtcDomain, cleanVfxDomain, domainWithoutSuffix, isValidBtcDomain, isValidVfxDomain } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
+import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TransactionApiClient } from './transaction-api.client';
 
 export class VfxClient {
@@ -14,6 +15,7 @@ export class VfxClient {
   private keypairService: KeypairService;
   private addressApiClient: AddressApiClient;
   private adnrApiClient: AdnrApiClient;
+  private rawTransactionApiClient: RawTransactionApiClient;
   private transactionApiClient: TransactionApiClient;
 
   constructor(network: Network | 'mainnet' | 'testnet', dryRun = false) {
@@ -27,6 +29,7 @@ export class VfxClient {
     this.keypairService = new KeypairService(networkEnum);
     this.addressApiClient = new AddressApiClient(networkEnum);
     this.adnrApiClient = new AdnrApiClient(networkEnum);
+    this.rawTransactionApiClient = new RawTransactionApiClient(networkEnum);
     this.transactionApiClient = new TransactionApiClient(networkEnum);
   }
 
@@ -57,6 +60,11 @@ export class VfxClient {
 
   public getSignature = (message: string, privateKey: string): string => {
     return this.keypairService.getSignature(message, privateKey);
+  };
+
+  // Raw Transaction API
+  public getHash = async (txData: Record<string, unknown>): Promise<string> => {
+    return this.rawTransactionApiClient.getHash(txData);
   };
 
   // Explorer API
