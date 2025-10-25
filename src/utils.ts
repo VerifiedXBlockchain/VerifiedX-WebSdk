@@ -1,5 +1,4 @@
 import CryptoJS from 'crypto-js';
-import * as crypto from 'crypto';
 import { Network } from './constants';
 import { VfxAddress } from './types';
 
@@ -17,18 +16,30 @@ export function generateRandomString(length: number, charset: string): string {
 
 export function generateRandomStringSecure(length: number, charset: string): string {
   try {
-    let result = '';
-    const charsetLength = charset.length;
-    const randomBytes = crypto.randomBytes(length);
+    // Try to access crypto (works in Node.js 15+ and browsers)
+    const cryptoObj = typeof globalThis !== 'undefined' && globalThis.crypto
+      ? globalThis.crypto
+      : typeof global !== 'undefined' && (global as any).crypto
+      ? (global as any).crypto
+      : undefined;
 
-    for (let i = 0; i < length; i++) {
-      result += charset.charAt(randomBytes[i] % charsetLength);
+    if (cryptoObj && cryptoObj.getRandomValues) {
+      let result = '';
+      const charsetLength = charset.length;
+      const randomValues = new Uint8Array(length);
+      cryptoObj.getRandomValues(randomValues);
+
+      for (let i = 0; i < length; i++) {
+        result += charset.charAt(randomValues[i] % charsetLength);
+      }
+      return result;
     }
-    return result;
   } catch (e) {
     // Fallback to non-secure version if crypto is unavailable
-    return generateRandomString(length, charset);
   }
+
+  // Fallback to non-secure version if crypto is unavailable
+  return generateRandomString(length, charset);
 }
 
 export function wordArrayToByteArray(wordArray: CryptoJS.lib.WordArray): Uint8Array {
