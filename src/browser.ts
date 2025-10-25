@@ -1,10 +1,10 @@
 // Browser-compatible exports with global window object support
 import { VfxClient, Network, TxType, btc } from './index';
-import type { Keypair, VfxAddress, Transaction, PaginatedResponse } from './index';
+import type { Keypair, VfxAddress, Transaction, PaginatedResponse, VbtcWithdrawalResult, VbtcWithdrawRequest } from './index';
 
 // Export for module bundlers
 export { VfxClient, Network, TxType, btc };
-export type { Keypair, VfxAddress, Transaction, PaginatedResponse };
+export type { Keypair, VfxAddress, Transaction, PaginatedResponse, VbtcWithdrawalResult, VbtcWithdrawRequest };
 
 // Default export for better bundler compatibility
 export default VfxClient;

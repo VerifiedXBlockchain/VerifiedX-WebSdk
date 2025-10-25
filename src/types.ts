@@ -37,3 +37,22 @@ export interface Transaction {
   callback_details: unknown;
   recovery_details: unknown;
 }
+
+export interface VbtcWithdrawalResult {
+  txHash: string;
+  uniqueId: string;
+  scId: string;
+}
+
+export interface VbtcWithdrawRequest {
+  SmartContractUID: string;
+  Amount: number;
+  VFXAddress: string;
+  BTCToAddress: string;
+  Timestamp: number;
+  UniqueId: string;
+  VFXSignature: string;
+  ChosenFeeRate: number;
+  IsTest: boolean;
+  [key: string]: unknown;
+}

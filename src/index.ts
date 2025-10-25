@@ -11,7 +11,9 @@ export type {
   Keypair,
   VfxAddress,
   Transaction,
-  PaginatedResponse
+  PaginatedResponse,
+  VbtcWithdrawalResult,
+  VbtcWithdrawRequest
 } from './types';
 
 // Export BTC namespace

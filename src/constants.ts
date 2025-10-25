@@ -13,6 +13,7 @@ export enum TxType {
   TokenTx = 15,
   TokenDeploy = 17,
   TokenizeTx = 18,
+  TokenizedWithdrawal = 21,
 }
 
 export enum Network {

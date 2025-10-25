@@ -6,6 +6,35 @@ export function generateRandomInteger(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
 }
 
+export function generateRandomString(length: number, charset: string): string {
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += charset.charAt(Math.floor(Math.random() * charset.length));
+  }
+  return result;
+}
+
+export function generateRandomStringSecure(length: number, charset: string): string {
+  try {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+      let result = '';
+      const charsetLength = charset.length;
+      const randomValues = new Uint8Array(length);
+      window.crypto.getRandomValues(randomValues);
+
+      for (let i = 0; i < length; i++) {
+        result += charset.charAt(randomValues[i] % charsetLength);
+      }
+      return result;
+    }
+    // Fallback to non-secure version if crypto is unavailable
+    return generateRandomString(length, charset);
+  } catch (e) {
+    // Fallback to non-secure version if crypto is unavailable
+    return generateRandomString(length, charset);
+  }
+}
+
 export function wordArrayToByteArray(wordArray: CryptoJS.lib.WordArray): Uint8Array {
   const len = wordArray.words.length;
 

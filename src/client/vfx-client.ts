@@ -2,8 +2,8 @@ import BtcClient from '../btc';
 import { DOMAIN_PURCHASE_COST, Network, TxType } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
-import { Keypair, PaginatedResponse, Transaction, VfxAddress } from '../types';
-import { cleanBtcDomain, cleanVfxDomain, domainWithoutSuffix, isValidBtcDomain, isValidVfxDomain } from '../utils';
+import { Keypair, PaginatedResponse, Transaction, VbtcWithdrawalResult, VbtcWithdrawRequest, VfxAddress } from '../types';
+import { cleanBtcDomain, cleanVfxDomain, domainWithoutSuffix, generateRandomString, generateRandomStringSecure, isValidBtcDomain, isValidVfxDomain } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
@@ -211,5 +211,71 @@ export class VfxClient {
     limit = 10,
   ): Promise<PaginatedResponse<Transaction> | null> => {
     return this.transactionApiClient.listTransactionsForAddress(address, page, limit);
+  };
+
+  public withdrawVbtc = async (
+    keypair: Keypair,
+    scId: string,
+    amount: number,
+    btcAddress: string,
+    feeRate: number,
+    isTest?: boolean
+  ): Promise<VbtcWithdrawalResult | null> => {
+    try {
+      const timestamp = Math.round(Date.now() / 1000);
+      const uniqueId = generateRandomStringSecure(16, 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz');
+      const message = `${keypair.address}.${timestamp}.${uniqueId}`;
+      const signature = this.keypairService.getSignature(message, keypair.privateKey);
+
+      if (!signature) {
+        console.log('withdrawVbtc() error: signature is empty or null');
+        return null;
+      }
+
+      const payload: VbtcWithdrawRequest = {
+        SmartContractUID: scId,
+        Amount: amount,
+        VFXAddress: keypair.address,
+        BTCToAddress: btcAddress,
+        Timestamp: timestamp,
+        UniqueId: uniqueId,
+        VFXSignature: signature,
+        ChosenFeeRate: feeRate,
+        IsTest: isTest !== undefined ? isTest : this.network === Network.Testnet,
+      };
+
+      return await this.rawTransactionApiClient.withdrawVbtc(payload);
+    } catch (e) {
+      console.log('withdrawVbtc() error', e);
+      return null;
+    }
+  };
+
+  public completeVbtcWithdrawal = async (
+    keypair: Keypair,
+    withdrawalResult: VbtcWithdrawalResult
+  ): Promise<string | null> => {
+    try {
+      const data = {
+        Function: 'TokenizedWithdrawalComplete()',
+        ContractUID: withdrawalResult.scId,
+        UniqueId: withdrawalResult.uniqueId,
+        TransactionHash: withdrawalResult.txHash,
+      };
+
+      const txBuilder = new RawTransactionService({
+        network: this.network,
+        keypair: keypair,
+        toAddress: 'TW_Base',
+        amount: 0,
+        txType: TxType.TokenizedWithdrawal,
+        data: data,
+      });
+
+      return await txBuilder.process(this.dryRun);
+    } catch (e) {
+      console.log('completeVbtcWithdrawal() error', e);
+      return null;
+    }
   };
 }

@@ -1,4 +1,5 @@
 import { Network } from '../constants';
+import { VbtcWithdrawalResult, VbtcWithdrawRequest } from '../types';
 import { BaseApiClient } from './base-api-client';
 
 export class RawTransactionApiClient extends BaseApiClient {
@@ -54,5 +55,25 @@ export class RawTransactionApiClient extends BaseApiClient {
     const response = await this.makeJsonRequest('/send/', 'POST', params);
 
     return response?.Result === 'Success';
+  }
+
+  async withdrawVbtc(payload: VbtcWithdrawRequest): Promise<VbtcWithdrawalResult> {
+    const response = await this.makeJsonRequest('/withdraw-vbtc/', 'POST', payload);
+
+    if (response?.result && response.result.Success === true) {
+      const { Hash, UniqueId, SmartContractUID } = response.result;
+
+      if (!Hash || !UniqueId || !SmartContractUID) {
+        throw new Error(`Incomplete VBTC withdrawal response: ${JSON.stringify(response)}`);
+      }
+
+      return {
+        txHash: Hash,
+        uniqueId: UniqueId,
+        scId: SmartContractUID,
+      };
+    }
+
+    throw new Error(`VBTC withdrawal failed: ${JSON.stringify(response)}`);
   }
 }
