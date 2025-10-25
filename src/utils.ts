@@ -1,4 +1,5 @@
 import CryptoJS from 'crypto-js';
+import * as crypto from 'crypto';
 import { Network } from './constants';
 import { VfxAddress } from './types';
 
@@ -16,7 +17,6 @@ export function generateRandomString(length: number, charset: string): string {
 
 export function generateRandomStringSecure(length: number, charset: string): string {
   try {
-    const crypto = require('crypto');
     let result = '';
     const charsetLength = charset.length;
     const randomBytes = crypto.randomBytes(length);
