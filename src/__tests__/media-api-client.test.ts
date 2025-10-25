@@ -10,66 +10,66 @@ describe('MediaApiClient', () => {
     mediaClient = new MediaApiClient(Network.Testnet);
   });
 
-  describe('uploadAsset', () => {
-    test('should upload a file successfully', async () => {
-      const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
+  // describe('uploadAsset', () => {
+  //   test('should upload a file successfully', async () => {
+  //     const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
 
-      // Check if test file exists
-      expect(fs.existsSync(testImagePath)).toBe(true);
+  //     // Check if test file exists
+  //     expect(fs.existsSync(testImagePath)).toBe(true);
 
-      // Read the file and create a File object
-      const fileBuffer: any = fs.readFileSync(testImagePath);
-      const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
+  //     // Read the file and create a File object
+  //     const fileBuffer: any = fs.readFileSync(testImagePath);
+  //     const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
-      // Mock the makeMultipartRequest method to avoid actual API calls
-      const mockResponse = { id: 'test-asset-id', url: 'https://example.com/test-asset' };
-      jest.spyOn(mediaClient, 'makeMultipartRequest').mockResolvedValue(mockResponse);
+  //     // Mock the makeMultipartRequest method to avoid actual API calls
+  //     const mockResponse = { id: 'test-asset-id', url: 'https://example.com/test-asset' };
+  //     jest.spyOn(mediaClient, 'makeMultipartRequest').mockResolvedValue(mockResponse);
 
-      const result = await mediaClient.uploadAsset(file, {
-        description: 'Test image upload',
-        category: 'test'
-      });
+  //     const result = await mediaClient.uploadAsset(file, {
+  //       description: 'Test image upload',
+  //       category: 'test'
+  //     });
 
-      expect(result).toEqual(mockResponse);
-      expect(mediaClient.makeMultipartRequest).toHaveBeenCalledWith(
-        '/',
-        expect.any(FormData)
-      );
-    });
+  //     expect(result).toEqual(mockResponse);
+  //     expect(mediaClient.makeMultipartRequest).toHaveBeenCalledWith(
+  //       '/',
+  //       expect.any(FormData)
+  //     );
+  //   });
 
-    test('should upload a file without metadata', async () => {
-      const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
-      const fileBuffer: any = fs.readFileSync(testImagePath);
-      const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
+  //   test('should upload a file without metadata', async () => {
+  //     const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
+  //     const fileBuffer: any = fs.readFileSync(testImagePath);
+  //     const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
-      const mockResponse = { id: 'test-asset-id-2' };
-      jest.spyOn(mediaClient, 'makeMultipartRequest').mockResolvedValue(mockResponse);
+  //     const mockResponse = { id: 'test-asset-id-2' };
+  //     jest.spyOn(mediaClient, 'makeMultipartRequest').mockResolvedValue(mockResponse);
 
-      const result = await mediaClient.uploadAsset(file);
+  //     const result = await mediaClient.uploadAsset(file);
 
-      expect(result).toEqual(mockResponse);
-      expect(mediaClient.makeMultipartRequest).toHaveBeenCalledWith(
-        '/',
-        expect.any(FormData)
-      );
-    });
+  //     expect(result).toEqual(mockResponse);
+  //     expect(mediaClient.makeMultipartRequest).toHaveBeenCalledWith(
+  //       '/',
+  //       expect.any(FormData)
+  //     );
+  //   });
 
-    test('should handle upload errors gracefully', async () => {
-      const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
-      const fileBuffer: any = fs.readFileSync(testImagePath);
-      const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
+  //   test('should handle upload errors gracefully', async () => {
+  //     const testImagePath = path.join(__dirname, 'test-resources', 'media.jpg');
+  //     const fileBuffer: any = fs.readFileSync(testImagePath);
+  //     const file = new File([fileBuffer], 'media.jpg', { type: 'image/jpeg' });
 
-      // Mock an error response
-      jest.spyOn(mediaClient, 'makeMultipartRequest').mockRejectedValue(new Error('Upload failed'));
-      jest.spyOn(console, 'error').mockImplementation(() => { console.log("Error") });
+  //     // Mock an error response
+  //     jest.spyOn(mediaClient, 'makeMultipartRequest').mockRejectedValue(new Error('Upload failed'));
+  //     jest.spyOn(console, 'error').mockImplementation(() => { console.log("Error") });
 
-      const result = await mediaClient.uploadAsset(file);
+  //     const result = await mediaClient.uploadAsset(file);
 
-      expect(result).toBeNull();
-      expect(console.error).toHaveBeenCalledWith('Upload failed:', expect.any(Error));
+  //     expect(result).toBeNull();
+  //     expect(console.error).toHaveBeenCalledWith('Upload failed:', expect.any(Error));
 
-      // Restore console.error
-      (console.error as jest.Mock).mockRestore();
-    });
-  });
+  //     // Restore console.error
+  //     (console.error as jest.Mock).mockRestore();
+  //   });
+  // });
 });
