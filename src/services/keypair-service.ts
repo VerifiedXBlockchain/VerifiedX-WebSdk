@@ -12,6 +12,7 @@ import {
   hexStringToByteArray,
   hexToString,
   isValidPrivateKey,
+  normalizePrivateKey,
   wordArrayToByteArray,
 } from '../utils';
 import { Network } from '../constants';
@@ -30,7 +31,8 @@ export class KeypairService {
       privateKey = CryptoJS.lib.WordArray.random(32);
     } while (!isValidPrivateKey(privateKey));
 
-    return privateKey.toString(CryptoJS.enc.Hex);
+    // Prepend 00 for CLI BigInteger compatibility
+    return '00' + privateKey.toString(CryptoJS.enc.Hex);
   }
 
   public generateMnemonic(words: 12 | 24 = 12): string {
@@ -46,7 +48,8 @@ export class KeypairService {
 
     const account = root.derivePath(`m/0'/0'/${index}'`);
     if (account.privateKey) {
-      return account.privateKey.toString('hex');
+      // Prepend 00 for CLI BigInteger compatibility
+      return '00' + account.privateKey.toString('hex');
     }
     return '';
   }
@@ -87,7 +90,8 @@ export class KeypairService {
     const child = node.derivePath(`m/0'/0'/${index}'`);
 
     if (child.privateKey) {
-      return child.privateKey.toString('hex');
+      // Prepend 00 for CLI BigInteger compatibility
+      return '00' + child.privateKey.toString('hex');
     }
 
     throw new Error('Failed to derive private key from email/password');
@@ -96,7 +100,9 @@ export class KeypairService {
   public publicFromPrivate(privateKey: string): string {
     const curve = new EC.ec('secp256k1');
 
-    const buffer = Buffer.from(privateKey.toLowerCase(), 'hex');
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKey.toLowerCase());
+    const buffer = Buffer.from(normalized, 'hex');
     const keyPair = curve.keyFromPrivate(buffer);
     return keyPair.getPublic('hex');
   }
@@ -104,7 +110,9 @@ export class KeypairService {
   public addressFromPrivate(privateKey: string): string {
     const curve = new EC.ec('secp256k1');
 
-    const buffer = Buffer.from(privateKey.toLowerCase(), 'hex');
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKey.toLowerCase());
+    const buffer = Buffer.from(normalized, 'hex');
     const keyPair = curve.keyFromPrivate(buffer);
     const publicKey = keyPair.getPublic('hex');
 
@@ -131,9 +139,12 @@ export class KeypairService {
   }
 
   public getSignature(message: string, privateKeyHex: string): string {
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKeyHex);
+
     const data = CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
 
-    const privateKey = Buffer.from(privateKeyHex, 'hex');
+    const privateKey = Buffer.from(normalized, 'hex');
     const dataBuffer = Buffer.from(data, 'hex');
 
     const { signature } = secp256k1.ecdsaSign(dataBuffer, privateKey);
@@ -141,7 +152,7 @@ export class KeypairService {
 
     const signatureBase64 = Buffer.from(derEncodedSignature).toString('base64');
 
-    let publicKeyHex = this.publicFromPrivate(privateKeyHex);
+    let publicKeyHex = this.publicFromPrivate(normalized);
     if (publicKeyHex.substring(0, 2) === '04') {
       publicKeyHex = publicKeyHex.substring(2);
     }

@@ -2,7 +2,7 @@ import { VfxClient } from '../index';
 import CryptoJS from 'crypto-js';
 
 import dotenv from 'dotenv';
-import { isValidAddress, isValidPrivateKey } from '../utils';
+import { isValidAddress, isValidPrivateKey, normalizePrivateKey } from '../utils';
 import { Network } from '../constants';
 import { Keypair } from '../types';
 dotenv.config({ path: 'test.env' });
@@ -25,7 +25,11 @@ describe('generate a private key', () => {
   test('private key should should be valid', () => {
     const client = new VfxClient(network, dryRun);
     const privateKey = client.generatePrivateKey();
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
+    // Private keys now have 00 prefix for CLI compatibility
+    expect(privateKey).toHaveLength(66);
+    expect(privateKey.startsWith('00')).toBe(true);
+    const normalized = normalizePrivateKey(privateKey);
+    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
     expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
   });
 });
@@ -81,7 +85,10 @@ describe('generate mnemonic and create private key', () => {
     const client = new VfxClient(network, dryRun);
     const phrase = client.generateMnemonic();
     const privateKey = client.privateKeyFromMneumonic(phrase, 0);
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
+    expect(privateKey).toHaveLength(66);
+    expect(privateKey.startsWith('00')).toBe(true);
+    const normalized = normalizePrivateKey(privateKey);
+    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
     expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
   });
 
@@ -105,7 +112,10 @@ describe('generate private key from email and password', () => {
   test('private key should be valid', () => {
     const client = new VfxClient(network, dryRun);
     const privateKey = client.privateKeyFromEmailPassword('user@example.com', 'MyPassword123', 0);
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
+    expect(privateKey).toHaveLength(66);
+    expect(privateKey.startsWith('00')).toBe(true);
+    const normalized = normalizePrivateKey(privateKey);
+    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
     expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
   });
 
@@ -198,4 +208,35 @@ describe('transaction checks', () => {
   //   const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
   //   expect(hash).toBeTruthy();
   // });
+});
+
+describe('CLI compatibility', () => {
+  test('high-bit private keys should work with both 64 and 66 char formats', () => {
+    const client = new VfxClient(Network.Mainnet, true);
+
+    // Test key with high bit set (starts with 0x90)
+    const pk64 = '90a805984bd65764350d644d9cfb8ca483f7f4ae1e783833f4661f93ee053b73';
+    const pk66 = '00' + pk64;
+
+    // Both formats should produce same address (WebWallet/JS address, not CLI bug address)
+    const addr64 = client.addressFromPrivate(pk64);
+    const addr66 = client.addressFromPrivate(pk66);
+
+    expect(addr64).toBe(addr66);
+    expect(addr64).toBe('RShL4yfSPuexMczBvsh7JDJnNngVznQbcn');
+  });
+
+  test('low-bit private keys should work with both formats', () => {
+    const client = new VfxClient(Network.Mainnet, true);
+
+    // Test key without high bit set (starts with 0x47)
+    const pk64 = '47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5';
+    const pk66 = '00' + pk64;
+
+    const addr64 = client.addressFromPrivate(pk64);
+    const addr66 = client.addressFromPrivate(pk66);
+
+    expect(addr64).toBe(addr66);
+    expect(addr64).toBe('RRH1Qs76UPTeTrXo4oV7XpLqfLugaReF1J');
+  });
 });

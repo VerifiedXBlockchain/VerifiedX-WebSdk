@@ -9,6 +9,7 @@ import {
   hexStringToByteArray,
   hexToString,
   isValidPrivateKey,
+  normalizePrivateKey,
   wordArrayToByteArray,
 } from '../utils';
 import { Network } from '../../constants';
@@ -49,7 +50,8 @@ export class BrowserKeypairService {
       privateKey = CryptoJS.lib.WordArray.random(32);
     } while (!isValidPrivateKey(privateKey));
 
-    return privateKey.toString(CryptoJS.enc.Hex);
+    // Prepend 00 for CLI BigInteger compatibility
+    return '00' + privateKey.toString(CryptoJS.enc.Hex);
   }
 
   public generateMnemonic(words: 12 | 24 = 12): string {
@@ -76,7 +78,8 @@ export class BrowserKeypairService {
     combined.set(indexBytes, seedArray.length);
 
     const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
-    return hash.toString(CryptoJS.enc.Hex);
+    // Prepend 00 for CLI BigInteger compatibility
+    return '00' + hash.toString(CryptoJS.enc.Hex);
   }
 
   public privateKeyFromEmailPassword(email: string, password: string, index = 0): string {
@@ -132,17 +135,22 @@ export class BrowserKeypairService {
       throw new Error('Generated private key is invalid');
     }
 
-    return privateKey;
+    // Prepend 00 for CLI BigInteger compatibility
+    return '00' + privateKey;
   }
 
   public publicFromPrivate(privateKey: string): string {
-    const privateKeyBytes = BufferPolyfill.from(privateKey.toLowerCase(), 'hex');
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKey.toLowerCase());
+    const privateKeyBytes = BufferPolyfill.from(normalized, 'hex');
     const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false); // uncompressed
     return BufferPolyfill.toString(publicKeyBytes, 'hex');
   }
 
   public addressFromPrivate(privateKey: string): string {
-    const privateKeyBytes = BufferPolyfill.from(privateKey.toLowerCase(), 'hex');
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKey.toLowerCase());
+    const privateKeyBytes = BufferPolyfill.from(normalized, 'hex');
     const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false);
     const publicKeyHex = BufferPolyfill.toString(publicKeyBytes, 'hex');
 
@@ -165,9 +173,12 @@ export class BrowserKeypairService {
   }
 
   public getSignature(message: string, privateKeyHex: string): string {
+    // Normalize to handle both 64 and 66 char formats
+    const normalized = normalizePrivateKey(privateKeyHex);
+
     const data = CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
 
-    const privateKey = BufferPolyfill.from(privateKeyHex, 'hex');
+    const privateKey = BufferPolyfill.from(normalized, 'hex');
     const dataBytes = BufferPolyfill.from(data, 'hex');
 
     // Use @noble/secp256k1 for browser-compatible signing
@@ -177,7 +188,7 @@ export class BrowserKeypairService {
     const derSignature = signature.toDERRawBytes ? signature.toDERRawBytes() : signature;
     const signatureBase64 = BufferPolyfill.toString(derSignature, 'base64');
 
-    let publicKeyHex = this.publicFromPrivate(privateKeyHex);
+    let publicKeyHex = this.publicFromPrivate(normalized);
     if (publicKeyHex.substring(0, 2) === '04') {
       publicKeyHex = publicKeyHex.substring(2);
     }

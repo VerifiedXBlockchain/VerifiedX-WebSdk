@@ -191,6 +191,14 @@ export function bigToUint8Array(big: bigint): Uint8Array {
   return u8;
 }
 
+export function normalizePrivateKey(privateKeyHex: string): string {
+  // Strip leading 00 if present (CLI compatibility format)
+  if (privateKeyHex.startsWith('00') && privateKeyHex.length === 66) {
+    return privateKeyHex.substring(2);
+  }
+  return privateKeyHex;
+}
+
 export function isValidPrivateKey(privateKey: CryptoJS.lib.WordArray): boolean {
   const order = 'fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141';
   const privateKeyHex = privateKey.toString(CryptoJS.enc.Hex);
