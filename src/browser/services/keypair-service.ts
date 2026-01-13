@@ -90,18 +90,10 @@ export class BrowserKeypairService {
     let seed = `${email}|${password}|`;
     seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
 
-    const regChars = /[a-z]+/g;
-    const regUpperChars = /[A-Z]+/g;
-    const regNumbers = /[0-9]+/g;
-
-    const charsMatches = password.match(regChars);
-    const chars = charsMatches ? charsMatches.length : 1;
-
-    const upperCharsMatches = password.match(regUpperChars);
-    const upperChars = upperCharsMatches ? upperCharsMatches.length : 1;
-
-    const numbersMatches = password.match(regNumbers);
-    const numbers = numbersMatches ? numbersMatches.length : 1;
+    // Fixed values for cross-platform wallet compatibility
+    const chars = 1;
+    const upperChars = 1;
+    const numbers = 1;
 
     seed = `${seed}${(chars + upperChars + numbers) * password.length}3571`;
     seed = `${seed}${seed}`;
