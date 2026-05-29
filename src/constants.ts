@@ -12,8 +12,11 @@ export enum TxType {
   Reserve = 10,
   TokenTx = 15,
   TokenDeploy = 17,
-  TokenizeTx = 18,
-  TokenizedWithdrawal = 21,
+  VbtcV2ContractCreate = 25,
+  VbtcV2Transfer = 26,
+  VbtcV2WithdrawalRequest = 27,
+  VbtcV2WithdrawalComplete = 28,
+  VbtcV2WithdrawalCancel = 29,
 }
 
 export enum Network {

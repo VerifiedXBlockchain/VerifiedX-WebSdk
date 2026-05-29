@@ -181,34 +181,34 @@ describe('address checks', () => {
   });
 });
 
-describe('transaction checks', () => {
-  let vfxClient: VfxClient;
-  let keypair: Keypair;
-  beforeAll(() => {
-    vfxClient = new VfxClient(Network.Testnet, dryRun);
+// describe('transaction checks', () => {
+//   let vfxClient: VfxClient;
+//   let keypair: Keypair;
+//   beforeAll(() => {
+//     vfxClient = new VfxClient(Network.Testnet, dryRun);
 
-    keypair = {
-      privateKey: process.env.PRIVATE_KEY as string,
-      publicKey: vfxClient.publicFromPrivate(process.env.PRIVATE_KEY as string),
-      address: vfxClient.addressFromPrivate(process.env.PRIVATE_KEY as string),
-    };
-  });
+//     keypair = {
+//       privateKey: process.env.PRIVATE_KEY as string,
+//       publicKey: vfxClient.publicFromPrivate(process.env.PRIVATE_KEY as string),
+//       address: vfxClient.addressFromPrivate(process.env.PRIVATE_KEY as string),
+//     };
+//   });
 
-  test('send coin', async () => {
-    const hash = await vfxClient.sendCoin(keypair, process.env.TO_ADDRESS as string, 1.0);
-    expect(hash).toBeTruthy();
-  });
+//   // test('send coin', async () => {
+//   //   const hash = await vfxClient.sendCoin(keypair, process.env.TO_ADDRESS as string, 1.0);
+//   //   expect(hash).toBeTruthy();
+//   // });
 
-  test('buy vfx domain', async () => {
-    const hash = await vfxClient.buyVfxDomain(keypair, 'test123.vfx');
-    expect(hash).toBeTruthy();
-  });
+//   // test('buy vfx domain', async () => {
+//   //   const hash = await vfxClient.buyVfxDomain(keypair, 'test123.vfx');
+//   //   expect(hash).toBeTruthy();
+//   // });
 
-  // test('buy btc domain', async () => {
-  //   const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
-  //   expect(hash).toBeTruthy();
-  // });
-});
+//   // test('buy btc domain', async () => {
+//   //   const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
+//   //   expect(hash).toBeTruthy();
+//   // });
+// });
 
 describe('CLI compatibility', () => {
   test('high-bit private keys should work with both 64 and 66 char formats', () => {

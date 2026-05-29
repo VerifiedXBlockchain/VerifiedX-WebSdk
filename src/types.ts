@@ -38,21 +38,88 @@ export interface Transaction {
   recovery_details: unknown;
 }
 
-export interface VbtcWithdrawalResult {
-  txHash: string;
-  uniqueId: string;
-  scId: string;
+// vBTC V2
+
+export interface VbtcV2Token {
+  sc_identifier: string;
+  name: string;
+  description: string;
+  owner_address: string;
+  image_url: string;
+  deposit_address: string;
+  frost_group_public_key: string;
+  required_threshold: number;
+  proof_block_height: number;
+  global_balance: number;
+  total_received: number;
+  total_sent: number;
+  tx_count: number;
+  is_pending_withdrawal: boolean;
+  addresses: Record<string, number>;
+  nft: unknown;
+  withdrawal_requests: VbtcWithdrawalRequest[];
+  created_at: string;
 }
 
-export interface VbtcWithdrawRequest {
-  SmartContractUID: string;
-  Amount: number;
-  VFXAddress: string;
-  BTCToAddress: string;
-  Timestamp: number;
-  UniqueId: string;
-  VFXSignature: string;
-  ChosenFeeRate: number;
-  IsTest: boolean;
-  [key: string]: unknown;
+export interface VbtcWithdrawalRequest {
+  id: number;
+  requestor_address: string;
+  btc_address: string;
+  amount: string;
+  fee_rate: string;
+  btc_transaction_hash: string;
+  status: 'requested' | 'completed';
+  request_transaction_hash: string;
+  completion_transaction_hash: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface VbtcTransfer {
+  id: number;
+  from_address: string;
+  to_address: string;
+  amount: string;
+  transaction_hash: string;
+  created_at: string;
+}
+
+export interface CreateVbtcResult {
+  transactionHash: string;
+  scIdentifier: string;
+  depositAddress: string;
+}
+
+export interface VbtcTransferResult {
+  transactionHash: string;
+}
+
+export interface VbtcWithdrawalResult {
+  btcTransactionHash: string;
+  completionTransactionHash: string;
+  withdrawalRequestHash: string;
+}
+
+export interface VbtcCancelResult {
+  transactionHash: string;
+}
+
+export type VbtcProgressPhase =
+  | 'ceremony_started'
+  | 'ceremony_polling'
+  | 'ceremony_complete'
+  | 'contract_preparing'
+  | 'contract_sent'
+  | 'withdraw_request_sent'
+  | 'frost_preparing'
+  | 'frost_polling'
+  | 'frost_complete'
+  | 'btc_broadcast'
+  | 'completion_recorded';
+
+export interface VbtcProgressEvent {
+  phase: VbtcProgressPhase;
+  message: string;
+  progress?: number;
+  data?: unknown;
 }

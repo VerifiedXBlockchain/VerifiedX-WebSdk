@@ -4,7 +4,21 @@ import { BrowserKeypairService } from './services/keypair-service';
 import { Network, TxType } from '../constants';
 
 // Re-export common interfaces and types from main package
-export type { Keypair, VfxAddress, Transaction, PaginatedResponse, VbtcWithdrawalResult, VbtcWithdrawRequest } from '../types';
+export type {
+  Keypair,
+  VfxAddress,
+  Transaction,
+  PaginatedResponse,
+  VbtcV2Token,
+  VbtcWithdrawalRequest,
+  VbtcTransfer,
+  CreateVbtcResult,
+  VbtcTransferResult,
+  VbtcWithdrawalResult,
+  VbtcCancelResult,
+  VbtcProgressPhase,
+  VbtcProgressEvent,
+} from '../types';
 
 // Export browser-compatible BTC namespace
 export * as btc from './btc';

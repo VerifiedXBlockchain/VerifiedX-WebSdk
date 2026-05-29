@@ -12,8 +12,15 @@ export type {
   VfxAddress,
   Transaction,
   PaginatedResponse,
+  VbtcV2Token,
+  VbtcWithdrawalRequest,
+  VbtcTransfer,
+  CreateVbtcResult,
+  VbtcTransferResult,
   VbtcWithdrawalResult,
-  VbtcWithdrawRequest
+  VbtcCancelResult,
+  VbtcProgressPhase,
+  VbtcProgressEvent,
 } from './types';
 
 // Export BTC namespace
