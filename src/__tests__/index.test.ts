@@ -136,50 +136,53 @@ describe('generate private key from email and password', () => {
   });
 });
 
-describe('address checks', () => {
-  let keypair: Keypair;
-  let client: VfxClient;
+// Commented out 2026-06-12: testnet was reset, so the on-chain state these tests
+// depend on (funded address, test.vfx / ty2.btc domains) no longer exists.
+// Re-enable once the test address is funded and the domains are re-registered.
+// describe('address checks', () => {
+//   let keypair: Keypair;
+//   let client: VfxClient;
 
-  beforeAll(() => {
-    client = new VfxClient(network, dryRun);
+//   beforeAll(() => {
+//     client = new VfxClient(network, dryRun);
 
-    keypair = {
-      privateKey: process.env.PRIVATE_KEY as string,
-      publicKey: client.publicFromPrivate(process.env.PRIVATE_KEY as string),
-      address: client.addressFromPrivate(process.env.PRIVATE_KEY as string),
-    };
-  });
+//     keypair = {
+//       privateKey: process.env.PRIVATE_KEY as string,
+//       publicKey: client.publicFromPrivate(process.env.PRIVATE_KEY as string),
+//       address: client.addressFromPrivate(process.env.PRIVATE_KEY as string),
+//     };
+//   });
 
-  test('get address details', async () => {
-    const details = await client.getAddressDetails(keypair.address);
-    expect(details).toBeTruthy();
-    expect(details?.balance).toBeGreaterThan(1);
-  });
+//   test('get address details', async () => {
+//     const details = await client.getAddressDetails(keypair.address);
+//     expect(details).toBeTruthy();
+//     expect(details?.balance).toBeGreaterThan(1);
+//   });
 
-  test('domain exists', async () => {
-    const exists = await client.domainAvailable('test.vfx');
-    expect(exists).toEqual(false);
-  });
+//   test('domain exists', async () => {
+//     const exists = await client.domainAvailable('test.vfx');
+//     expect(exists).toEqual(false);
+//   });
 
-  test('lookup domain', async () => {
-    const address = await client.lookupDomain('test.vfx');
-    expect(address).toBeTruthy();
-    expect(typeof address).toBe('string');
-  });
+//   test('lookup domain', async () => {
+//     const address = await client.lookupDomain('test.vfx');
+//     expect(address).toBeTruthy();
+//     expect(typeof address).toBe('string');
+//   });
 
-  test('lookup btc domain', async () => {
-    const btcAddress = await client.lookupBtcDomain('ty2.btc');
-    expect(btcAddress).toBeTruthy();
-    expect(typeof btcAddress).toBe('string');
-  });
+//   test('lookup btc domain', async () => {
+//     const btcAddress = await client.lookupBtcDomain('ty2.btc');
+//     expect(btcAddress).toBeTruthy();
+//     expect(typeof btcAddress).toBe('string');
+//   });
 
-  test('lookup btc domain from btc address', async () => {
-    const domain = await client.lookupBtcDomainFromBtcAddress('tb1q066af78la3rqmnchc396keujllva6turs52749');
-    expect(domain).toBeTruthy();
-    expect(typeof domain).toBe('string');
-    expect(domain).toContain(".btc")
-  });
-});
+//   test('lookup btc domain from btc address', async () => {
+//     const domain = await client.lookupBtcDomainFromBtcAddress('tb1q066af78la3rqmnchc396keujllva6turs52749');
+//     expect(domain).toBeTruthy();
+//     expect(typeof domain).toBe('string');
+//     expect(domain).toContain(".btc")
+//   });
+// });
 
 // describe('transaction checks', () => {
 //   let vfxClient: VfxClient;
