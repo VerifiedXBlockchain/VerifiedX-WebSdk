@@ -380,8 +380,6 @@ export class VfxClient {
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
     const onProgress = params.onProgress ?? (() => undefined);
-    const pollIntervalMs = params.pollIntervalMs ?? 5000;
-    const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
 
     // Step 1: Request (Type 27)
     const requestPrep = await this.vbtcV2ApiClient.prepareWithdrawRequest({
@@ -405,6 +403,38 @@ export class VfxClient {
       data: { withdrawalRequestHash },
     });
 
+    // Steps 2-4 are resumable: a crashed/failed session can re-drive them
+    // for the same on-chain request via completeWithdrawal (the chain
+    // refuses a NEW request while one is incomplete, so resume is the only
+    // way forward for a stranded request).
+    return this.completeWithdrawal({ ...params, withdrawalRequestHash });
+  };
+
+  /**
+   * Complete an EXISTING on-chain withdrawal request (Type 27 already
+   * broadcast): FROST prepare/sign/execute, BTC broadcast, Type 28 record.
+   *
+   * Safe to call for a request whose first completion attempt died at any
+   * point before the BTC broadcast — FROST sessions are per-call and the
+   * node rejects double-completion of a completed request.
+   */
+  public completeWithdrawal = async (params: {
+    scIdentifier: string;
+    requestorAddress: string;
+    withdrawalRequestHash: string;
+    btcAddress: string;
+    amount: number;
+    feeRate: number;
+    privateKey: string;
+    onProgress?: (event: VbtcProgressEvent) => void;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }): Promise<VbtcWithdrawalResult> => {
+    const onProgress = params.onProgress ?? (() => undefined);
+    const pollIntervalMs = params.pollIntervalMs ?? 5000;
+    const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
+    const withdrawalRequestHash = params.withdrawalRequestHash;
+
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
 
@@ -414,7 +444,7 @@ export class VfxClient {
       owner_address: params.requestorAddress,
     });
     if (!frostPrep?.success) {
-      throw new Error(`requestWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
+      throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
 
     const frostStartSig = this.keypairService.getSignature(frostPrep.StartMessage, params.privateKey);
@@ -443,7 +473,7 @@ export class VfxClient {
       fee_rate: params.feeRate,
     });
     if (!frostExec?.success || !frostExec.job_id) {
-      throw new Error(`requestWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);
+      throw new Error(`completeWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);
     }
 
     const frostFinal = await this.pollUntilDone({
@@ -462,7 +492,7 @@ export class VfxClient {
     });
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
-      throw new Error(`requestWithdrawal frost completed without signed_btc_tx_hex: ${JSON.stringify(frostFinal)}`);
+      throw new Error(`completeWithdrawal frost completed without signed_btc_tx_hex: ${JSON.stringify(frostFinal)}`);
     }
 
     onProgress({ phase: 'frost_complete', message: 'FROST signing complete' });
@@ -470,7 +500,7 @@ export class VfxClient {
     // Broadcast BTC tx
     const broadcast = await this.vbtcV2ApiClient.broadcastBtc(frostFinal.signed_btc_tx_hex);
     if (!broadcast?.success || !broadcast.txid) {
-      throw new Error(`requestWithdrawal broadcast failed: ${JSON.stringify(broadcast)}`);
+      throw new Error(`completeWithdrawal broadcast failed: ${JSON.stringify(broadcast)}`);
     }
 
     onProgress({
@@ -485,15 +515,17 @@ export class VfxClient {
       from_address: params.requestorAddress,
       withdrawal_request_hash: withdrawalRequestHash,
       btc_transaction_hash: broadcast.txid,
-      amount: frostPrep.Amount,
-      btc_destination: frostPrep.BTCDestination,
+      // Caller's real values — frostPrep echoes are 0/"" when prepare raced
+      // the node's processing of the Type 27 block (same trap as execute).
+      amount: params.amount,
+      btc_destination: params.btcAddress,
     });
-    this.assertPrepared(completionPrep, 'requestWithdrawal:completion:prepare');
+    this.assertPrepared(completionPrep, 'completeWithdrawal:completion:prepare');
 
     const completionSent = await this.signAndSend(completionPrep, params.privateKey, (body) =>
       this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
     );
-    this.assertSent(completionSent, 'requestWithdrawal:completion:send');
+    this.assertSent(completionSent, 'completeWithdrawal:completion:send');
 
     onProgress({
       phase: 'completion_recorded',
