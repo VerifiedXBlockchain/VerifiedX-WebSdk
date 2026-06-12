@@ -430,9 +430,17 @@ export class VfxClient {
       start_timestamp: frostPrep.StartTimestamp,
       share_distribution_signature: frostShareSig,
       share_distribution_timestamp: frostPrep.ShareDistributionTimestamp,
-      amount: frostPrep.Amount,
-      btc_destination: frostPrep.BTCDestination,
-      fee_rate: frostPrep.FeeRate,
+      // Delegated params: the caller's REAL inputs, never frostPrep echoes.
+      // This call races the node's processing of the Type 27 block (prepare
+      // runs seconds after the request broadcast); when the node hasn't
+      // recorded the request yet, prepare silently returns Amount=0 /
+      // BTCDestination="" — echoing those turns a benign propagation race
+      // into a hard "Withdrawal request not found" failure. Real delegated
+      // values let the node build a transient request and proceed
+      // (2026-06-12 first mainnet V2 withdrawal).
+      amount: params.amount,
+      btc_destination: params.btcAddress,
+      fee_rate: params.feeRate,
     });
     if (!frostExec?.success || !frostExec.job_id) {
       throw new Error(`requestWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);

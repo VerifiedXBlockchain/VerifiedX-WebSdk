@@ -423,6 +423,61 @@ describe('vBTC V2 — requestWithdrawal', () => {
     expect(frostBody.share_distribution_signature).toBe(client.getSignature('FROST_SHARE', privateKey));
   });
 
+  test('execute carries caller inputs as delegated params even when prepare returns zeros', async () => {
+    // The FROST prepare races the node's processing of the Type 27 block —
+    // when the withdrawal-request record isn't there yet, prepare silently
+    // returns Amount=0 / BTCDestination='' / FeeRate=10. The execute payload
+    // must carry the CALLER's real values so the node can build a transient
+    // request instead of failing with "Withdrawal request not found"
+    // (2026-06-12 first mainnet V2 withdrawal).
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH' }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: true,
+        SessionId: 'SES_W',
+        StartMessage: 'FROST_START',
+        StartTimestamp: 100,
+        ShareDistributionMessage: 'FROST_SHARE',
+        ShareDistributionTimestamp: 101,
+        // Node hasn't seen the request record yet — prepare defaults.
+        Amount: 0,
+        BTCDestination: '',
+        FeeRate: 10,
+      }),
+      '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_1' }),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_1/': () => ({
+        success: true,
+        status: 'complete',
+        signed_btc_tx_hex: '0200000001abcd',
+        sc_identifier: 'sc-1',
+        withdrawal_request_hash: 'WR_HASH',
+      }),
+      '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID_123' }),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'COMP_PREP_HASH', Fee: 0 }),
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMP_TX_HASH' }),
+    });
+
+    await client.requestWithdrawal({
+      scIdentifier: 'sc-1',
+      requestorAddress,
+      btcAddress: 'bc1qRealDestination',
+      amount: 0.00042,
+      feeRate: 21,
+      privateKey,
+      pollIntervalMs: 5,
+      timeoutMs: 5000,
+    });
+
+    const frostExec = calls.find((c) => c.url.includes('/withdraw/complete/execute/'));
+    expect(frostExec).toBeDefined();
+    expect(frostExec!.body).toMatchObject({
+      amount: 0.00042,
+      btc_destination: 'bc1qRealDestination',
+      fee_rate: 21,
+    });
+  });
+
   test('throws if FROST job reports failed', async () => {
     installFetch({
       '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH' }),
