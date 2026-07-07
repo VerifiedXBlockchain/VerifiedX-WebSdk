@@ -16,6 +16,27 @@ A comprehensive TypeScript/JavaScript SDK for VerifiedX blockchain and Bitcoin s
 npm install vfx-web-sdk
 ```
 
+> **Upgrading to 3.1.0?** See [CHANGELOG.md](CHANGELOG.md) — it fixes insecure
+> key generation and broken browser signing, and changes two behaviors you may
+> rely on (browser mnemonic derivation is now BIP32 with a legacy escape hatch,
+> and vBTC flows throw on a `dryRun` client instead of silently sending).
+
+### Client options
+
+Both clients keep their historical `(network, dryRun)` signature and also
+accept an options object:
+
+```typescript
+// Point at a self-hosted node / replacement testnet without an SDK release:
+const vfx = new VfxClient('testnet', { baseUrl: 'https://my-node.example.com/api', timeoutMs: 15000 });
+
+// Same for the Bitcoin side (mempool.space-compatible API):
+const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://mempool.space/testnet4/api' });
+
+// Distinguish "not found" from an API outage where it matters:
+const available = await vfx.domainAvailable('name.vfx', { strict: true }); // throws VfxApiError on outage
+```
+
 ## Quick Start
 
 ### VFX Operations
