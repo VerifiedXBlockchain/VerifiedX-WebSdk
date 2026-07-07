@@ -14,6 +14,19 @@ export function generateRandomString(length: number, charset: string): string {
   return result;
 }
 
+export function getSecureRandomBytes(length: number): Uint8Array {
+  const cryptoObj = typeof globalThis !== 'undefined' ? (globalThis as { crypto?: Crypto }).crypto : undefined;
+  if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
+    throw new Error(
+      'vfx-web-sdk: no cryptographically secure random source available (crypto.getRandomValues). ' +
+        'Node >= 18.13 and all modern browsers provide this.',
+    );
+  }
+  const bytes = new Uint8Array(length);
+  cryptoObj.getRandomValues(bytes);
+  return bytes;
+}
+
 export function generateRandomStringSecure(length: number, charset: string): string {
   try {
     // Try to access crypto (works in Node.js 15+ and browsers)
@@ -198,17 +211,29 @@ export function bigToUint8Array(big: bigint): Uint8Array {
 }
 
 export function normalizePrivateKey(privateKeyHex: string): string {
+  let hex = privateKeyHex;
   // Strip leading 00 if present (CLI compatibility format)
-  if (privateKeyHex.startsWith('00') && privateKeyHex.length === 66) {
-    return privateKeyHex.substring(2);
+  if (hex.startsWith('00') && hex.length === 66) {
+    hex = hex.substring(2);
   }
-  return privateKeyHex;
+  // Left-pad short keys to 64 chars: some generators (e.g. the web wallet's
+  // elliptic-based generate()) emit unpadded hex when the key has leading
+  // zero bytes. Padding does not change the numeric key.
+  while (hex.length < 64) {
+    hex = '0' + hex;
+  }
+  return hex;
 }
 
+const SECP256K1_ORDER = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
+
 export function isValidPrivateKey(privateKey: CryptoJS.lib.WordArray): boolean {
-  const order = 'fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141';
   const privateKeyHex = privateKey.toString(CryptoJS.enc.Hex);
-  return privateKeyHex < order && privateKeyHex.length === 64;
+  if (privateKeyHex.length !== 64) {
+    return false;
+  }
+  const key = BigInt('0x' + privateKeyHex);
+  return key > BigInt(0) && key < SECP256K1_ORDER;
 }
 
 export function isValidAddress(address: string, network: Network): boolean {

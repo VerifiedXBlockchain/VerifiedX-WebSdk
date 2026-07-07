@@ -9,6 +9,7 @@ import {
   arrayToHex,
   byteArrayToWordArray,
   concatArrays,
+  getSecureRandomBytes,
   hexStringToByteArray,
   hexToString,
   isValidPrivateKey,
@@ -25,10 +26,12 @@ export class KeypairService {
   }
 
   public generatePrivateKey(): string {
+    // Native CSPRNG only — CryptoJS.lib.WordArray.random (crypto-js 3.x) is
+    // seeded from Math.random and must never be used for key material.
     let privateKey: CryptoJS.lib.WordArray;
 
     do {
-      privateKey = CryptoJS.lib.WordArray.random(32);
+      privateKey = byteArrayToWordArray(getSecureRandomBytes(32));
     } while (!isValidPrivateKey(privateKey));
 
     // Prepend 00 for CLI BigInteger compatibility

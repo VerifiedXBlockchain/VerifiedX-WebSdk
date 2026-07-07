@@ -23,7 +23,10 @@ export type {
 // Export browser-compatible BTC namespace
 export * as btc from './btc';
 
-// Browser-compatible VfxClient that extends the original
+// Browser-compatible VfxClient that extends the original.
+// Key generation, derivation and signing are inherited from the canonical
+// VfxClient — its crypto stack bundles for browsers and is byte-identical to
+// Node/CLI/web-wallet output (see BrowserKeypairService for details).
 export class BrowserVfxClient extends OriginalVfxClient {
   private browserKeypairService: BrowserKeypairService;
 
@@ -32,29 +35,8 @@ export class BrowserVfxClient extends OriginalVfxClient {
     this.browserKeypairService = new BrowserKeypairService(network);
   }
 
-  // Override only the crypto-related methods with browser-compatible versions
-  public generatePrivateKey = (): string => {
-    return this.browserKeypairService.generatePrivateKey();
-  };
-
-  public generateMnemonic = (words: 12 | 24 = 12): string => {
-    return this.browserKeypairService.generateMnemonic(words);
-  };
-
   public privateKeyFromMnemonic = (mnemonic: string, index: number): string => {
     return this.browserKeypairService.privateKeyFromMnemonic(mnemonic, index);
-  };
-
-  public publicFromPrivate = (privateKey: string): string => {
-    return this.browserKeypairService.publicFromPrivate(privateKey);
-  };
-
-  public addressFromPrivate = (privateKey: string): string => {
-    return this.browserKeypairService.addressFromPrivate(privateKey);
-  };
-
-  public getSignature = (message: string, privateKeyHex: string): string => {
-    return this.browserKeypairService.getSignature(message, privateKeyHex);
   };
 
   // All other methods (getAddressDetails, transactions, etc.) are inherited from OriginalVfxClient
