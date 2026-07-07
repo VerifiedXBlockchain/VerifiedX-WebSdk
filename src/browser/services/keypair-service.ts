@@ -33,10 +33,25 @@ export class BrowserKeypairService {
     return this.inner.generateMnemonic(words);
   }
 
+  /**
+   * Derives via BIP32 m/0'/0'/index' — identical to the canonical
+   * privateKeyFromMneumonic and to the Node/CLI/web-wallet derivation.
+   *
+   * BREAKING BEHAVIOR NOTE (v3.1.0): earlier browser builds derived a
+   * different, non-BIP32 key from the same mnemonic. If you stored funds on
+   * an address created by THIS method in the browser before v3.1.0, recover
+   * it with privateKeyFromMnemonicLegacyBrowser.
+   */
   public privateKeyFromMnemonic(mnemonic: string, index: number): string {
-    // NOTE: legacy non-BIP32 derivation, kept temporarily for compatibility.
-    // Unlike the canonical privateKeyFromMneumonic (BIP32 m/0'/0'/index'),
-    // this hashes the BIP39 seed with the index appended.
+    return this.inner.privateKeyFromMneumonic(mnemonic, index);
+  }
+
+  /**
+   * Pre-v3.1.0 browser-only mnemonic derivation (SHA256 of BIP39 seed +
+   * index). NOT compatible with the rest of the ecosystem — exists solely so
+   * funds on legacy browser-derived addresses can be recovered.
+   */
+  public privateKeyFromMnemonicLegacyBrowser(mnemonic: string, index: number): string {
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     const seedArray = new Uint8Array(seed);
 
@@ -55,10 +70,24 @@ export class BrowserKeypairService {
     return '00' + hash.toString(CryptoJS.enc.Hex);
   }
 
+  /**
+   * Derives via the canonical email/password scheme (51x SHA256 seed ->
+   * BIP32 m/0'/0'/index'), matching Node/CLI/web-wallet output.
+   *
+   * BREAKING BEHAVIOR NOTE (v3.1.0): earlier browser builds of THIS class
+   * derived a different, non-BIP32 key. BrowserVfxClient was unaffected (it
+   * always inherited the canonical implementation). Recover legacy keys with
+   * privateKeyFromEmailPasswordLegacyBrowser.
+   */
   public privateKeyFromEmailPassword(email: string, password: string, index = 0): string {
-    // NOTE: legacy non-BIP32 derivation, kept temporarily for compatibility.
-    // The canonical implementation (KeypairService.privateKeyFromEmailPassword)
-    // derives via BIP32 m/0'/0'/index' and matches the web wallet.
+    return this.inner.privateKeyFromEmailPassword(email, password, index);
+  }
+
+  /**
+   * Pre-v3.1.0 browser-only email/password derivation. NOT compatible with
+   * the rest of the ecosystem — exists solely for fund recovery.
+   */
+  public privateKeyFromEmailPasswordLegacyBrowser(email: string, password: string, index = 0): string {
     email = email.toLowerCase();
 
     let seed = `${email}|${password}|`;

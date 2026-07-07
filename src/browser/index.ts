@@ -35,8 +35,19 @@ export class BrowserVfxClient extends OriginalVfxClient {
     this.browserKeypairService = new BrowserKeypairService(network);
   }
 
+  /**
+   * BIP32 m/0'/0'/index' — identical to privateKeyFromMneumonic and to the
+   * Node/CLI/web-wallet derivation. Before v3.1.0 this browser-only method
+   * used an incompatible derivation; see privateKeyFromMnemonicLegacyBrowser
+   * to recover funds from addresses created with it.
+   */
   public privateKeyFromMnemonic = (mnemonic: string, index: number): string => {
     return this.browserKeypairService.privateKeyFromMnemonic(mnemonic, index);
+  };
+
+  /** Pre-v3.1.0 browser-only mnemonic derivation, kept for fund recovery. */
+  public privateKeyFromMnemonicLegacyBrowser = (mnemonic: string, index: number): string => {
+    return this.browserKeypairService.privateKeyFromMnemonicLegacyBrowser(mnemonic, index);
   };
 
   // All other methods (getAddressDetails, transactions, etc.) are inherited from OriginalVfxClient
