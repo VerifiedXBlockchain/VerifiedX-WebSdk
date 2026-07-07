@@ -1,0 +1,266 @@
+{
+  "generatedAt": "2026-07-07T15:01:39.097Z",
+  "source": "vfx-gui/assets/js/keygen-v3.js + vfx-web-sdk@3.0.0 KeypairService",
+  "privateKeys": [
+    {
+      "privateKey": "90a805984bd65764350d644d9cfb8ca483f7f4ae1e783833f4661f93ee053b73",
+      "mainnetAddress": "RShL4yfSPuexMczBvsh7JDJnNngVznQbcn",
+      "testnetAddress": "xRimtLcd4oLRKzirpBLedsGMqdX8mhd699",
+      "publicKey": "044e9d90af0039abc1efebb1d6c084d8822f755f57fa64c33c1f89d38d625a8699a502234af60dbf36debaaf408d693c76ac64e738a6bc7bb1b355e5e966afdd78"
+    },
+    {
+      "privateKey": "47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+      "mainnetAddress": "RRH1Qs76UPTeTrXo4oV7XpLqfLugaReF1J",
+      "testnetAddress": "xQJTEE4H9H97SEGTx78esUJR8BkKLYktvB",
+      "publicKey": "04a88f3e876777aafdb28235a759f0d312838d5c024ef8d84520e1a129c0a165f50470f563b2326f2f1a995e419df923520c80c5f0763990430db0d0b9330a33a6"
+    },
+    {
+      "privateKey": "c202da26413c513358f0e10916b9097b2ab790e5918233c1b3675eaa1c7bafc2",
+      "mainnetAddress": "RBXpNvMXxbfWxnMh1g4krgaU1PVqzr22uY",
+      "testnetAddress": "xAZGCHJidVLywA6MtyiJCLY3UELUkixRcR",
+      "publicKey": "04ba2cbbb5fc0b6659841789fb5d73e35a02f09dbfc235a60301a726d65dc83f86ca78a47510ae36b321300c042fa2c8e58dce2c8c923ce22be7b8d3e6687566df"
+    },
+    {
+      "privateKey": "a81dfb122a2f3255d61a10f7dd2caab004fab1b3d98a2aef3441c9f2d742da43",
+      "mainnetAddress": "RL9235dFvs3UqJJbUqM656GoxeWCe7Qtid",
+      "testnetAddress": "xKATrSaSbkiwog3GN8zdQkEPRVLqHz5oki",
+      "publicKey": "04eec9f02e6f8d18b8bd08291812fe51f1d66c1f0d4e3162aa1a3cf914f62f30163664064df50f298855be2e6e9ff1824a19c095b0f31b7fc7890b5c9c7f02b512"
+    },
+    {
+      "privateKey": "23e87f71fc924ff47113300724ae17718eab75f3f3602e4c55e9eab7e3ab225e",
+      "mainnetAddress": "RSx23txtn2G2YceJ2wbkKTiBD3Uckfo26x",
+      "testnetAddress": "xRyTsFv5SuwVWzNxvFFHf7fkftKFS3cT7s",
+      "publicKey": "040e171999c2603fd7cc4d36b6dfeedbf6953036b8083bcc9088d422faf1ca9b588cb3e52891cab631ca6c4a0d04e8f57034f1031881893102bd124e9a791f9ef0"
+    },
+    {
+      "privateKey": "74137ead923e841b0ba7786836e742bbb987694e0cbfb3dc20c10901c62606ec",
+      "mainnetAddress": "RF4h5BRMN38RMfD3y8QphqTrNWnybMDDow",
+      "testnetAddress": "xE68tYNY2votL2wirS4N3VRRqMdcFRhjvb",
+      "publicKey": "04fd1458b104a6d3a115ac1ba2e48e805722724964adde4b8c1fcc2a48741b22142ea2bc64510f221d3404817e6569a522fa8636275fd46cfe68f8b77def2e89bf"
+    },
+    {
+      "privateKey": "8b842a3e2c7f2a4ce4b20533a9096b12c549cad1bc23eb18b55ed4bf33a00edb",
+      "mainnetAddress": "RYQLfWnEVQw1ExNhy5cLsRh1jZtanRdVLw",
+      "testnetAddress": "xXRnUsjRAJcUDL7NrPFtD5ebCQjDZjyKbJ",
+      "publicKey": "04c8533e61c7437f9c87c3690c3bed6846b8696c11a8108b9f9e6bca6204206e66e84bced52d9b32af5933f9d26899900289be72fbed4043750e9f4d14f63446a9"
+    },
+    {
+      "privateKey": "cf168bd0a8e64b78331050b6f6fcff694711d9490d3c7dd6edea2dc30161f982",
+      "mainnetAddress": "RXAnZcd7Jy1df3MAsr2JGX2cXPyPFr6R4d",
+      "testnetAddress": "xWCENyaHyrh6dR5qm9fqcAzBzEp1xMzwHy",
+      "publicKey": "04b81fb26b051aa689d8205e8a2e6f879630ae4bda92ba1fc12932200b6efd82dbe11a36701939c906be38d06e176a29e08d9919a283feb79448f60229c406dd21"
+    },
+    {
+      "privateKey": "99d295512ea745563cbf10071754387c006db034cb885dbbbf9668ccef224ac8",
+      "mainnetAddress": "RMsLV6Uvr7WHupo3NRUukf6d3KkPaMuasy",
+      "testnetAddress": "xLtnJTS7X1BktCXiFj8T6K4CWAb2NuHZ4S",
+      "publicKey": "045637e9555ffbe0f5c2d38bbdc8bd79e92583e80a6f90db7b7ef368385c339c3589dbf929131cd38b6efb05cddf0a1142cb2ccdce8867ed1ce1277bfc1995d895"
+    },
+    {
+      "privateKey": "1be81f430f64e1b2b46f246ff36b0f731078a6d9ac05698df29d93632db4799c",
+      "mainnetAddress": "RSqTaxVfTsjyBWnh4ThaRWabWuuAh7stYD",
+      "testnetAddress": "xRruQKSr8mRS9tXMwmM7mAYAykjoQvjpss",
+      "publicKey": "0469c105c014b656f6801e82c109468222a522e39ab88d3189b98116d63bbacfd8a8b4dfa82c7aa980bb18ee4a85636b8fadfa32b77c761db25204c1c5cc520480"
+    },
+    {
+      "privateKey": "2f89e9d4cfe92048eba8c00ffe85c3e195c382956ac3cb4fbfedf1778331a1ce",
+      "mainnetAddress": "RQxX77ZAs42QNaTvaJtNfBJTCZxZa7WQ7v",
+      "testnetAddress": "xPyxvUWMXwhsLxCbTcXuzqG2fQoCLDsVE2",
+      "publicKey": "0413d2279da525d7253cb333cedd120014579fa19502f1811020ac64bc44702779b8246008c6f2bcb54e416d57f7eadf9986a316fa5c169b29566db555ef48295a"
+    },
+    {
+      "privateKey": "919e63ddefa113c7fa5c3b8a697739ab7270125c7de487ca8dc794264c7b8769",
+      "mainnetAddress": "RH79emjQERdqwzi3LBoaeooUgq2hFsZV43",
+      "testnetAddress": "xG8bU8gauKKJvNSiDVT7zTm49fsKumT21U",
+      "publicKey": "04b7e8f35aef03c3330dd341ef45de86fd06707c165d786f9fada3dfa90c90c1f7d89b6eeea3290f2bef5f072d2751bf913c158c3cf99e12c9f200b9b0f20de89d"
+    },
+    {
+      "privateKey": "5071517ffda1b3416005fc5299c94761a73143d9add59eb75a86516ac4addfaf",
+      "mainnetAddress": "RGAxESLf2mged7YAVb6gG5eZkWnwmCk2Tu",
+      "testnetAddress": "xFCQ3oHqhfN7bVGqNtkDbjc9DMdaZ4Btfo",
+      "publicKey": "04c104f17005c6ea8cc563ee98ab49e5841dec9f9a4658e8b342eec70bdde0a22ec88956590824a5c4ee57ce3cdd1e5280c5a12ba840fd207131c8a0ba5c6db14b"
+    },
+    {
+      "privateKey": "7ef4c16baf1722f655b50aeb2a2b35ad84876e6fe322ab6d6e83fabb42a25ac6",
+      "mainnetAddress": "RRveWe3qgSNnyJV1FCHwS6qxtNnaK2WB6e",
+      "testnetAddress": "xQx6L112ML4FwgDg8VwUmkoYMDdD4CdsDt",
+      "publicKey": "0492dea2f64490206ca4fd3c8a3df39362ef681f460fcab0712e102051b3ea92f82a8b048c431d988741ab27ecd5f7d602fad45ffaca8f440dcc0229b018353dcf"
+    },
+    {
+      "privateKey": "baa192d96a9bf0af43cad828e3e953b9a528ec67ca29cee4b36daa90b5fe68f1",
+      "mainnetAddress": "RCC9BvSZoqc7aBWDifH4x5KBtYJNzguq9W",
+      "testnetAddress": "xBDb1HPkUjHaYZEtbxvcHjGmMP91jDSAZy",
+      "publicKey": "041610c4111cc7252c8901b91036cd9cabcbf9d49a8c25f7b2b6132feafbf6e50cdc0a86cba2557eb261a876566371a0dc2f55713c23b65320782d574959bd8949"
+    },
+    {
+      "privateKey": "4cfe825413ebbd8bbf9badfaad461c99778b3940377a78a1508bf9d59e1ef664",
+      "mainnetAddress": "RHu4FzqNKrPg5NaZ6tofwdGpkbwcsyQizs",
+      "testnetAddress": "xGvW5MnYzk593kKDzCTDHHEQDSnFaH3xg8",
+      "publicKey": "04158f993630994d22504d42baf428868740f8c6bdd81ba09ac1e135f8a8fddf1b7e043e33fc544a1b6d59b1f428cfa413d4494a130c3bb4f3cfb8d3c6dadea212"
+    },
+    {
+      "privateKey": "31d59912f936c72fa8a5e6fb2e7ee8a0b50d476586447a9371e8408fa06d5896",
+      "mainnetAddress": "RVCMacXAysa9XV5tKSgwkVEhcsjLHodtMD",
+      "testnetAddress": "xUDoPyUMemFcVrpZCkLV69CH5iZy1ov8V8",
+      "publicKey": "04505a0d4cfe722f8ea9f4dec77d0ddfd4b398f8ecf113fbf46126635c01fd0f552e57ffbe81d646e9528a8016ae602636cad7098299d28c299f7abc47b1e08621"
+    },
+    {
+      "privateKey": "8c300333d8e82fdce63b20b22d519e5327a446c26d06acb5d0f5ed480151d34c",
+      "mainnetAddress": "RVtquKVEi2qgosup5T5UMmAbrUkcYaRkgT",
+      "testnetAddress": "xUvHigSRNvX9nFeUxkj1hR8BKKbFM5Uohk",
+      "publicKey": "044513d4f700835cce7ea5c73c55056a7261014b953992672c6d720358a057d8cf9d67319ae75d6f25308257d9e8187bddd2aa525c18f7ac2f2d806ab4ae15b449"
+    },
+    {
+      "privateKey": "5e021a668021f8775d01805ffba83bf30d0f726d16638c96af15b269134bbcff",
+      "mainnetAddress": "RX8Gni2vjREmJwVTC3iX42ceuRku7XgKWb",
+      "testnetAddress": "xW9ic4z7QJvEHKE85MN4PgaENGbXtEb1c3",
+      "publicKey": "043e7fb3f45c94f86e8ff8413f172976d2362676c854809c7dbea1d1f536d9a673f83cb02839bfb6dff2569820b8f0fcf50de72819ce6e5935af915522b19d33aa"
+    },
+    {
+      "privateKey": "9e0d7571da3d9b6526f111f07d963874e574e530938a9ec5da9da20cdd39e62a",
+      "mainnetAddress": "REhFnuiVRQ6An6esCJvo1HYeV7vhCg1uf1",
+      "testnetAddress": "xDihcGfg6HmdkUPY5caLLwWDwxmKyzASWP",
+      "publicKey": "0416ee509ea292ec37c2308d3ef899743c0640a7f72019c5a9388af80b85d0f507964bb65667f059b9dda4343ccf3dd4bf784b2bb61f6f60fd1533e09b67246f1d"
+    },
+    {
+      "privateKey": "cc5894b5a8be616976bf4984bff4c884be01cf6221374aa44cee4c57a06f2453",
+      "mainnetAddress": "RXf7wQ3FetxGWb7WxmVhLaxKKMXe5yTFA4",
+      "testnetAddress": "xWgZkkzSKndjUxrBr59EgEutnCNGrfvtgY",
+      "publicKey": "04f079596ae0d7e9d3aff564e2361b59e45254da0b60b32e829ce510b1974adc83ef023adaca5f8b70879e873fe459051d2f1abac7ac967369ac05a78b4a6344b1"
+    },
+    {
+      "privateKey": "a913ee8e4b311f72323b2be8d5939771ea5990e3a2412ed4cc3427e215b43918",
+      "mainnetAddress": "RYax5R11BwxRoe3VUuhq4ntp8e4mNfpymN",
+      "testnetAddress": "xXcPtmxBrqdtn1nANDMNQSrPbUuQ66sTZi",
+      "publicKey": "04927203a4fecf94c8bcd90183c274f4bfd69feef7c503d9febc9b33f2de6033b750c204b86e7861eff881dbc85586a192cf50cc14bd5466824f000203f6357480"
+    },
+    {
+      "privateKey": "009a0e1e29f84c0418cdfb8941499062890fdafb0c3a199362618208f7fd3264",
+      "mainnetAddress": "RUkPYVLUKWCfyMqhM33ULJUFmGRJfX1YYd",
+      "testnetAddress": "xTmqMrHezPt8wjaNELh1fxRqE7FwPYDaNk",
+      "publicKey": "0476b06f1ae7332c3d817fa76995bbed6d6978024a3515bcddd29d7fd4bc5744c7c12eb13033fbf69114c04f23eeab6eaf6188f39cd56abea2723b072d5bcb5818"
+    }
+  ],
+  "email": [
+    {
+      "email": "test@verifiedx.io",
+      "password": "test1234",
+      "index": 0,
+      "privateKey": "0009c9e9ef2ac9ddefe486710b863b7df0b052110adbc8082df748a893aa78c462",
+      "testnetAddress": "xHoSVXZ3cpM25XJC2qif3hCbzUFwYe2MLp",
+      "mainnetAddress": "RJmzgAbrwvfZ79ZX9Y57i3F2XdRJr9M9Hx"
+    },
+    {
+      "email": "test@verifiedx.io",
+      "password": "test1234",
+      "index": 1,
+      "privateKey": "00cf8db89a4add253ad5b83418da3cb1ec739e37c0d1e8c3598d1553778ad5fef2",
+      "testnetAddress": "xPUbXgAaxejTkjKLTMAAPDoRxxzrpLBNQB",
+      "mainnetAddress": "RQT9iKDQHm3znMafa3Wd3ZqrW8AE4cSwEK"
+    },
+    {
+      "email": "test@verifiedx.io",
+      "password": "test1234",
+      "index": 5,
+      "privateKey": "002968a51b8386d74acc06904b6efd416cd6ece294073a47198033e53abdf505cc",
+      "testnetAddress": "xHLNkpDL2VBgMoHK7Torbo3QZ8ggfDk4bs",
+      "mainnetAddress": "RJJvwTG9MbWDPRYeEAAKG95q6Hr3uvuXQw"
+    },
+    {
+      "email": "user@example.com",
+      "password": "MyPassword123",
+      "index": 0,
+      "privateKey": "005d645bce118266eb8d66d1b15b19a44c749f6d82bc9af659d8388f8349c6aafb",
+      "testnetAddress": "xEweaoVA2WR1p3FDGfuW9RGBR1hQP6K4vM",
+      "mainnetAddress": "RFvCmSXyMcjYqfWYPNFxomJbxArmc7XgpT"
+    },
+    {
+      "email": "user@example.com",
+      "password": "MyPassword123",
+      "index": 1,
+      "privateKey": "00d61222c7d6812f9316085d75e247a6c5affb17554b282edd61af3f8f79744d22",
+      "testnetAddress": "xEMDvDHsBd56CSc8xbYVe7dwnGsTVu8Pmq",
+      "mainnetAddress": "RFKn6rLgWjPdE4sU5HtxJTgNKS2ppZFJTd"
+    },
+    {
+      "email": "user@example.com",
+      "password": "MyPassword123",
+      "index": 5,
+      "privateKey": "00cf82d9e0c10a31c458f0b7950ad38721391e49e4cd353bb407713186eec375d3",
+      "testnetAddress": "xQ4jRzTM4fwdGLLGb4NQVj5C4m8EwwvmcB",
+      "mainnetAddress": "RR3HcdWAPnGAHxbbhkisA57cbvHcE5i7Fa"
+    }
+  ],
+  "mnemonic": [
+    {
+      "mnemonic": "entire taste skull already invest view turtle surge razor key next buffalo venue canoe sheriff winner wash ten subject hamster scrap unit shield garden",
+      "index": 0,
+      "privateKey": "007631b14a28c60a9fee2e8f7ff015ef78613c9c2b9286280c73fcbb2861aff2eb",
+      "mainnetAddress": "RQJzd53UoyyjghC16gJ3meXNKiD2ABSHW7"
+    },
+    {
+      "mnemonic": "entire taste skull already invest view turtle surge razor key next buffalo venue canoe sheriff winner wash ten subject hamster scrap unit shield garden",
+      "index": 1,
+      "privateKey": "00bbdd64f38afdb369533846179e1e5fea066f46e919dcbb600f5b5e53981d3f08",
+      "mainnetAddress": "RFv1GFi1M5NxyLQKJcktyxrYRwQsTdiqym"
+    },
+    {
+      "mnemonic": "entire taste skull already invest view turtle surge razor key next buffalo venue canoe sheriff winner wash ten subject hamster scrap unit shield garden",
+      "index": 3,
+      "privateKey": "00ca9b16a5a4ad7cb2f5b6b9a8157a753fc7f708b571a3c2880f52a2538a582b51",
+      "mainnetAddress": "RKPVhsvmFK5LAgM6F5MxXq5sWfhwk1QabQ"
+    }
+  ],
+  "signatures": [
+    {
+      "privateKey": "90a805984bd65764350d644d9cfb8ca483f7f4ae1e783833f4661f93ee053b73",
+      "message": "vfx-compat-message-0",
+      "signature": "MEUCIQCq+0/bjCPrW5msfT8R5dMysS6FF3Y6we2UTD0Y0lRcLgIgbnZPrQWgWNOYMFvZm/WNfNoiG/a5U/2JDnmh/7v5EKE=.2aATFKhCp9uQDW55Up6Tj3zxSmjST8ELYikvnZywUE1JUH3i8V5xDR41WD9yPa3WsUmbcWJSv8J1pgER5hNXEnmd"
+    },
+    {
+      "privateKey": "47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+      "message": "vfx-compat-message-1",
+      "signature": "MEQCIFtLV4QRhrsC2mJ/jz3SSiM0ZfmOBF84owzBTvM2rxNyAiAdJO2erqfQMWb9/tFERKWlKoUNxG7iF0omXE9Jeq15Bg==.4NTqGbsfnQePEN5q3Pkoqpw7cvrnWVtvAg2XkhpK2ypWVazyGRNBUhKeFcj615WDKfLFy1C1KeVurUuUmHdo6RhF"
+    },
+    {
+      "privateKey": "c202da26413c513358f0e10916b9097b2ab790e5918233c1b3675eaa1c7bafc2",
+      "message": "vfx-compat-message-2",
+      "signature": "MEUCIQCufqlJu5W9004hv0xYjkGKBs7L0RpzMMglxmdQtqvB3AIgLJNXuajneyd9ywHxWstHMPwdexCmWOzOqQLVsptqdBw=.4itacX4KwvXrLLBmxAiyXtqqNrcwUT6Hng7Tp7gAoCduq5sinHFKvVUj4YfVxSRVM96ttMhrw9J393R1N7eUgZsc"
+    },
+    {
+      "privateKey": "a81dfb122a2f3255d61a10f7dd2caab004fab1b3d98a2aef3441c9f2d742da43",
+      "message": "vfx-compat-message-3",
+      "signature": "MEQCIE19jglDTFY1MXfM9rO+mhr2DzA2NHyMm5DKq8wxVC/OAiBuN681JloI5pNyDEhSAyv8DAIeTMgCLAH9ilLIBw2vPA==.5muFcTQnaL2Co5oDK34CW5PBMSyHVDW9u7eTktH5rMW4q5yRQz2Dghduqm6xZCrXnBBAbVdJgPyT8bFFwNFTQtWV"
+    },
+    {
+      "privateKey": "23e87f71fc924ff47113300724ae17718eab75f3f3602e4c55e9eab7e3ab225e",
+      "message": "vfx-compat-message-4",
+      "signature": "MEUCIQDCiMZ4oAQ3E4ca5+F5IHbwg92KkCHPvsWKG/qckDyYfAIgdPJOb/Jn5RWkxOuPjIE75kL93Dz8DoUZdTFdJqPvu9k=.HLfnpUAZgV38wBdPvcfmTNH1eEUNhVosMuudELPt3wybcebF29yxS13ZtyN74HmnrDsP25zZuvHrUVkJcXHcSNs"
+    },
+    {
+      "privateKey": "74137ead923e841b0ba7786836e742bbb987694e0cbfb3dc20c10901c62606ec",
+      "message": "vfx-compat-message-5",
+      "signature": "MEUCIQCkbHFqO/pBTiUfUl/kdC1w23XBKbKXH/d18sDBkDEUqQIgfdl5JoQuic2nRZmFvd5x0RRbj8SfeC++y2ykVZ9lYiA=.64UQEY8Va1iJjuYwjnwKEu4wMDk9z9kyyQ3hBNqWwZLygLBv1cMzeeYQJaNks8mewkEaiPs5DaacykKpiRKuehLA"
+    },
+    {
+      "privateKey": "8b842a3e2c7f2a4ce4b20533a9096b12c549cad1bc23eb18b55ed4bf33a00edb",
+      "message": "vfx-compat-message-6",
+      "signature": "MEQCIAoq1DGm0lI/H0rIDIFTA+oJ1oqm2lfo2U055BWJ3X3IAiBTDIA/Bwbmy99cnsAQzJUKXxEBp8kcv0hTOdXvCpfi+w==.51JJE67GXWCChY3y63NqMNqgm4XVKAM5KVki8zZGvg5u14wkGootEfDzZzsVEjqDC88vsb5Tc92VNZkDaEQkkbBN"
+    },
+    {
+      "privateKey": "cf168bd0a8e64b78331050b6f6fcff694711d9490d3c7dd6edea2dc30161f982",
+      "message": "vfx-compat-message-7",
+      "signature": "MEQCIEaS577hde3v6iyYjUbpukR9V9fGxnc/Y5iN6EVJ7ZjsAiAqWh/PTt5GwP1rtY2Zi1oRgbhmlHUOTKnZIvK+Yg+IFQ==.4gWe92MYPXYCvNWULJsEVFfCgwGr1A2JngQ2HThHBzE7du3eGFSeyiXGz3VFEoDCA2RUWKkURc2jkp9kpE2hH1yJ"
+    },
+    {
+      "privateKey": "99d295512ea745563cbf10071754387c006db034cb885dbbbf9668ccef224ac8",
+      "message": "vfx-compat-message-8",
+      "signature": "MEQCIB7ppBh4IsVdLSFZKsN4vUyedt6S2qSVYhOos+TlqKXsAiAdtrPYmR7XALBeotGk87fgLrriIN3mqSvfQDPH7wzbGw==.2iyoZhkfqgGCW8RmgJAeX4J5Yh8M7RHkYZHRRQeSigZSx17RroSRvgWpAskrcJaLmCUraQViQXgP65gSzBayeMg8"
+    },
+    {
+      "privateKey": "1be81f430f64e1b2b46f246ff36b0f731078a6d9ac05698df29d93632db4799c",
+      "message": "vfx-compat-message-9",
+      "signature": "MEUCIQCgrqJt824SxBOKb2aPIxacdQ9Q8PtmGTG+8Oyr/EQgPgIgaS6tgnrgzuWyK0/i8QoiT+dHhskv6e2St5OX2Pzv+Qw=.37diDYJQ6aTmemJLUR9ny6zBPjSHzx91PJc1K98Mf16b5xfvzMPpwc1dT5dNRfdG4aJ5H16p4F3QpfSKdAUQL7AP"
+    }
+  ]
+}
