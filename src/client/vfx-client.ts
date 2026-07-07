@@ -35,9 +35,23 @@ type SendFn = (body: { hash: string; signature: string; public_key: string }) =>
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
 
+export interface VfxClientOptions {
+  /** Return would-be hashes from sendCoin/domain purchases without broadcasting. */
+  dryRun?: boolean;
+  /**
+   * Override the network-derived data API origin (e.g. a self-hosted node or
+   * a replacement testnet), including the /api suffix:
+   * 'https://data-testnet.verifiedx.io/api'
+   */
+  baseUrl?: string;
+  /** Per-request timeout in ms (default 30000; 0 disables). */
+  timeoutMs?: number;
+}
+
 export class VfxClient {
   private network: Network;
   private dryRun: boolean;
+  private apiOptions: { baseUrl?: string; timeoutMs?: number };
   private keypairService: KeypairService;
   private addressApiClient: AddressApiClient;
   private adnrApiClient: AdnrApiClient;
@@ -45,20 +59,29 @@ export class VfxClient {
   private transactionApiClient: TransactionApiClient;
   private vbtcV2ApiClient: VbtcV2ApiClient;
 
-  constructor(network: Network | 'mainnet' | 'testnet', dryRun = false) {
+  /**
+   * @param network 'mainnet' | 'testnet' (or the Network enum)
+   * @param dryRunOrOptions boolean dryRun (historical signature) or a
+   *   VfxClientOptions object: new VfxClient('testnet', { baseUrl: '...' })
+   */
+  constructor(network: Network | 'mainnet' | 'testnet', dryRunOrOptions: boolean | VfxClientOptions = false) {
     // Convert string literals to Network enum values
     const networkEnum = typeof network === 'string'
       ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet)
       : network;
 
+    const options: VfxClientOptions =
+      typeof dryRunOrOptions === 'boolean' ? { dryRun: dryRunOrOptions } : dryRunOrOptions;
+
     this.network = networkEnum;
-    this.dryRun = dryRun;
+    this.dryRun = options.dryRun ?? false;
+    this.apiOptions = { baseUrl: options.baseUrl, timeoutMs: options.timeoutMs };
     this.keypairService = new KeypairService(networkEnum);
-    this.addressApiClient = new AddressApiClient(networkEnum);
-    this.adnrApiClient = new AdnrApiClient(networkEnum);
-    this.rawTransactionApiClient = new RawTransactionApiClient(networkEnum);
-    this.transactionApiClient = new TransactionApiClient(networkEnum);
-    this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum);
+    this.addressApiClient = new AddressApiClient(networkEnum, this.apiOptions);
+    this.adnrApiClient = new AdnrApiClient(networkEnum, this.apiOptions);
+    this.rawTransactionApiClient = new RawTransactionApiClient(networkEnum, this.apiOptions);
+    this.transactionApiClient = new TransactionApiClient(networkEnum, this.apiOptions);
+    this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
   }
 
   // Keypairs
@@ -75,6 +98,11 @@ export class VfxClient {
   };
 
   public privateKeyFromMneumonic = (mnemonic: string, index: number): string => {
+    return this.keypairService.privateKeyFromMneumonic(mnemonic, index);
+  };
+
+  /** Correctly-spelled alias for privateKeyFromMneumonic (same derivation). */
+  public privateKeyFromMnemonic = (mnemonic: string, index: number): string => {
     return this.keypairService.privateKeyFromMneumonic(mnemonic, index);
   };
 
@@ -96,12 +124,12 @@ export class VfxClient {
   };
 
   // Explorer API
-  public getAddressDetails = (address: string): Promise<VfxAddress | null> => {
-    return this.addressApiClient.getAddressDetails(address);
+  public getAddressDetails = (address: string, opts: { strict?: boolean } = {}): Promise<VfxAddress | null> => {
+    return this.addressApiClient.getAddressDetails(address, opts);
   };
 
-  public domainAvailable = (domain: string): Promise<boolean> => {
-    return this.addressApiClient.domainAvailable(domain);
+  public domainAvailable = (domain: string, opts: { strict?: boolean } = {}): Promise<boolean> => {
+    return this.addressApiClient.domainAvailable(domain, opts);
   };
 
   // Transactions
@@ -111,12 +139,13 @@ export class VfxClient {
       keypair: keypair,
       toAddress: toAddress,
       amount: amount,
+      apiOptions: this.apiOptions,
     });
     return await txBuilder.process(this.dryRun);
   };
 
-  public lookupDomain = async (domain: string): Promise<string | null> => {
-    return this.addressApiClient.lookupDomain(domain);
+  public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
+    return this.addressApiClient.lookupDomain(domain, opts);
   };
 
   public lookupBtcDomain = async (domain: string): Promise<string | null> => {
@@ -134,14 +163,14 @@ export class VfxClient {
       throw new Error(`Invalid vfx domain: ${domain}`);
     }
 
-    const addressApiClient = new AddressApiClient(this.network);
-
-    const addressDetails = await addressApiClient.getAddressDetails(keypair.address);
+    // strict: an API outage must fail the purchase, not read as
+    // "no domain yet / domain available".
+    const addressDetails = await this.addressApiClient.getAddressDetails(keypair.address, { strict: true });
     if (addressDetails && addressDetails.adnr != null) {
       throw new Error(`Address already has a domain: ${addressDetails.adnr}`);
     }
 
-    const available = await addressApiClient.domainAvailable(domain);
+    const available = await this.addressApiClient.domainAvailable(domain, { strict: true });
 
     if (!available) {
       throw new Error(`Domain already exists: ${domain}`);
@@ -159,6 +188,7 @@ export class VfxClient {
       amount: DOMAIN_PURCHASE_COST,
       txType: TxType.Adnr,
       data: data,
+      apiOptions: this.apiOptions,
     });
 
     return await txBuilder.process(this.dryRun);
@@ -171,9 +201,8 @@ export class VfxClient {
       throw new Error(`Invalid btc domain: ${domain}`);
     }
 
-    const addressApiClient = new AddressApiClient(this.network);
-
-    const available = await addressApiClient.domainAvailable(domain);
+    // strict: an API outage must fail the purchase, not read as available.
+    const available = await this.addressApiClient.domainAvailable(domain, { strict: true });
 
     if (!available) {
       throw new Error(`Domain already exists: ${domain}`);
@@ -201,6 +230,7 @@ export class VfxClient {
       amount: DOMAIN_PURCHASE_COST,
       txType: TxType.Adnr,
       data: data,
+      apiOptions: this.apiOptions,
     });
 
     return await txBuilder.process(this.dryRun);

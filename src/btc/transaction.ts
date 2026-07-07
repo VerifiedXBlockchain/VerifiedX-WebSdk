@@ -42,9 +42,11 @@ export default class TransactionService {
     network: bitcoin.Network;
     apiBaseUrl: string;
 
-    constructor(isTestnet: boolean) {
+    constructor(isTestnet: boolean, apiBaseUrl?: string) {
         this.network = isTestnet ? TESTNET : MAINNET;
-        this.apiBaseUrl = isTestnet ? 'https://mempool.space/testnet4/api' : 'https://mempool.space/api';
+        // Overridable so a mempool.space outage or testnet generation change
+        // (testnet3 -> testnet4 -> ...) doesn't require an SDK release.
+        this.apiBaseUrl = apiBaseUrl ?? (isTestnet ? 'https://mempool.space/testnet4/api' : 'https://mempool.space/api');
     }
 
     private _buildCreateResponse(success: boolean, result: string | null, error: string | null = null): CreateTxResponse {

@@ -24,6 +24,7 @@ export {
 
 // Export service classes
 export { KeypairService, TransactionService, AccountService, BtcClient };
+export type { BtcClientOptions } from './client';
 
 // Default export - the main client
 export default BtcClient;

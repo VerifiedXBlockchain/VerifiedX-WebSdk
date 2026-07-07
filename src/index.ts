@@ -2,6 +2,11 @@ import { VfxClient } from './client/vfx-client';
 
 // Export main VFX client
 export { VfxClient };
+export type { VfxClientOptions } from './client/vfx-client';
+
+// Export API error type + media client
+export { VfxApiError } from './client/base-api-client';
+export { MediaApiClient } from './client/media-api-client';
 
 // Export VFX enums
 export { Network, TxType } from './constants';

@@ -1,7 +1,10 @@
 // Browser-compatible exports with polyfills included
-import { VfxClient as OriginalVfxClient } from '../client/vfx-client';
+import { VfxClient as OriginalVfxClient, VfxClientOptions } from '../client/vfx-client';
 import { BrowserKeypairService } from './services/keypair-service';
 import { Network, TxType } from '../constants';
+
+export type { VfxClientOptions } from '../client/vfx-client';
+export { VfxApiError } from '../client/base-api-client';
 
 // Re-export common interfaces and types from main package
 export type {
@@ -30,8 +33,8 @@ export * as btc from './btc';
 export class BrowserVfxClient extends OriginalVfxClient {
   private browserKeypairService: BrowserKeypairService;
 
-  constructor(network: Network) {
-    super(network);
+  constructor(network: Network, dryRunOrOptions: boolean | VfxClientOptions = false) {
+    super(network, dryRunOrOptions);
     this.browserKeypairService = new BrowserKeypairService(network);
   }
 
@@ -54,8 +57,8 @@ export class BrowserVfxClient extends OriginalVfxClient {
 }
 
 // Create a factory function that matches the original API
-export function VfxClient(network: Network): BrowserVfxClient {
-  return new BrowserVfxClient(network);
+export function VfxClient(network: Network, dryRunOrOptions: boolean | VfxClientOptions = false): BrowserVfxClient {
+  return new BrowserVfxClient(network, dryRunOrOptions);
 }
 
 // Export constants
