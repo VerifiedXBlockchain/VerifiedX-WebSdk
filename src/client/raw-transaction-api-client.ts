@@ -1,9 +1,10 @@
 import { Network } from '../constants';
 import { BaseApiClient } from './base-api-client';
+import { IApiClientOptions } from './address-api-client';
 
 export class RawTransactionApiClient extends BaseApiClient {
-  constructor(network: Network) {
-    super({ basePath: '/raw', network: network });
+  constructor(network: Network, options: IApiClientOptions = {}) {
+    super({ basePath: '/raw', network: network, ...options });
   }
 
   async getTimestamp(): Promise<number> {
@@ -12,7 +13,7 @@ export class RawTransactionApiClient extends BaseApiClient {
   }
 
   async getNonce(address: string): Promise<number> {
-    const text = await this.makeTextRequest(`/nonce/${address}/`, 'POST');
+    const text = await this.makeTextRequest(`/nonce/${encodeURIComponent(address)}/`, 'POST');
     return Number(text);
   }
 
@@ -39,7 +40,13 @@ export class RawTransactionApiClient extends BaseApiClient {
   }
 
   async validateSignature(message: string, address: string, signature: string): Promise<boolean> {
-    return this.makeBoolRequest(`/validate-signature/${message}/${address}/${signature}/`, 'POST');
+    // Signatures are base64 and can contain '/', '+', '=' — percent-encode
+    // every segment. Verified live (2026-07-07): the API accepts both raw
+    // and encoded forms; encoded is the robust choice.
+    return this.makeBoolRequest(
+      `/validate-signature/${encodeURIComponent(message)}/${encodeURIComponent(address)}/${encodeURIComponent(signature)}/`,
+      'POST',
+    );
   }
 
   async verifyTransaction(txData: Record<string, unknown>): Promise<boolean> {

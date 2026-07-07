@@ -10,6 +10,7 @@ export interface IRawTransactionServiceOptions {
   txType?: number;
   amount?: number;
   data?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  apiOptions?: { baseUrl?: string; timeoutMs?: number };
 }
 
 export class RawTransactionService {
@@ -20,6 +21,7 @@ export class RawTransactionService {
   private amount: number;
   private data: Record<string, unknown> | Array<Record<string, unknown>> | null;
   private fromAddress: string;
+  private apiOptions: { baseUrl?: string; timeoutMs?: number };
 
   private hash: string | null = null;
   private nonce: number | null = null;
@@ -35,6 +37,7 @@ export class RawTransactionService {
     this.amount = options.amount ?? 0;
     this.data = options.data ?? null;
     this.fromAddress = this.keypair.address;
+    this.apiOptions = options.apiOptions ?? {};
   }
 
   private updateTransactionData(): Record<string, unknown> {
@@ -55,7 +58,7 @@ export class RawTransactionService {
   }
 
   async process(dryRun = false): Promise<string | null> {
-    const client = new RawTransactionApiClient(this.network);
+    const client = new RawTransactionApiClient(this.network, this.apiOptions);
     const keypairService = new KeypairService(this.network);
 
     try {

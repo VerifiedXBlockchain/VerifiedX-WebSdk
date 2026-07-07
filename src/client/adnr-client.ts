@@ -1,14 +1,15 @@
 import { Network } from '../constants';
 import { BaseApiClient } from './base-api-client';
+import { IApiClientOptions } from './address-api-client';
 
 export class AdnrApiClient extends BaseApiClient {
-  constructor(network: Network) {
-    super({ basePath: '/adnr', network: network });
+  constructor(network: Network, options: IApiClientOptions = {}) {
+    super({ basePath: '/adnr', network: network, ...options });
   }
 
   public lookupBtcDomain = async (domain: string): Promise<string | null> => {
     try {
-      const result = await this.makeJsonRequest(`/${domain}/`);
+      const result = await this.makeJsonRequest(`/${encodeURIComponent(domain)}/`);
       return result?.btc_address || null;
     } catch (e) {
       return null;
@@ -17,10 +18,9 @@ export class AdnrApiClient extends BaseApiClient {
 
   public lookupBtcDomainFromBtcAddress = async (address: string): Promise<string | null> => {
     try {
-      const result = await this.makeJsonRequest(`/btc/${address}/`);
+      const result = await this.makeJsonRequest(`/btc/${encodeURIComponent(address)}/`);
       return result?.domain || null;
     } catch (e) {
-      console.log(e)
       return null;
     }
   };

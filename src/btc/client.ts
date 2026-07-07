@@ -10,6 +10,15 @@ import type {
   IFeeRates
 } from './types';
 
+export interface BtcClientOptions {
+  dryRun?: boolean;
+  /**
+   * Override the mempool.space-style API origin (including /api), e.g.
+   * 'https://mempool.space/testnet4/api' or a self-hosted mempool instance.
+   */
+  apiBaseUrl?: string;
+}
+
 export default class BtcClient {
   private keypairService: KeypairService;
   private transactionService: TransactionService;
@@ -17,13 +26,21 @@ export default class BtcClient {
   private isTestnet: boolean;
   private dryRun: boolean;
 
-  constructor(network: "mainnet" | "testnet" = "mainnet", dryRun = false) {
+  /**
+   * @param network 'mainnet' | 'testnet'
+   * @param dryRunOrOptions boolean dryRun (historical signature) or a
+   *   BtcClientOptions object: new BtcClient('testnet', { apiBaseUrl: '...' })
+   */
+  constructor(network: "mainnet" | "testnet" = "mainnet", dryRunOrOptions: boolean | BtcClientOptions = false) {
     this.isTestnet = network === "testnet";
-    this.dryRun = dryRun;
+
+    const options: BtcClientOptions =
+      typeof dryRunOrOptions === 'boolean' ? { dryRun: dryRunOrOptions } : dryRunOrOptions;
+    this.dryRun = options.dryRun ?? false;
 
     this.keypairService = new KeypairService(this.isTestnet);
-    this.transactionService = new TransactionService(this.isTestnet);
-    this.accountService = new AccountService(this.isTestnet);
+    this.transactionService = new TransactionService(this.isTestnet, options.apiBaseUrl);
+    this.accountService = new AccountService(this.isTestnet, options.apiBaseUrl);
   }
 
   // Keypair generation and management

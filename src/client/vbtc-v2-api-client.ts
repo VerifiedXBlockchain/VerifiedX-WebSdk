@@ -79,8 +79,8 @@ interface SignedSendBody {
 }
 
 export class VbtcV2ApiClient extends BaseApiClient {
-  constructor(network: Network) {
-    super({ basePath: '/btc', network });
+  constructor(network: Network, options: { baseUrl?: string; timeoutMs?: number } = {}) {
+    super({ basePath: '/btc', network, ...options });
   }
 
   // Reads

@@ -1,9 +1,10 @@
 import { Network } from '../constants';
 import { BaseApiClient } from './base-api-client';
+import { IApiClientOptions } from './address-api-client';
 
 export class MediaApiClient extends BaseApiClient {
-    constructor(network: Network) {
-        super({ basePath: '/media', network: network });
+    constructor(network: Network, options: IApiClientOptions = {}) {
+        super({ basePath: '/media', network: network, ...options });
     }
 
     public uploadAsset = async (file: File, metadata?: Record<string, string>): Promise<string | null> => {
@@ -22,7 +23,6 @@ export class MediaApiClient extends BaseApiClient {
             const result = await this.makeMultipartRequest('/', formData);
             return result;
         } catch (error) {
-            console.error('Upload failed:', error);
             return null;
         }
     }

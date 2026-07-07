@@ -8,6 +8,7 @@ esbuild.build({
   format: 'esm',
   platform: 'browser',
   target: ['es2020'],
+  minify: true,
   sourcemap: true,
   external: [], // Bundle everything
   define: {
@@ -35,6 +36,7 @@ esbuild.build({
   globalName: 'VfxWebSDK',
   platform: 'browser',
   target: ['es2020'],
+  minify: true,
   sourcemap: true,
   external: [], // Bundle everything
   define: {

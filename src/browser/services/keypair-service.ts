@@ -1,72 +1,60 @@
 import CryptoJS from 'crypto-js';
-import base58 from 'bs58';
-import * as secp256k1 from '@noble/secp256k1';
 import * as bip39 from 'bip39';
-import {
-  arrayToHex,
-  byteArrayToWordArray,
-  concatArrays,
-  hexStringToByteArray,
-  hexToString,
-  isValidPrivateKey,
-  normalizePrivateKey,
-  wordArrayToByteArray,
-} from '../utils';
+import KeypairService from '../../services/keypair-service';
+import { isValidPrivateKey } from '../utils';
 import { Network } from '../../constants';
 
-// Browser-compatible Buffer polyfill
-const BufferPolyfill = {
-  from: (data: string | Uint8Array, encoding?: string): Uint8Array => {
-    if (typeof data === 'string') {
-      if (encoding === 'hex') {
-        return new Uint8Array(data.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
-      }
-      return new TextEncoder().encode(data);
-    }
-    return data;
-  },
-  toString: (buffer: Uint8Array, encoding: string): string => {
-    if (encoding === 'hex') {
-      return Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-    if (encoding === 'base64') {
-      return btoa(String.fromCharCode(...buffer));
-    }
-    return new TextDecoder().decode(buffer);
-  }
-};
-
+/**
+ * Browser-facing keypair service.
+ *
+ * Key generation, public-key/address derivation and signing delegate to the
+ * canonical KeypairService: its dependency chain (elliptic, secp256k1's
+ * pure-JS build, crypto-js, bip32) is fully browser-bundleable, and using a
+ * single implementation guarantees browser output is byte-identical to
+ * Node/CLI/web-wallet output. The previous @noble/secp256k1-based signing
+ * path here broke with noble v3 ("hashes.sha256 not set") and, even when
+ * wired, produced a different signature encoding than the rest of the
+ * ecosystem.
+ */
 export class BrowserKeypairService {
   network: Network;
+  private inner: KeypairService;
 
   constructor(network: Network) {
     this.network = network;
+    this.inner = new KeypairService(network);
   }
 
   public generatePrivateKey(): string {
-    let privateKey: CryptoJS.lib.WordArray;
-
-    do {
-      privateKey = CryptoJS.lib.WordArray.random(32);
-    } while (!isValidPrivateKey(privateKey));
-
-    // Prepend 00 for CLI BigInteger compatibility
-    return '00' + privateKey.toString(CryptoJS.enc.Hex);
+    return this.inner.generatePrivateKey();
   }
 
   public generateMnemonic(words: 12 | 24 = 12): string {
-    return bip39.generateMnemonic(words == 12 ? 128 : 256);
+    return this.inner.generateMnemonic(words);
   }
 
+  /**
+   * Derives via BIP32 m/0'/0'/index' — identical to the canonical
+   * privateKeyFromMneumonic and to the Node/CLI/web-wallet derivation.
+   *
+   * BREAKING BEHAVIOR NOTE (v3.1.0): earlier browser builds derived a
+   * different, non-BIP32 key from the same mnemonic. If you stored funds on
+   * an address created by THIS method in the browser before v3.1.0, recover
+   * it with privateKeyFromMnemonicLegacyBrowser.
+   */
   public privateKeyFromMnemonic(mnemonic: string, index: number): string {
-    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    return this.inner.privateKeyFromMneumonic(mnemonic, index);
+  }
 
-    // Use WebCrypto API for HD key derivation (simplified for browser)
-    // Note: This is a simplified implementation. For full BIP32 support,
-    // you might want to use @scure/bip32 which is browser-compatible
+  /**
+   * Pre-v3.1.0 browser-only mnemonic derivation (SHA256 of BIP39 seed +
+   * index). NOT compatible with the rest of the ecosystem — exists solely so
+   * funds on legacy browser-derived addresses can be recovered.
+   */
+  public privateKeyFromMnemonicLegacyBrowser(mnemonic: string, index: number): string {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
     const seedArray = new Uint8Array(seed);
 
-    // Simple deterministic derivation based on index
     const indexBytes = new Uint8Array(4);
     indexBytes[0] = (index >>> 24) & 0xff;
     indexBytes[1] = (index >>> 16) & 0xff;
@@ -82,15 +70,29 @@ export class BrowserKeypairService {
     return '00' + hash.toString(CryptoJS.enc.Hex);
   }
 
+  /**
+   * Derives via the canonical email/password scheme (51x SHA256 seed ->
+   * BIP32 m/0'/0'/index'), matching Node/CLI/web-wallet output.
+   *
+   * BREAKING BEHAVIOR NOTE (v3.1.0): earlier browser builds of THIS class
+   * derived a different, non-BIP32 key. BrowserVfxClient was unaffected (it
+   * always inherited the canonical implementation). Recover legacy keys with
+   * privateKeyFromEmailPasswordLegacyBrowser.
+   */
   public privateKeyFromEmailPassword(email: string, password: string, index = 0): string {
-    // Normalize email
+    return this.inner.privateKeyFromEmailPassword(email, password, index);
+  }
+
+  /**
+   * Pre-v3.1.0 browser-only email/password derivation. NOT compatible with
+   * the rest of the ecosystem — exists solely for fund recovery.
+   */
+  public privateKeyFromEmailPasswordLegacyBrowser(email: string, password: string, index = 0): string {
     email = email.toLowerCase();
 
-    // Create seed string with entropy
     let seed = `${email}|${password}|`;
     seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
 
-    // Fixed values for cross-platform wallet compatibility
     const chars = 1;
     const upperChars = 1;
     const numbers = 1;
@@ -98,16 +100,12 @@ export class BrowserKeypairService {
     seed = `${seed}${(chars + upperChars + numbers) * password.length}3571`;
     seed = `${seed}${seed}`;
 
-    // Hash the seed 50 times
     for (let i = 0; i <= 50; i++) {
       seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
     }
 
-    // For browser, we need to use a simplified approach since we don't have full BIP32
-    // Convert the seed string to bytes (treating it as UTF-8, not hex)
     const seedBytes = new TextEncoder().encode(seed);
 
-    // Simple deterministic derivation based on index
     const indexBytes = new Uint8Array(4);
     indexBytes[0] = (index >>> 24) & 0xff;
     indexBytes[1] = (index >>> 16) & 0xff;
@@ -121,7 +119,6 @@ export class BrowserKeypairService {
     const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
     const privateKey = hash.toString(CryptoJS.enc.Hex);
 
-    // Validate private key
     const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
     if (!isValidPrivateKey(privateKeyWordArray)) {
       throw new Error('Generated private key is invalid');
@@ -132,65 +129,15 @@ export class BrowserKeypairService {
   }
 
   public publicFromPrivate(privateKey: string): string {
-    // Normalize to handle both 64 and 66 char formats
-    const normalized = normalizePrivateKey(privateKey.toLowerCase());
-    const privateKeyBytes = BufferPolyfill.from(normalized, 'hex');
-    const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false); // uncompressed
-    return BufferPolyfill.toString(publicKeyBytes, 'hex');
+    return this.inner.publicFromPrivate(privateKey);
   }
 
   public addressFromPrivate(privateKey: string): string {
-    // Normalize to handle both 64 and 66 char formats
-    const normalized = normalizePrivateKey(privateKey.toLowerCase());
-    const privateKeyBytes = BufferPolyfill.from(normalized, 'hex');
-    const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes, false);
-    const publicKeyHex = BufferPolyfill.toString(publicKeyBytes, 'hex');
-
-    const pubKeySha = CryptoJS.SHA256(hexToString(publicKeyHex));
-    const pubKeyShaRipe = CryptoJS.RIPEMD160(pubKeySha);
-
-    const preHashWNetworkData = concatArrays([
-      new Uint8Array(this.network == Network.Testnet ? [0x89] : [0x3c]),
-      wordArrayToByteArray(pubKeyShaRipe),
-    ]);
-
-    const publicHash = CryptoJS.SHA256(byteArrayToWordArray(preHashWNetworkData));
-    const publicHashHash = CryptoJS.SHA256(publicHash);
-    const checksum = publicHashHash.toString(CryptoJS.enc.Hex).slice(0, 8);
-
-    const address = `${arrayToHex(preHashWNetworkData)}${checksum}`;
-    const base54Address = base58.encode(hexStringToByteArray(address));
-
-    return base54Address;
+    return this.inner.addressFromPrivate(privateKey);
   }
 
   public getSignature(message: string, privateKeyHex: string): string {
-    // Normalize to handle both 64 and 66 char formats
-    const normalized = normalizePrivateKey(privateKeyHex);
-
-    const data = CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
-
-    const privateKey = BufferPolyfill.from(normalized, 'hex');
-    const dataBytes = BufferPolyfill.from(data, 'hex');
-
-    // Use @noble/secp256k1 for browser-compatible signing
-    const signature = secp256k1.sign(dataBytes, privateKey);
-
-    // Get DER encoded signature directly
-    const derSignature = signature.toDERRawBytes ? signature.toDERRawBytes() : signature;
-    const signatureBase64 = BufferPolyfill.toString(derSignature, 'base64');
-
-    let publicKeyHex = this.publicFromPrivate(normalized);
-    if (publicKeyHex.substring(0, 2) === '04') {
-      publicKeyHex = publicKeyHex.substring(2);
-    }
-
-    const publicKeyBuffer = BufferPolyfill.from(publicKeyHex, 'hex');
-    const publicKeyBufferBase58 = base58.encode(publicKeyBuffer);
-
-    const fullSignature = `${signatureBase64}.${publicKeyBufferBase58}`;
-
-    return fullSignature;
+    return this.inner.getSignature(message, privateKeyHex);
   }
 }
 

@@ -1,10 +1,11 @@
 import { Network } from '../constants';
 import { PaginatedResponse, Transaction } from '../types';
 import { BaseApiClient } from './base-api-client';
+import { IApiClientOptions } from './address-api-client';
 
 export class TransactionApiClient extends BaseApiClient {
-  constructor(network: Network) {
-    super({ basePath: '/transaction', network: network });
+  constructor(network: Network, options: IApiClientOptions = {}) {
+    super({ basePath: '/transaction', network: network, ...options });
   }
 
   public listTransactionsForAddress = async (
@@ -13,9 +14,8 @@ export class TransactionApiClient extends BaseApiClient {
     limit = 10,
   ): Promise<PaginatedResponse<Transaction> | null> => {
     try {
-      return await this.makeJsonRequest(`/address/${address}/`, 'GET', { page: page, limit: limit });
+      return await this.makeJsonRequest(`/address/${encodeURIComponent(address)}/`, 'GET', { page: page, limit: limit });
     } catch (e) {
-      console.log(e);
       return null;
     }
   };

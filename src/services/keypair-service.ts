@@ -1,14 +1,14 @@
 import CryptoJS from 'crypto-js';
 import base58 from 'bs58';
 import EC from 'elliptic';
-import * as ecc from 'tiny-secp256k1';
+import ecc from '@bitcoinerlab/secp256k1';
 import * as bip39 from 'bip39';
 import { BIP32Factory } from 'bip32';
-import secp256k1 from 'secp256k1';
 import {
   arrayToHex,
   byteArrayToWordArray,
   concatArrays,
+  getSecureRandomBytes,
   hexStringToByteArray,
   hexToString,
   isValidPrivateKey,
@@ -16,6 +16,9 @@ import {
   wordArrayToByteArray,
 } from '../utils';
 import { Network } from '../constants';
+
+// Curve context construction is the expensive part of elliptic — build once.
+const secp256k1Curve = new EC.ec('secp256k1');
 
 export class KeypairService {
   network: Network;
@@ -25,10 +28,12 @@ export class KeypairService {
   }
 
   public generatePrivateKey(): string {
+    // Native CSPRNG only — CryptoJS.lib.WordArray.random (crypto-js 3.x) is
+    // seeded from Math.random and must never be used for key material.
     let privateKey: CryptoJS.lib.WordArray;
 
     do {
-      privateKey = CryptoJS.lib.WordArray.random(32);
+      privateKey = byteArrayToWordArray(getSecureRandomBytes(32));
     } while (!isValidPrivateKey(privateKey));
 
     // Prepend 00 for CLI BigInteger compatibility
@@ -90,22 +95,18 @@ export class KeypairService {
   }
 
   public publicFromPrivate(privateKey: string): string {
-    const curve = new EC.ec('secp256k1');
-
     // Normalize to handle both 64 and 66 char formats
     const normalized = normalizePrivateKey(privateKey.toLowerCase());
     const buffer = Buffer.from(normalized, 'hex');
-    const keyPair = curve.keyFromPrivate(buffer);
+    const keyPair = secp256k1Curve.keyFromPrivate(buffer);
     return keyPair.getPublic('hex');
   }
 
   public addressFromPrivate(privateKey: string): string {
-    const curve = new EC.ec('secp256k1');
-
     // Normalize to handle both 64 and 66 char formats
     const normalized = normalizePrivateKey(privateKey.toLowerCase());
     const buffer = Buffer.from(normalized, 'hex');
-    const keyPair = curve.keyFromPrivate(buffer);
+    const keyPair = secp256k1Curve.keyFromPrivate(buffer);
     const publicKey = keyPair.getPublic('hex');
 
     const pubKeySha = CryptoJS.SHA256(hexToString(publicKey));
@@ -139,10 +140,13 @@ export class KeypairService {
     const privateKey = Buffer.from(normalized, 'hex');
     const dataBuffer = Buffer.from(data, 'hex');
 
-    const { signature } = secp256k1.ecdsaSign(dataBuffer, privateKey);
-    const derEncodedSignature = secp256k1.signatureExport(signature);
+    // RFC6979 deterministic k + canonical low-s, DER-encoded — byte-identical
+    // to the former native secp256k1 ecdsaSign/signatureExport output
+    // (locked by the compat golden vectors).
+    const keyPair = secp256k1Curve.keyFromPrivate(privateKey);
+    const derEncodedSignature = Buffer.from(keyPair.sign(dataBuffer, { canonical: true }).toDER());
 
-    const signatureBase64 = Buffer.from(derEncodedSignature).toString('base64');
+    const signatureBase64 = derEncodedSignature.toString('base64');
 
     let publicKeyHex = this.publicFromPrivate(normalized);
     if (publicKeyHex.substring(0, 2) === '04') {

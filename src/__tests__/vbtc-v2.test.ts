@@ -1,45 +1,42 @@
 import { VfxClient } from '../index';
 import { VbtcProgressEvent } from '../types';
+import { installFetch } from './helpers/mock-fetch';
 
-type FetchHandler = (url: string, init?: RequestInit) => unknown;
+describe('vBTC V2 — dryRun guard', () => {
+  test('all mutating vBTC flows throw immediately on a dryRun client', async () => {
+    const client = new VfxClient('testnet', true);
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
 
-interface CapturedCall {
-  url: string;
-  method: string;
-  body: Record<string, unknown> | null;
-}
+    const common = { scIdentifier: 'sc-1', privateKey: '00' + '11'.repeat(32) };
+    await expect(
+      client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.createVbtcToken({ ...common, ownerAddress: 'xA', name: 'n', description: 'd', ticker: 'T' }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.requestWithdrawal({ ...common, requestorAddress: 'xA', btcAddress: 'bc1q', amount: 1, feeRate: 5 }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.completeWithdrawal({
+        ...common,
+        requestorAddress: 'xA',
+        withdrawalRequestHash: 'WR',
+        btcAddress: 'bc1q',
+        amount: 1,
+        feeRate: 5,
+      }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.cancelWithdrawal({ ...common, ownerAddress: 'xA', withdrawalRequestHash: 'WR' }),
+    ).rejects.toThrow(/dryRun/);
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
+    // Guard fires before any network activity.
+    expect(fetchMock).not.toHaveBeenCalled();
+    jest.resetAllMocks();
   });
-}
-
-function parseBody(init?: RequestInit): Record<string, unknown> | null {
-  if (!init?.body) return null;
-  return JSON.parse(init.body as string);
-}
-
-function installFetch(handlers: Record<string, FetchHandler>): { calls: CapturedCall[] } {
-  const calls: CapturedCall[] = [];
-  global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    const body = parseBody(init);
-    calls.push({ url, method: init?.method ?? 'GET', body });
-
-    for (const [pattern, handler] of Object.entries(handlers)) {
-      if (url.includes(pattern)) {
-        const result = handler(url, init);
-        if (result instanceof Response) return result;
-        return jsonResponse(result);
-      }
-    }
-    throw new Error(`No mock handler for URL: ${url}`);
-  }) as unknown as typeof fetch;
-
-  return { calls };
-}
+});
 
 describe('vBTC V2 — read methods', () => {
   let client: VfxClient;

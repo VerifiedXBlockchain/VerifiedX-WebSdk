@@ -112,47 +112,53 @@ export default class KeypairService {
 
     public signMessage(wif: string, message: string) {
         const keyPair = ECPair.fromWIF(wif, this.network);
-        const messageBuffer = Buffer.from(message, 'utf8')
-
-        const messageHash = bitcoin.crypto.hash256(messageBuffer);
-        const signature = keyPair.sign(messageHash);
-
-        const derEncodedSignature = signature.toString('hex');
-        const publicKeyHex = keyPair.publicKey.toString('hex');
-
-        const fullSignature = `30440220${injectAfter64thChar(derEncodedSignature, '0220')}.${publicKeyHex}`;
-
-        return fullSignature;
+        return this.signWithKeyPair(keyPair, message);
     }
 
 
     public signMessageWithPrivateKey(privateKeyHex: string, message: string) {
         const privateKeyBytes = Buffer.from(privateKeyHex, 'hex');
-
         const keyPair = ECPair.fromPrivateKey(privateKeyBytes);
+        return this.signWithKeyPair(keyPair, message);
+    }
 
-
+    private signWithKeyPair(keyPair: ECPairInterface, message: string) {
         const messageBuffer = Buffer.from(message, 'utf8')
 
         const messageHash = bitcoin.crypto.hash256(messageBuffer);
-        const signature = keyPair.sign(messageHash);
+        const signature = keyPair.sign(messageHash); // 64-byte compact r||s
 
-        const derEncodedSignature = signature.toString('hex');
+        const derEncodedSignature = compactSignatureToDER(Buffer.from(signature)).toString('hex');
         const publicKeyHex = keyPair.publicKey.toString('hex');
 
-        const fullSignature = `30440220${injectAfter64thChar(derEncodedSignature, '0220')}.${publicKeyHex}`;
-
-        return fullSignature;
+        return `${derEncodedSignature}.${publicKeyHex}`;
     }
 
 }
 
-function injectAfter64thChar(inputString: string, charToInject: string) {
-    // Check if the input string has at least 64 characters
-    if (inputString.length <= 64) {
-        return inputString + charToInject;
-    }
+/**
+ * Canonical DER encoding of a 64-byte compact (r||s) signature.
+ *
+ * Replaces a hand-rolled `3044 0220 r 0220 s` layout that produced invalid
+ * DER whenever r's high bit was set (~50% of signatures) or r had leading
+ * zero bytes. Verified against the VerifiedX node's vendored NBitcoin
+ * verifier (2026-07-07): it accepts canonical DER for all cases, including
+ * ones the old layout encoded incorrectly.
+ */
+function compactSignatureToDER(compact: Buffer): Buffer {
+    const encodeInteger = (bytes: Buffer): Buffer => {
+        let b = bytes;
+        while (b.length > 1 && b[0] === 0x00 && !(b[1] & 0x80)) {
+            b = b.subarray(1);
+        }
+        if (b[0] & 0x80) {
+            b = Buffer.concat([Buffer.from([0x00]), b]);
+        }
+        return Buffer.concat([Buffer.from([0x02, b.length]), b]);
+    };
 
-    // Inject the character after the 64th character
-    return inputString.slice(0, 64) + charToInject + inputString.slice(64);
+    const r = encodeInteger(compact.subarray(0, 32));
+    const s = encodeInteger(compact.subarray(32, 64));
+    const body = Buffer.concat([r, s]);
+    return Buffer.concat([Buffer.from([0x30, body.length]), body]);
 }
