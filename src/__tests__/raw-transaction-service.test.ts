@@ -36,7 +36,18 @@ function buildService(): RawTransactionService {
   });
 }
 
+// process() reports failures via console.error before returning null (the
+// only diagnostics its null-contract allows). Capture it so intentional
+// failure-path tests stay silent — and assert on it, since that logging IS
+// part of the observable behavior.
+let consoleErrorSpy: jest.SpyInstance;
+
+beforeEach(() => {
+  consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
 afterEach(() => {
+  consoleErrorSpy.mockRestore();
   jest.resetAllMocks();
 });
 
@@ -74,18 +85,21 @@ describe('RawTransactionService.process', () => {
     expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
   });
 
-  test('returns null when the node rejects the signature', async () => {
+  test('returns null and logs when the node rejects the signature', async () => {
     installPipeline({ '/raw/validate-signature/': () => textResponse('false') });
     expect(await buildService().process()).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Invalid Signature' }));
   });
 
-  test('returns null when transaction verification fails', async () => {
+  test('returns null and logs when transaction verification fails', async () => {
     installPipeline({ '/raw/verify/': () => ({ Result: 'Failure', Message: 'bad tx' }) });
     expect(await buildService().process()).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Invalid Transaction' }));
   });
 
-  test('returns null when send fails', async () => {
+  test('returns null and logs when send fails', async () => {
     installPipeline({ '/raw/send/': () => ({ Result: 'Failure' }) });
     expect(await buildService().process()).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Transaction failed to send' }));
   });
 });
