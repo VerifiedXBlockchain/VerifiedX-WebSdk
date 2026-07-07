@@ -4,22 +4,16 @@ import CryptoJS from 'crypto-js';
 import dotenv from 'dotenv';
 import { isValidAddress, isValidPrivateKey, normalizePrivateKey } from '../utils';
 import { Network } from '../constants';
-import { Keypair } from '../types';
 dotenv.config({ path: 'test.env' });
 
 const network: Network = Network.Testnet;
 const dryRun = true;
 
-describe('test env vars', () => {
-  const expectedEnvVars = ['PRIVATE_KEY', 'FROM_ADDRESS', 'TO_ADDRESS'];
-
-  for (const entry of expectedEnvVars) {
-    test(`${entry}`, () => {
-      const item = process.env[entry];
-      expect(item).not.toBe(undefined);
-    });
-  }
-});
+// Environment-backed checks are optional: the suite must pass on a fresh
+// clone with no test.env. Provide PRIVATE_KEY + FROM_ADDRESS to also verify
+// a known key/address pair (the compat suite pins derivation vectors
+// deterministically regardless).
+const hasEnvKeypair = !!process.env.PRIVATE_KEY && !!process.env.FROM_ADDRESS;
 
 describe('generate a private key', () => {
   test('private key should should be valid', () => {
@@ -34,25 +28,11 @@ describe('generate a private key', () => {
   });
 });
 
-describe('address from private key', () => {
-  let PRIVATE_KEYS: string[];
-  let EXPECTED_ADDRESSES: string[];
-
-  beforeAll(() => {
-    PRIVATE_KEYS = [process.env.PRIVATE_KEY ?? ''];
-    EXPECTED_ADDRESSES = [process.env.FROM_ADDRESS ?? ''];
-  });
-
+(hasEnvKeypair ? describe : describe.skip)('address from private key (env)', () => {
   test('private key should generate valid VFX address', () => {
     const client = new VfxClient(network, dryRun);
-
-    for (let i = 0; i < PRIVATE_KEYS.length; i++) {
-      const privateKey = PRIVATE_KEYS[i];
-      const expectedAddress = EXPECTED_ADDRESSES[i];
-
-      const address = client.addressFromPrivate(privateKey);
-      expect(address == expectedAddress).toBe(true);
-    }
+    const address = client.addressFromPrivate(process.env.PRIVATE_KEY as string);
+    expect(address).toBe(process.env.FROM_ADDRESS);
   });
 });
 
@@ -135,83 +115,6 @@ describe('generate private key from email and password', () => {
     expect(address0).not.toBe(address1);
   });
 });
-
-// Commented out 2026-06-12: testnet was reset, so the on-chain state these tests
-// depend on (funded address, test.vfx / ty2.btc domains) no longer exists.
-// Re-enable once the test address is funded and the domains are re-registered.
-// describe('address checks', () => {
-//   let keypair: Keypair;
-//   let client: VfxClient;
-
-//   beforeAll(() => {
-//     client = new VfxClient(network, dryRun);
-
-//     keypair = {
-//       privateKey: process.env.PRIVATE_KEY as string,
-//       publicKey: client.publicFromPrivate(process.env.PRIVATE_KEY as string),
-//       address: client.addressFromPrivate(process.env.PRIVATE_KEY as string),
-//     };
-//   });
-
-//   test('get address details', async () => {
-//     const details = await client.getAddressDetails(keypair.address);
-//     expect(details).toBeTruthy();
-//     expect(details?.balance).toBeGreaterThan(1);
-//   });
-
-//   test('domain exists', async () => {
-//     const exists = await client.domainAvailable('test.vfx');
-//     expect(exists).toEqual(false);
-//   });
-
-//   test('lookup domain', async () => {
-//     const address = await client.lookupDomain('test.vfx');
-//     expect(address).toBeTruthy();
-//     expect(typeof address).toBe('string');
-//   });
-
-//   test('lookup btc domain', async () => {
-//     const btcAddress = await client.lookupBtcDomain('ty2.btc');
-//     expect(btcAddress).toBeTruthy();
-//     expect(typeof btcAddress).toBe('string');
-//   });
-
-//   test('lookup btc domain from btc address', async () => {
-//     const domain = await client.lookupBtcDomainFromBtcAddress('tb1q066af78la3rqmnchc396keujllva6turs52749');
-//     expect(domain).toBeTruthy();
-//     expect(typeof domain).toBe('string');
-//     expect(domain).toContain(".btc")
-//   });
-// });
-
-// describe('transaction checks', () => {
-//   let vfxClient: VfxClient;
-//   let keypair: Keypair;
-//   beforeAll(() => {
-//     vfxClient = new VfxClient(Network.Testnet, dryRun);
-
-//     keypair = {
-//       privateKey: process.env.PRIVATE_KEY as string,
-//       publicKey: vfxClient.publicFromPrivate(process.env.PRIVATE_KEY as string),
-//       address: vfxClient.addressFromPrivate(process.env.PRIVATE_KEY as string),
-//     };
-//   });
-
-//   // test('send coin', async () => {
-//   //   const hash = await vfxClient.sendCoin(keypair, process.env.TO_ADDRESS as string, 1.0);
-//   //   expect(hash).toBeTruthy();
-//   // });
-
-//   // test('buy vfx domain', async () => {
-//   //   const hash = await vfxClient.buyVfxDomain(keypair, 'test123.vfx');
-//   //   expect(hash).toBeTruthy();
-//   // });
-
-//   // test('buy btc domain', async () => {
-//   //   const hash = await vfxClient.buyBtcDomain(keypair, 'test123.btc', "56635d0d93c446076946c9e0c750dcfcef4db63ea156f01928b667b61a6e8f91");
-//   //   expect(hash).toBeTruthy();
-//   // });
-// });
 
 describe('CLI compatibility', () => {
   test('high-bit private keys should work with both 64 and 66 char formats', () => {
