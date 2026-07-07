@@ -41,6 +41,42 @@ function installFetch(handlers: Record<string, FetchHandler>): { calls: Captured
   return { calls };
 }
 
+describe('vBTC V2 — dryRun guard', () => {
+  test('all mutating vBTC flows throw immediately on a dryRun client', async () => {
+    const client = new VfxClient('testnet', true);
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const common = { scIdentifier: 'sc-1', privateKey: '00' + '11'.repeat(32) };
+    await expect(
+      client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.createVbtcToken({ ...common, ownerAddress: 'xA', name: 'n', description: 'd', ticker: 'T' }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.requestWithdrawal({ ...common, requestorAddress: 'xA', btcAddress: 'bc1q', amount: 1, feeRate: 5 }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.completeWithdrawal({
+        ...common,
+        requestorAddress: 'xA',
+        withdrawalRequestHash: 'WR',
+        btcAddress: 'bc1q',
+        amount: 1,
+        feeRate: 5,
+      }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(
+      client.cancelWithdrawal({ ...common, ownerAddress: 'xA', withdrawalRequestHash: 'WR' }),
+    ).rejects.toThrow(/dryRun/);
+
+    // Guard fires before any network activity.
+    expect(fetchMock).not.toHaveBeenCalled();
+    jest.resetAllMocks();
+  });
+});
+
 describe('vBTC V2 — read methods', () => {
   let client: VfxClient;
 

@@ -245,6 +245,7 @@ export class VfxClient {
     amount: number;
     privateKey: string;
   }): Promise<VbtcTransferResult> => {
+    this.assertNotDryRun('transferVbtc');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
@@ -271,6 +272,7 @@ export class VfxClient {
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<CreateVbtcResult> => {
+    this.assertNotDryRun('createVbtcToken');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 4000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -379,6 +381,7 @@ export class VfxClient {
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
+    this.assertNotDryRun('requestWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
 
     // Step 1: Request (Type 27)
@@ -430,6 +433,7 @@ export class VfxClient {
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
+    this.assertNotDryRun('completeWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -546,6 +550,7 @@ export class VfxClient {
     withdrawalRequestHash: string;
     privateKey: string;
   }): Promise<VbtcCancelResult> => {
+    this.assertNotDryRun('cancelWithdrawal');
     const prepared = await this.vbtcV2ApiClient.prepareWithdrawCancel({
       sc_identifier: params.scIdentifier,
       owner_address: params.ownerAddress,
@@ -562,6 +567,18 @@ export class VfxClient {
   };
 
   // -- Internal helpers --------------------------------------------------------
+
+  private assertNotDryRun(label: string): void {
+    // vBTC flows run MPC/FROST ceremonies and broadcast immediately — there
+    // is no meaningful dry-run subset. Before v3.1.0 these methods silently
+    // IGNORED dryRun and moved real funds; failing loudly is the safe fix.
+    if (this.dryRun) {
+      throw new Error(
+        `${label} does not support dryRun mode: this flow signs and broadcasts real transactions. ` +
+          'Construct the VfxClient without dryRun to use it.',
+      );
+    }
+  }
 
   private assertPrepared(response: PreparedTransactionResponse | undefined, label: string): void {
     if (!response?.success || !response.Hash) {
