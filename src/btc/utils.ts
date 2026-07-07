@@ -8,10 +8,26 @@ import { BIP32Factory } from 'bip32';
 import { RegtestUtils } from 'regtest-client';
 import { SATOSHI_TO_BTC_MULTIPLIER } from './constants';
 
-const APIPASS = process.env.APIPASS || 'satoshi';
-const APIURL = process.env.APIURL || 'https://regtest.bitbank.cc/1';
+// Lazy so importing the SDK never constructs regtest tooling or reads env
+// vars; the exported object keeps its historical shape for existing users.
+let _regtestUtils: RegtestUtils | undefined;
 
-export const regtestUtils = new RegtestUtils({ APIPASS, APIURL });
+function getRegtestUtils(): RegtestUtils {
+    if (!_regtestUtils) {
+        const APIPASS = process.env.APIPASS || 'satoshi';
+        const APIURL = process.env.APIURL || 'https://regtest.bitbank.cc/1';
+        _regtestUtils = new RegtestUtils({ APIPASS, APIURL });
+    }
+    return _regtestUtils;
+}
+
+export const regtestUtils = new Proxy({} as RegtestUtils, {
+    get(_target, prop) {
+        const instance = getRegtestUtils();
+        const value = instance[prop as keyof RegtestUtils];
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(instance) : value;
+    },
+});
 
 const ECPair = ECPairFactory(ecc);
 const bip32 = BIP32Factory(ecc);
