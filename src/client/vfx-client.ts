@@ -579,22 +579,68 @@ export class VfxClient {
     });
 
     // Step 4: Record completion (Type 28)
-    const completionPrep = await this.vbtcV2ApiClient.prepareWithdrawCompleteTx({
-      sc_identifier: params.scIdentifier,
-      from_address: params.requestorAddress,
-      withdrawal_request_hash: withdrawalRequestHash,
-      btc_transaction_hash: broadcast.txid,
+    return this.recordWithdrawalCompletion({
+      scIdentifier: params.scIdentifier,
+      requestorAddress: params.requestorAddress,
+      withdrawalRequestHash,
+      btcTransactionHash: broadcast.txid,
       // Caller's real values — frostPrep echoes are 0/"" when prepare raced
       // the node's processing of the Type 27 block (same trap as execute).
       amount: params.amount,
-      btc_destination: params.btcAddress,
+      btcDestination: params.btcAddress,
+      privateKey: params.privateKey,
+      onProgress,
     });
-    this.assertPrepared(completionPrep, 'completeWithdrawal:completion:prepare');
+  };
+
+  /**
+   * Record an already-broadcast withdrawal on the VFX chain (Type 28) without
+   * re-running FROST.
+   *
+   * This is the resume path for a withdrawal whose Bitcoin transaction went out
+   * but whose completion was never recorded — the state that leaves BTC spent
+   * and the vBTC still unburned. `completeWithdrawal` cannot be used to recover
+   * it: that method restarts at the signing ceremony, and because UTXOs are
+   * re-selected live and the validators' double-sign guard is in-memory (so a
+   * validator restart or 24h clears it), a second ceremony can broadcast a
+   * SECOND Bitcoin transaction and pay the destination twice.
+   *
+   * Requires only the values a caller already holds once the broadcast
+   * succeeded — no ceremony session state — so it is safe to call from a fresh
+   * process after a crash, reload, or device switch, provided the txid was
+   * persisted.
+   */
+  public recordWithdrawalCompletion = async (params: {
+    scIdentifier: string;
+    requestorAddress: string;
+    withdrawalRequestHash: string;
+    btcTransactionHash: string;
+    amount: number;
+    btcDestination: string;
+    privateKey: string;
+    onProgress?: (event: VbtcProgressEvent) => void;
+  }): Promise<VbtcWithdrawalResult> => {
+    this.assertNotDryRun('recordWithdrawalCompletion');
+    const onProgress = params.onProgress ?? (() => undefined);
+
+    if (!params.btcTransactionHash) {
+      throw new Error('recordWithdrawalCompletion requires the broadcast btcTransactionHash');
+    }
+
+    const completionPrep = await this.vbtcV2ApiClient.prepareWithdrawCompleteTx({
+      sc_identifier: params.scIdentifier,
+      from_address: params.requestorAddress,
+      withdrawal_request_hash: params.withdrawalRequestHash,
+      btc_transaction_hash: params.btcTransactionHash,
+      amount: params.amount,
+      btc_destination: params.btcDestination,
+    });
+    this.assertPrepared(completionPrep, 'recordWithdrawalCompletion:prepare');
 
     const completionSent = await this.signAndSend(completionPrep, params.privateKey, (body) =>
       this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
     );
-    this.assertSent(completionSent, 'completeWithdrawal:completion:send');
+    this.assertSent(completionSent, 'recordWithdrawalCompletion:send');
 
     onProgress({
       phase: 'completion_recorded',
@@ -603,9 +649,9 @@ export class VfxClient {
     });
 
     return {
-      btcTransactionHash: broadcast.txid,
+      btcTransactionHash: params.btcTransactionHash,
       completionTransactionHash: completionSent.Hash,
-      withdrawalRequestHash,
+      withdrawalRequestHash: params.withdrawalRequestHash,
     };
   };
 
