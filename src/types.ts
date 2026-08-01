@@ -61,6 +61,24 @@ export interface VbtcV2Token {
   created_at: string;
 }
 
+/**
+ * Withdrawal states as served by Spyglass, which lowercases the node's
+ * PascalCase names (VbtcV2WithdrawalRequest.Status). This type previously
+ * admitted only 'requested' and 'completed', so a cancelled withdrawal was a
+ * type error at the boundary.
+ *
+ * 'pending_btc' and 'cancellation_requested' are served by Spyglass from the
+ * release that widened its status set to match the node's six; older
+ * deployments never emit them, so treat them as additive rather than assuming
+ * every backend produces them.
+ */
+export type VbtcWithdrawalStatus =
+  | 'requested'
+  | 'pending_btc'
+  | 'completed'
+  | 'cancelled'
+  | 'cancellation_requested';
+
 export interface VbtcWithdrawalRequest {
   id: number;
   requestor_address: string;
@@ -68,7 +86,13 @@ export interface VbtcWithdrawalRequest {
   amount: string;
   fee_rate: string;
   btc_transaction_hash: string;
-  status: 'requested' | 'completed';
+  /**
+   * Mirrors the node's withdrawal states (VBTCContractV2.cs). `Pending_BTC`
+   * matters most: the Bitcoin transaction is broadcast but the on-chain
+   * completion is not yet recorded, which is the one state where re-running a
+   * withdrawal can pay the destination twice.
+   */
+  status: VbtcWithdrawalStatus;
   request_transaction_hash: string;
   completion_transaction_hash: string | null;
   created_at: string;
