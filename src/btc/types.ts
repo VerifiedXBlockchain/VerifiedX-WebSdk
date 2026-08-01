@@ -11,10 +11,10 @@ export interface IBtcKeypair {
 }
 
 export interface IBtcAddresses {
-  p2pkh: string | undefined;    // Legacy (P2PKH)
-  p2sh: string | undefined;     // Nested Segwit (P2SH-P2WPKH)
-  bech32: string | undefined;   // Native Segwit (P2WPKH)
-  bech32m: string | undefined;  // Taproot (P2TR)
+  p2pkh: string | undefined; // Legacy (P2PKH)
+  p2sh: string | undefined; // Nested Segwit (P2SH-P2WPKH)
+  bech32: string | undefined; // Native Segwit (P2WPKH)
+  bech32m: string | undefined; // Taproot (P2TR)
 }
 
 export interface IAccountInfo {
@@ -115,7 +115,12 @@ export interface ITransactionService {
   apiBaseUrl: string;
   getFeeRates(): Promise<IFeeRates | null>;
   getRawTx(txId: string): Promise<Buffer>;
-  createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>;
+  createTransaction(
+    senderWif: string,
+    recipientAddress: string,
+    amount: number,
+    feeRate?: number,
+  ): Promise<ICreateTxResponse>;
   broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>;
 }
 
@@ -127,30 +132,35 @@ export interface IAccountService {
 
 // Main BTC Client interface
 export interface IBtcClient {
-  new(network: "mainnet" | "testnet", dryRun?: boolean): {
+  new (network: 'mainnet' | 'testnet', dryRun?: boolean): {
     // Keypair generation and management
-    generatePrivateKey: () => IBtcKeypair
-    generateMnemonic: (words?: 12 | 24) => IBtcKeypair
-    privateKeyFromMnemonic: (mnemonic: string, index?: number) => IBtcKeypair
-    publicFromPrivate: (privateKey: string) => IBtcKeypair
-    addressFromPrivate: (privateKey: string) => IBtcKeypair
-    addressFromWif: (wif: string) => IBtcKeypair
-    getSignature: (message: string, privateKey: string) => string
-    getSignatureFromWif: (message: string, wif: string) => string
+    generatePrivateKey: () => IBtcKeypair;
+    generateMnemonic: (words?: 12 | 24) => IBtcKeypair;
+    privateKeyFromMnemonic: (mnemonic: string, index?: number) => IBtcKeypair;
+    publicFromPrivate: (privateKey: string) => IBtcKeypair;
+    addressFromPrivate: (privateKey: string) => IBtcKeypair;
+    addressFromWif: (wif: string) => IBtcKeypair;
+    getSignature: (message: string, privateKey: string) => string;
+    getSignatureFromWif: (message: string, wif: string) => string;
 
     // Account and address info
-    getAddressInfo: (address: string, inSatoshis?: boolean) => Promise<IAccountInfo>
-    getTransactions: (address: string, limit?: number, before?: number | null) => Promise<ITransaction[]>
+    getAddressInfo: (address: string, inSatoshis?: boolean) => Promise<IAccountInfo>;
+    getTransactions: (address: string, limit?: number, before?: number | null) => Promise<ITransaction[]>;
 
     // Transaction operations
-    getFeeRates: () => Promise<IFeeRates | null>
-    createTransaction: (senderWif: string, recipientAddress: string, amount: number, feeRate?: number) => Promise<ICreateTxResponse>
-    broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>
-    sendBtc: (senderWif: string, recipientAddress: string, amount: number, feeRate?: number) => Promise<string | null>
+    getFeeRates: () => Promise<IFeeRates | null>;
+    createTransaction: (
+      senderWif: string,
+      recipientAddress: string,
+      amount: number,
+      feeRate?: number,
+    ) => Promise<ICreateTxResponse>;
+    broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
+    sendBtc: (senderWif: string, recipientAddress: string, amount: number, feeRate?: number) => Promise<string | null>;
 
     // Utility functions
-    getRawTransaction: (txId: string) => Promise<Buffer>
-  }
+    getRawTransaction: (txId: string) => Promise<Buffer>;
+  };
 }
 
 // Global window interface for browser usage
@@ -171,5 +181,5 @@ export type {
   IKeypairService as KeypairService,
   ITransactionService as TransactionService,
   IAccountService as AccountService,
-  IBtcClient as BtcClient
+  IBtcClient as BtcClient,
 };

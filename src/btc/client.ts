@@ -7,7 +7,7 @@ import type {
   ITransaction,
   ICreateTxResponse,
   IBroadcastTxResponse,
-  IFeeRates
+  IFeeRates,
 } from './types';
 
 export interface BtcClientOptions {
@@ -31,8 +31,8 @@ export default class BtcClient {
    * @param dryRunOrOptions boolean dryRun (historical signature) or a
    *   BtcClientOptions object: new BtcClient('testnet', { apiBaseUrl: '...' })
    */
-  constructor(network: "mainnet" | "testnet" = "mainnet", dryRunOrOptions: boolean | BtcClientOptions = false) {
-    this.isTestnet = network === "testnet";
+  constructor(network: 'mainnet' | 'testnet' = 'mainnet', dryRunOrOptions: boolean | BtcClientOptions = false) {
+    this.isTestnet = network === 'testnet';
 
     const options: BtcClientOptions =
       typeof dryRunOrOptions === 'boolean' ? { dryRun: dryRunOrOptions } : dryRunOrOptions;
@@ -90,12 +90,17 @@ export default class BtcClient {
     return this.transactionService.getFeeRates();
   }
 
-  async createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate = 0): Promise<ICreateTxResponse> {
+  async createTransaction(
+    senderWif: string,
+    recipientAddress: string,
+    amount: number,
+    feeRate = 0,
+  ): Promise<ICreateTxResponse> {
     if (this.dryRun) {
       return {
         success: true,
-        result: "dry_run_transaction_hex",
-        error: null
+        result: 'dry_run_transaction_hex',
+        error: null,
       };
     }
     return this.transactionService.createTransaction(senderWif, recipientAddress, amount, feeRate);
@@ -105,8 +110,8 @@ export default class BtcClient {
     if (this.dryRun) {
       return {
         success: true,
-        result: "dry_run_transaction_id",
-        error: null
+        result: 'dry_run_transaction_id',
+        error: null,
       };
     }
     return this.transactionService.broadcastTransaction(transactionHex);

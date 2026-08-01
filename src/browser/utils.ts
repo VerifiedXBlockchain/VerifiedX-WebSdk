@@ -174,7 +174,7 @@ export function hexToString(hex: string): CryptoJS.lib.WordArray {
 // Browser-compatible replacement for Buffer.from().toString('hex')
 export function arrayToHex(uint8: Uint8Array): string {
   return Array.from(uint8)
-    .map(b => b.toString(16).padStart(2, '0'))
+    .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 

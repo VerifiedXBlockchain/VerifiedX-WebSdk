@@ -95,12 +95,20 @@ export class BaseApiClient {
     return response;
   }
 
-  async makeJsonRequest<T = any>(path: string, method: HttpMethod = 'GET', params: Record<string, unknown> = {}): Promise<T> {
+  async makeJsonRequest<T = any>(
+    path: string,
+    method: HttpMethod = 'GET',
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
     const response = await this._makeRequest(path, method, params);
     return response.json();
   }
 
-  async makeTextRequest(path: string, method: HttpMethod = 'GET', params: Record<string, unknown> = {}): Promise<string> {
+  async makeTextRequest(
+    path: string,
+    method: HttpMethod = 'GET',
+    params: Record<string, unknown> = {},
+  ): Promise<string> {
     const response = await this._makeRequest(path, method, params);
     const text = await response.text();
     // Try to parse as JSON and stringify if successful, otherwise return as-is
@@ -112,7 +120,11 @@ export class BaseApiClient {
     }
   }
 
-  async makeBoolRequest(path: string, method: HttpMethod = 'GET', params: Record<string, unknown> = {}): Promise<boolean> {
+  async makeBoolRequest(
+    path: string,
+    method: HttpMethod = 'GET',
+    params: Record<string, unknown> = {},
+  ): Promise<boolean> {
     const text = await this.makeTextRequest(path, method, params);
     return text.trim() === 'true';
   }

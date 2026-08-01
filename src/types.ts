@@ -72,12 +72,7 @@ export interface VbtcV2Token {
  * deployments never emit them, so treat them as additive rather than assuming
  * every backend produces them.
  */
-export type VbtcWithdrawalStatus =
-  | 'requested'
-  | 'pending_btc'
-  | 'completed'
-  | 'cancelled'
-  | 'cancellation_requested';
+export type VbtcWithdrawalStatus = 'requested' | 'pending_btc' | 'completed' | 'cancelled' | 'cancellation_requested';
 
 export interface VbtcWithdrawalRequest {
   id: number;

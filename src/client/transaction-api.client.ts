@@ -14,7 +14,10 @@ export class TransactionApiClient extends BaseApiClient {
     limit = 10,
   ): Promise<PaginatedResponse<Transaction> | null> => {
     try {
-      return await this.makeJsonRequest(`/address/${encodeURIComponent(address)}/`, 'GET', { page: page, limit: limit });
+      return await this.makeJsonRequest(`/address/${encodeURIComponent(address)}/`, 'GET', {
+        page: page,
+        limit: limit,
+      });
     } catch (e) {
       return null;
     }

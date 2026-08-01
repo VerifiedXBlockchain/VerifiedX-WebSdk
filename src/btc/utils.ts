@@ -13,20 +13,20 @@ import { SATOSHI_TO_BTC_MULTIPLIER } from './constants';
 let _regtestUtils: RegtestUtils | undefined;
 
 function getRegtestUtils(): RegtestUtils {
-    if (!_regtestUtils) {
-        const APIPASS = process.env.APIPASS || 'satoshi';
-        const APIURL = process.env.APIURL || 'https://regtest.bitbank.cc/1';
-        _regtestUtils = new RegtestUtils({ APIPASS, APIURL });
-    }
-    return _regtestUtils;
+  if (!_regtestUtils) {
+    const APIPASS = process.env.APIPASS || 'satoshi';
+    const APIURL = process.env.APIURL || 'https://regtest.bitbank.cc/1';
+    _regtestUtils = new RegtestUtils({ APIPASS, APIURL });
+  }
+  return _regtestUtils;
 }
 
 export const regtestUtils = new Proxy({} as RegtestUtils, {
-    get(_target, prop) {
-        const instance = getRegtestUtils();
-        const value = instance[prop as keyof RegtestUtils];
-        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(instance) : value;
-    },
+  get(_target, prop) {
+    const instance = getRegtestUtils();
+    const value = instance[prop as keyof RegtestUtils];
+    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(instance) : value;
+  },
 });
 
 const ECPair = ECPairFactory(ecc);
@@ -35,76 +35,73 @@ const bip32 = BIP32Factory(ecc);
 bitcoin.initEccLib(ecc);
 
 export const publicKeyToAddress = (publicKey: Buffer, network: bitcoin.Network) => {
+  const p2pkh = bitcoin.payments.p2pkh({ pubkey: publicKey, network }).address; //P2PKH (Legacy)
+  const p2sh = bitcoin.payments.p2sh({
+    redeem: bitcoin.payments.p2wpkh({ pubkey: publicKey, network }),
+    network,
+  }).address;
+  const bech32 = bitcoin.payments.p2wpkh({ pubkey: publicKey, network }).address; // Bech32 (Segwit)
 
-    const p2pkh = bitcoin.payments.p2pkh({ pubkey: publicKey, network }).address; //P2PKH (Legacy)
-    const p2sh = bitcoin.payments.p2sh({
-        redeem: bitcoin.payments.p2wpkh({ pubkey: publicKey, network }),
-        network
-    }).address;
-    const bech32 = bitcoin.payments.p2wpkh({ pubkey: publicKey, network }).address; // Bech32 (Segwit)
+  const bech32m = bitcoin.payments.p2tr({
+    pubkey: publicKey.length === 33 ? publicKey.slice(1) : publicKey,
+    network,
+  }).address; // Taproot - P2TR)
 
-
-    const bech32m = bitcoin.payments.p2tr({ pubkey: publicKey.length === 33 ? publicKey.slice(1) : publicKey, network }).address; // Taproot - P2TR)
-
-    return {
-        p2pkh, p2sh, bech32, bech32m
-    }
-
-
-}
+  return {
+    p2pkh,
+    p2sh,
+    bech32,
+    bech32m,
+  };
+};
 
 export const wifToPrivateKey = (wif: string, network: bitcoin.Network) => {
-    return ECPair.fromWIF(wif, network).privateKey;
-}
+  return ECPair.fromWIF(wif, network).privateKey;
+};
 
 export const seedToPrivateKey = (seed: string, index = 0, network: bitcoin.Network) => {
-    const root = bip32.fromSeed(Buffer.from(seed, 'hex'), network);
-    const child = root.derivePath(`m/44'/0'/0'/0/${index}`);
-    return wifToPrivateKey(child.toWIF(), network);
-}
+  const root = bip32.fromSeed(Buffer.from(seed, 'hex'), network);
+  const child = root.derivePath(`m/44'/0'/0'/0/${index}`);
+  return wifToPrivateKey(child.toWIF(), network);
+};
 
 export function hashSeed(seed: string) {
+  const seedBuffer = Buffer.from(seed);
+  const hashBuffer = bitcoin.crypto.sha256(seedBuffer);
 
-    const seedBuffer = Buffer.from(seed);
-    const hashBuffer = bitcoin.crypto.sha256(seedBuffer);
+  const hashHex = hashBuffer.toString('hex');
 
-    const hashHex = hashBuffer.toString('hex');
-
-    return hashHex;
-
-
+  return hashHex;
 }
 
 export async function streamToBuffer(stream: ReadableStream<Uint8Array> | null): Promise<Buffer> {
-    if (!stream) {
-        throw new Error('Stream is null');
+  if (!stream) {
+    throw new Error('Stream is null');
+  }
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+
+  let done = false;
+
+  while (!done) {
+    const { value, done: isDone } = await reader.read();
+    if (value) {
+      chunks.push(value);
     }
+    done = isDone;
+  }
 
-    const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
+  // Concatenate all Uint8Array chunks into a single Uint8Array
+  const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+  const result = new Uint8Array(totalLength);
 
-    let done = false;
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
 
-    while (!done) {
-        const { value, done: isDone } = await reader.read();
-        if (value) {
-            chunks.push(value);
-        }
-        done = isDone;
-    }
-
-    // Concatenate all Uint8Array chunks into a single Uint8Array
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const result = new Uint8Array(totalLength);
-
-    let offset = 0;
-    for (const chunk of chunks) {
-        result.set(chunk, offset);
-        offset += chunk.length;
-    }
-
-    // Convert the final Uint8Array into a Buffer
-    return Buffer.from(result);
+  // Convert the final Uint8Array into a Buffer
+  return Buffer.from(result);
 }
-
-

@@ -131,9 +131,8 @@ export class VfxClient {
    */
   constructor(network: Network | 'mainnet' | 'testnet', dryRunOrOptions: boolean | VfxClientOptions = false) {
     // Convert string literals to Network enum values
-    const networkEnum = typeof network === 'string'
-      ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet)
-      : network;
+    const networkEnum =
+      typeof network === 'string' ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet) : network;
 
     const options: VfxClientOptions =
       typeof dryRunOrOptions === 'boolean' ? { dryRun: dryRunOrOptions } : dryRunOrOptions;
@@ -273,7 +272,7 @@ export class VfxClient {
       throw new Error(`Domain already exists: ${domain}`);
     }
 
-    const message = `${Math.floor((Date.now() / 1000))}`;
+    const message = `${Math.floor(Date.now() / 1000)}`;
     const btcClient = new BtcClient(this.network);
 
     const signature = btcClient.getSignature(message, btcPrivateKey);
@@ -284,9 +283,8 @@ export class VfxClient {
       Name: domainWithoutSuffix(domain),
       BTCAddress: btcAccount.address,
       Message: message,
-      Signature: signature
+      Signature: signature,
     };
-
 
     const txBuilder = new RawTransactionService({
       network: this.network,
@@ -349,9 +347,7 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendTransfer(body),
-    );
+    const sent = await this.signAndSend(prepared, params.privateKey, (body) => this.vbtcV2ApiClient.sendTransfer(body));
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
@@ -444,9 +440,7 @@ export class VfxClient {
     });
     this.assertPrepared(createPrep, 'createVbtcToken:prepare');
 
-    const sent = await this.signAndSend(createPrep, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendCreate(body),
-    );
+    const sent = await this.signAndSend(createPrep, params.privateKey, (body) => this.vbtcV2ApiClient.sendCreate(body));
     this.assertSent(sent, 'createVbtcToken:send');
 
     onProgress({

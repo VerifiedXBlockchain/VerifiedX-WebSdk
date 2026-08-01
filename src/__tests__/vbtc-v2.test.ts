@@ -9,9 +9,9 @@ describe('vBTC V2 — dryRun guard', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const common = { scIdentifier: 'sc-1', privateKey: '00' + '11'.repeat(32) };
-    await expect(
-      client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 }),
-    ).rejects.toThrow(/dryRun/);
+    await expect(client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 })).rejects.toThrow(
+      /dryRun/,
+    );
     await expect(
       client.createVbtcToken({ ...common, ownerAddress: 'xA', name: 'n', description: 'd', ticker: 'T' }),
     ).rejects.toThrow(/dryRun/);
@@ -578,12 +578,8 @@ describe('vBTC V2 — withdrawal completion failure stays resumable', () => {
       }),
     });
 
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /Contract not found/,
-    );
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /WR_HASH/,
-    );
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/Contract not found/);
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/WR_HASH/);
   });
 
   test('a request that never reached the chain does not masquerade as resumable', async () => {
@@ -663,12 +659,8 @@ describe('vBTC V2 — a post-broadcast failure must never advise re-signing', ()
       btcTransactionHash: 'BTC_TXID',
     });
 
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /Do NOT call completeWithdrawal/,
-    );
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /recordWithdrawalCompletion/,
-    );
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/Do NOT call completeWithdrawal/);
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/recordWithdrawalCompletion/);
   });
 
   test('a post-broadcast failure is not reported as merely incomplete', async () => {
@@ -694,9 +686,7 @@ describe('vBTC V2 — a post-broadcast failure must never advise re-signing', ()
       name: 'VbtcWithdrawalUnrecordedError',
       btcTransactionHash: null,
     });
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /recover it from the Bitcoin network/,
-    );
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/recover it from the Bitcoin network/);
   });
 
   test('a rejected broadcast stays pre-broadcast and remains resumable', async () => {

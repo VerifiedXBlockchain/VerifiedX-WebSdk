@@ -11,7 +11,9 @@ function installUtxoFetch(utxoValues: number[]): jest.Mock {
     const url = String(input);
     if (url.includes('/utxo')) {
       return new Response(
-        JSON.stringify(utxoValues.map((value, i) => ({ txid: FAKE_TXID, vout: i, value, status: { confirmed: true } }))),
+        JSON.stringify(
+          utxoValues.map((value, i) => ({ txid: FAKE_TXID, vout: i, value, status: { confirmed: true } })),
+        ),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
     }

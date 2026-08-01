@@ -30,11 +30,12 @@ export function getSecureRandomBytes(length: number): Uint8Array {
 export function generateRandomStringSecure(length: number, charset: string): string {
   try {
     // Try to access crypto (works in Node.js 15+ and browsers)
-    const cryptoObj = typeof globalThis !== 'undefined' && globalThis.crypto
-      ? globalThis.crypto
-      : typeof global !== 'undefined' && (global as any).crypto
-      ? (global as any).crypto
-      : undefined;
+    const cryptoObj =
+      typeof globalThis !== 'undefined' && globalThis.crypto
+        ? globalThis.crypto
+        : typeof global !== 'undefined' && (global as any).crypto
+        ? (global as any).crypto
+        : undefined;
 
     if (cryptoObj && cryptoObj.getRandomValues) {
       let result = '';
@@ -92,13 +93,13 @@ export function hexToBn(hex: string): bigint {
     bn =
       BigInt(
         '0b' +
-        bn
-          .toString(2)
-          .split('')
-          .map(function (i) {
-            return '0' === i ? 1 : 0;
-          })
-          .join(''),
+          bn
+            .toString(2)
+            .split('')
+            .map(function (i) {
+              return '0' === i ? 1 : 0;
+            })
+            .join(''),
       ) + BigInt(1);
     bn = -bn;
   }

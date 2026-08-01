@@ -14,13 +14,7 @@ export { networks } from 'bitcoinjs-lib';
 export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER } from './constants';
 
 // Export utility functions
-export {
-  publicKeyToAddress,
-  wifToPrivateKey,
-  seedToPrivateKey,
-  hashSeed,
-  regtestUtils
-} from './utils';
+export { publicKeyToAddress, wifToPrivateKey, seedToPrivateKey, hashSeed, regtestUtils } from './utils';
 
 // Export service classes
 export { KeypairService, TransactionService, AccountService, BtcClient };

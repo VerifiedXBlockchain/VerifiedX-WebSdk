@@ -88,19 +88,28 @@ describe('RawTransactionService.process', () => {
   test('returns null and logs when the node rejects the signature', async () => {
     installPipeline({ '/raw/validate-signature/': () => textResponse('false') });
     expect(await buildService().process()).toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Invalid Signature' }));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('process()'),
+      expect.objectContaining({ message: 'Invalid Signature' }),
+    );
   });
 
   test('returns null and logs when transaction verification fails', async () => {
     installPipeline({ '/raw/verify/': () => ({ Result: 'Failure', Message: 'bad tx' }) });
     expect(await buildService().process()).toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Invalid Transaction' }));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('process()'),
+      expect.objectContaining({ message: 'Invalid Transaction' }),
+    );
   });
 
   test('returns null and logs when send fails', async () => {
     installPipeline({ '/raw/send/': () => ({ Result: 'Failure' }) });
     expect(await buildService().process()).toBeNull();
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Transaction failed to send' }));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('process()'),
+      expect.objectContaining({ message: 'Transaction failed to send' }),
+    );
   });
 });
 
