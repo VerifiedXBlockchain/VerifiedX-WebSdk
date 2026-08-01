@@ -512,3 +512,87 @@ describe('vBTC V2 — requestWithdrawal', () => {
     ).rejects.toThrow(/frost polling failed/);
   });
 });
+
+describe('vBTC V2 — withdrawal completion failure stays resumable', () => {
+  let client: VfxClient;
+  let privateKey: string;
+  let requestorAddress: string;
+
+  beforeEach(() => {
+    client = new VfxClient('testnet');
+    privateKey = client.generatePrivateKey();
+    requestorAddress = client.addressFromPrivate(privateKey);
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  const withdrawParams = () => ({
+    scIdentifier: 'sc-1',
+    requestorAddress,
+    btcAddress: 'bc1qBTC',
+    amount: 0.001,
+    feeRate: 10,
+    privateKey,
+    pollIntervalMs: 1,
+    timeoutMs: 50,
+  });
+
+  test('a failed FROST ceremony still surfaces the on-chain request hash', async () => {
+    installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: true,
+        SessionId: 'SES_W',
+        StartMessage: 'FROST_START',
+        StartTimestamp: 100,
+        ShareDistributionMessage: 'FROST_SHARE',
+        ShareDistributionTimestamp: 101,
+        Amount: 0.001,
+        BTCDestination: 'bc1qBTC',
+        FeeRate: 10,
+      }),
+      '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: false,
+        status: 'failed',
+        message: 'Invalid start signature',
+      }),
+    });
+
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toMatchObject({
+      name: 'VbtcWithdrawalIncompleteError',
+      withdrawalRequestHash: 'WR_HASH',
+    });
+  });
+
+  test('the underlying failure reason is preserved, not swallowed', async () => {
+    installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: false,
+        message: 'Contract not found',
+      }),
+    });
+
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
+      /Contract not found/,
+    );
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
+      /WR_HASH/,
+    );
+  });
+
+  test('a request that never reached the chain does not masquerade as resumable', async () => {
+    installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: false, message: 'nope' }),
+    });
+
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.not.toMatchObject({
+      name: 'VbtcWithdrawalIncompleteError',
+    });
+  });
+});
