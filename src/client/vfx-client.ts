@@ -61,6 +61,45 @@ export class VbtcWithdrawalIncompleteError extends Error {
   }
 }
 
+/**
+ * Thrown when the Bitcoin transaction was broadcast but the VFX-side
+ * completion record was not written. The BTC has left the vault; only the
+ * Type 28 is missing.
+ *
+ * This is emphatically NOT resumable via completeWithdrawal — that restarts
+ * the signing ceremony, and a second ceremony can broadcast a second Bitcoin
+ * transaction against a different UTXO and pay the destination twice. Resume
+ * with recordWithdrawalCompletion, which needs no ceremony state.
+ *
+ * `btcTransactionHash` is null only in the narrow case where the broadcast was
+ * accepted but the node returned no txid. The coins are gone and the txid must
+ * be recovered from the Bitcoin network (look up spends of the contract's
+ * Taproot deposit address) before completion can be recorded. Retrying is
+ * unsafe in that state.
+ */
+export class VbtcWithdrawalUnrecordedError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly btcTransactionHash: string | null;
+  readonly cause: unknown;
+
+  constructor(withdrawalRequestHash: string, btcTransactionHash: string | null, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const resume = btcTransactionHash
+      ? `Resume with recordWithdrawalCompletion({ withdrawalRequestHash, btcTransactionHash: '${btcTransactionHash}' }).`
+      : 'The broadcast was accepted but returned no txid; recover it from the Bitcoin network before recording completion.';
+    super(
+      `Withdrawal request ${withdrawalRequestHash} broadcast its Bitcoin transaction ` +
+        `but the on-chain completion was not recorded: ${detail}. ` +
+        `Do NOT call completeWithdrawal — it would re-sign and may broadcast a second payout. ${resume}`,
+    );
+    this.name = 'VbtcWithdrawalUnrecordedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.btcTransactionHash = btcTransactionHash;
+    this.cause = cause;
+    Object.setPrototypeOf(this, VbtcWithdrawalUnrecordedError.prototype);
+  }
+}
+
 export interface VfxClientOptions {
   /** Return would-be hashes from sendCoin/domain purchases without broadcasting. */
   dryRun?: boolean;
@@ -474,6 +513,11 @@ export class VfxClient {
     try {
       return await this.completeWithdrawal({ ...params, withdrawalRequestHash });
     } catch (error) {
+      // A post-broadcast failure already carries the txid and the correct
+      // (do-not-re-sign) recovery instruction. Re-wrapping it as merely
+      // "incomplete" would tell the caller to resume via completeWithdrawal,
+      // which is the one thing that can pay the destination twice.
+      if (error instanceof VbtcWithdrawalUnrecordedError) throw error;
       throw new VbtcWithdrawalIncompleteError(withdrawalRequestHash, error);
     }
   };
@@ -566,10 +610,22 @@ export class VfxClient {
 
     onProgress({ phase: 'frost_complete', message: 'FROST signing complete' });
 
-    // Broadcast BTC tx
+    // Broadcast BTC tx.
+    //
+    // The two failure modes here are opposites and must not be collapsed:
+    // a rejected broadcast leaves the coins untouched and is safe to re-drive,
+    // while an accepted broadcast that returns no txid means the coins are
+    // already gone and re-signing would risk a second payout.
     const broadcast = await this.vbtcV2ApiClient.broadcastBtc(frostFinal.signed_btc_tx_hex);
-    if (!broadcast?.success || !broadcast.txid) {
-      throw new Error(`completeWithdrawal broadcast failed: ${JSON.stringify(broadcast)}`);
+    if (!broadcast?.success) {
+      throw new Error(`completeWithdrawal broadcast rejected: ${JSON.stringify(broadcast)}`);
+    }
+    if (!broadcast.txid) {
+      throw new VbtcWithdrawalUnrecordedError(
+        withdrawalRequestHash,
+        null,
+        new Error(`broadcast accepted without a txid: ${JSON.stringify(broadcast)}`),
+      );
     }
 
     onProgress({
@@ -578,19 +634,27 @@ export class VfxClient {
       data: { txid: broadcast.txid },
     });
 
-    // Step 4: Record completion (Type 28)
-    return this.recordWithdrawalCompletion({
-      scIdentifier: params.scIdentifier,
-      requestorAddress: params.requestorAddress,
-      withdrawalRequestHash,
-      btcTransactionHash: broadcast.txid,
-      // Caller's real values — frostPrep echoes are 0/"" when prepare raced
-      // the node's processing of the Type 27 block (same trap as execute).
-      amount: params.amount,
-      btcDestination: params.btcAddress,
-      privateKey: params.privateKey,
-      onProgress,
-    });
+    // Step 4: Record completion (Type 28).
+    //
+    // Past this point the BTC has left the vault, so a failure here is not the
+    // same kind of failure as anything above it: the caller must record the
+    // completion for the txid we already have, never re-run the ceremony.
+    try {
+      return await this.recordWithdrawalCompletion({
+        scIdentifier: params.scIdentifier,
+        requestorAddress: params.requestorAddress,
+        withdrawalRequestHash,
+        btcTransactionHash: broadcast.txid,
+        // Caller's real values — frostPrep echoes are 0/"" when prepare raced
+        // the node's processing of the Type 27 block (same trap as execute).
+        amount: params.amount,
+        btcDestination: params.btcAddress,
+        privateKey: params.privateKey,
+        onProgress,
+      });
+    } catch (error) {
+      throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
+    }
   };
 
   /**
