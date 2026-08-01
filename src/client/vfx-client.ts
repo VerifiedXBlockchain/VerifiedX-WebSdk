@@ -35,6 +35,32 @@ type SendFn = (body: { hash: string; signature: string; public_key: string }) =>
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
 
+/**
+ * Thrown when a withdrawal request made it on chain but completing it did
+ * not. The request is live, and the chain refuses a new one while it stands,
+ * so re-driving completion for `withdrawalRequestHash` is the only way
+ * forward — hence the hash travelling on the error rather than being lost
+ * with the return value the caller never got.
+ */
+export class VbtcWithdrawalIncompleteError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly cause: unknown;
+
+  constructor(withdrawalRequestHash: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Withdrawal request ${withdrawalRequestHash} is on chain but completion ` +
+        `failed: ${detail}. Resume with completeWithdrawal({ withdrawalRequestHash }).`,
+    );
+    this.name = 'VbtcWithdrawalIncompleteError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.cause = cause;
+    // Subclassing a built-in under an ES6 target loses the prototype chain,
+    // which would break instanceof for callers trying to recover the hash.
+    Object.setPrototypeOf(this, VbtcWithdrawalIncompleteError.prototype);
+  }
+}
+
 export interface VfxClientOptions {
   /** Return would-be hashes from sendCoin/domain purchases without broadcasting. */
   dryRun?: boolean;
@@ -440,7 +466,16 @@ export class VfxClient {
     // for the same on-chain request via completeWithdrawal (the chain
     // refuses a NEW request while one is incomplete, so resume is the only
     // way forward for a stranded request).
-    return this.completeWithdrawal({ ...params, withdrawalRequestHash });
+    //
+    // Resuming needs withdrawalRequestHash, and a caller that only ever sees
+    // a rejected promise never receives it — the request is committed on
+    // chain but its hash lives only in this frame. Carrying it on the error
+    // is what keeps the resume path reachable.
+    try {
+      return await this.completeWithdrawal({ ...params, withdrawalRequestHash });
+    } catch (error) {
+      throw new VbtcWithdrawalIncompleteError(withdrawalRequestHash, error);
+    }
   };
 
   /**
