@@ -6,6 +6,7 @@ import { Network, TxType } from '../constants';
 export type { VfxClientOptions } from '../client/vfx-client';
 export { VfxApiError } from '../client/base-api-client';
 export { VbtcWithdrawalIncompleteError, VbtcWithdrawalUnrecordedError } from '../client/vfx-client';
+export { TransactionDispatchError } from '../services/raw-transaction-service';
 
 // Re-export common interfaces and types from main package
 export type {

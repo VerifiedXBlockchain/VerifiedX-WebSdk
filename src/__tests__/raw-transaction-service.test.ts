@@ -103,3 +103,42 @@ describe('RawTransactionService.process', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('process()'), expect.objectContaining({ message: 'Transaction failed to send' }));
   });
 });
+
+describe('RawTransactionService.process — dispatch ambiguity', () => {
+  test('a lost response after dispatch throws rather than reporting a clean failure', async () => {
+    installPipeline({
+      // The request went out; the reply never came back. The node may well
+      // have accepted it.
+      '/raw/send/': () => {
+        throw new Error('socket hang up');
+      },
+    });
+
+    const service = buildService();
+    await expect(service.process()).rejects.toMatchObject({
+      name: 'TransactionDispatchError',
+      hash: 'TX_HASH_ABC',
+    });
+    await expect(buildService().process()).rejects.toThrow(/check the chain for this hash before resending/);
+  });
+
+  test('failures before dispatch still return null, since nothing was sent', async () => {
+    installPipeline({
+      '/raw/validate-signature/': () => textResponse('false'),
+    });
+
+    expect(await buildService().process()).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('process()'),
+      expect.objectContaining({ message: 'Invalid Signature' }),
+    );
+  });
+
+  test('an explicit node-side rejection still returns null', async () => {
+    installPipeline({
+      '/raw/send/': () => ({ Result: 'Failure' }),
+    });
+
+    expect(await buildService().process()).toBeNull();
+  });
+});
