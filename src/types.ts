@@ -63,14 +63,29 @@ export interface VbtcV2Token {
 
 /**
  * Withdrawal states as served by Spyglass, which lowercases the node's
- * PascalCase names (VbtcV2WithdrawalRequest.Status). This type previously
- * admitted only 'requested' and 'completed', so a cancelled withdrawal was a
- * type error at the boundary.
+ * PascalCase names. This type previously admitted only 'requested' and
+ * 'completed', so a cancelled withdrawal was a type error at the boundary.
  *
- * 'pending_btc' and 'cancellation_requested' are served by Spyglass from the
- * release that widened its status set to match the node's six; older
- * deployments never emit them, so treat them as additive rather than assuming
- * every backend produces them.
+ * Spyglass derives these from transaction type as it indexes, not from a status
+ * field on the node — the node never persists `Pending_BTC` at all. Both of the
+ * added values are additive: deployments older than the release that widened
+ * this set never emit them.
+ *
+ * Two caveats that matter when branching on these:
+ *
+ * - `pending_btc` is written when the FROST ceremony returns a signed Bitcoin
+ *   transaction, which is marginally EARLIER than the broadcast — the ceremony
+ *   runs in sign-only mode and the client broadcasts. It means "a spendable
+ *   transaction exists", not "broadcast confirmed", and must not be rendered as
+ *   the latter. It is deliberately the conservative direction for gating a
+ *   retry.
+ * - `pending_btc` only appears for ceremonies run THROUGH Spyglass (web wallet,
+ *   Butterfly). A desktop wallet that drives a node directly never touches it,
+ *   so those withdrawals stay 'requested' until completion lands. Absence of
+ *   this status is not evidence that nothing was signed.
+ * - `cancellation_requested` is a legitimate node state but is not yet reachable
+ *   in Spyglass: a Type 29 currently writes 'cancelled' directly, without
+ *   waiting on the 75% validator vote that actually decides it.
  */
 export type VbtcWithdrawalStatus = 'requested' | 'pending_btc' | 'completed' | 'cancelled' | 'cancellation_requested';
 
@@ -82,10 +97,9 @@ export interface VbtcWithdrawalRequest {
   fee_rate: string;
   btc_transaction_hash: string;
   /**
-   * Mirrors the node's withdrawal states (VBTCContractV2.cs). `Pending_BTC`
-   * matters most: the Bitcoin transaction is broadcast but the on-chain
-   * completion is not yet recorded, which is the one state where re-running a
-   * withdrawal can pay the destination twice.
+   * See {@link VbtcWithdrawalStatus} for the per-value caveats. `pending_btc`
+   * is the one to branch on: a signed Bitcoin transaction exists, so re-running
+   * the withdrawal from here can pay the destination twice.
    */
   status: VbtcWithdrawalStatus;
   request_transaction_hash: string;
