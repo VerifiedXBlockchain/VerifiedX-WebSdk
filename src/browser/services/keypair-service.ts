@@ -91,7 +91,7 @@ export class BrowserKeypairService {
     email = email.toLowerCase();
 
     let seed = `${email}|${password}|`;
-    seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
+    seed = `${seed}${seed.length}|!@${(password.length * 7 + email.length) * 7}`;
 
     const chars = 1;
     const upperChars = 1;

@@ -44,7 +44,9 @@ export class RawTransactionApiClient extends BaseApiClient {
     // every segment. Verified live (2026-07-07): the API accepts both raw
     // and encoded forms; encoded is the robust choice.
     return this.makeBoolRequest(
-      `/validate-signature/${encodeURIComponent(message)}/${encodeURIComponent(address)}/${encodeURIComponent(signature)}/`,
+      `/validate-signature/${encodeURIComponent(message)}/${encodeURIComponent(address)}/${encodeURIComponent(
+        signature,
+      )}/`,
       'POST',
     );
   }

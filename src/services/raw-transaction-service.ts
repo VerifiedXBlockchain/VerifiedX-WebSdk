@@ -96,7 +96,17 @@ export class RawTransactionService {
         return this.hash;
       }
 
-      const success = await client.sendTransaction(txData);
+      // Everything above this line fails before the transaction reaches the
+      // node, so `null` honestly means "not sent". Past it, a thrown error is
+      // ambiguous: the node may have accepted the transaction and only the
+      // response was lost. Reporting that as a clean failure invites the caller
+      // to resend and double-spend, so it is surfaced instead of swallowed.
+      let success: boolean;
+      try {
+        success = await client.sendTransaction(txData);
+      } catch (error) {
+        throw new TransactionDispatchError(this.hash, error);
+      }
 
       if (!success) {
         throw new Error('Transaction failed to send');
@@ -104,8 +114,38 @@ export class RawTransactionService {
 
       return this.hash;
     } catch (error) {
+      if (error instanceof TransactionDispatchError) {
+        throw error;
+      }
       console.error(`Error in process():`, error);
       return null;
     }
+  }
+}
+
+/**
+ * Thrown when dispatch to the node failed in a way that leaves it unknown
+ * whether the transaction was accepted -- a dropped connection or timeout after
+ * the request went out.
+ *
+ * Deliberately not folded into the `null` return that `process()` uses for
+ * pre-dispatch failures. `null` means the transaction definitely did not send;
+ * this means it might have. Check the chain for `hash` before resending, or a
+ * retry risks broadcasting the same spend twice.
+ */
+export class TransactionDispatchError extends Error {
+  readonly hash: string;
+  readonly cause: unknown;
+
+  constructor(hash: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `Transaction ${hash} was dispatched but the node's response was not received: ${detail}. ` +
+        `It may or may not have been accepted -- check the chain for this hash before resending.`,
+    );
+    this.name = 'TransactionDispatchError';
+    this.hash = hash;
+    this.cause = cause;
+    Object.setPrototypeOf(this, TransactionDispatchError.prototype);
   }
 }

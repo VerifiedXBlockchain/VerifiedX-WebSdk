@@ -47,7 +47,7 @@ describe('compat: email/password -> private key', () => {
   );
 });
 
-describe('compat: mnemonic -> private key (BIP32 m/0\'/0\'/i\')', () => {
+describe("compat: mnemonic -> private key (BIP32 m/0'/0'/i')", () => {
   test.each(vectors.mnemonic)('index $index derives pinned key', ({ mnemonic, index, privateKey, mainnetAddress }) => {
     const derived = mainnetService.privateKeyFromMneumonic(mnemonic, index);
     expect(derived).toBe(privateKey);
@@ -56,7 +56,10 @@ describe('compat: mnemonic -> private key (BIP32 m/0\'/0\'/i\')', () => {
 });
 
 describe('compat: deterministic signatures (RFC6979)', () => {
-  test.each(vectors.signatures)('message "$message" signs to pinned signature', ({ privateKey, message, signature }) => {
-    expect(mainnetService.getSignature(message, privateKey)).toBe(signature);
-  });
+  test.each(vectors.signatures)(
+    'message "$message" signs to pinned signature',
+    ({ privateKey, message, signature }) => {
+      expect(mainnetService.getSignature(message, privateKey)).toBe(signature);
+    },
+  );
 });

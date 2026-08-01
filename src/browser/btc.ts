@@ -13,7 +13,7 @@ export * from '../btc/types';
 export const networks = {
   bitcoin: { name: 'bitcoin' },
   testnet: { name: 'testnet' },
-  regtest: { name: 'regtest' }
+  regtest: { name: 'regtest' },
 };
 
 // Note: BTC utility functions contain Node.js Buffer dependencies
@@ -23,7 +23,7 @@ export const networks = {
 
 // Browser-compatible BTC client that extends the original
 export class BrowserBtcClient extends OriginalBtcClient {
-  constructor(network: "mainnet" | "testnet" = "mainnet", dryRun = false) {
+  constructor(network: 'mainnet' | 'testnet' = 'mainnet', dryRun = false) {
     super(network, dryRun);
   }
 

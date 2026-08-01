@@ -15,7 +15,14 @@ describe('constructor options', () => {
 
   test('baseUrl override routes every request to the custom origin', async () => {
     const { calls } = installFetch({
-      'my-node.example.com': () => ({ address: 'xA', balance: 1, balance_total: 1, balance_locked: 0, adnr: null, activated: true }),
+      'my-node.example.com': () => ({
+        address: 'xA',
+        balance: 1,
+        balance_total: 1,
+        balance_locked: 0,
+        adnr: null,
+        activated: true,
+      }),
     });
 
     const client = new VfxClient('testnet', { baseUrl: 'https://my-node.example.com/api' });
@@ -27,7 +34,13 @@ describe('constructor options', () => {
   test('options object can set dryRun', async () => {
     const client = new VfxClient('testnet', { dryRun: true });
     await expect(
-      client.transferVbtc({ scIdentifier: 's', fromAddress: 'a', toAddress: 'b', amount: 1, privateKey: '00' + '11'.repeat(32) }),
+      client.transferVbtc({
+        scIdentifier: 's',
+        fromAddress: 'a',
+        toAddress: 'b',
+        amount: 1,
+        privateKey: '00' + '11'.repeat(32),
+      }),
     ).rejects.toThrow(/dryRun/);
   });
 });

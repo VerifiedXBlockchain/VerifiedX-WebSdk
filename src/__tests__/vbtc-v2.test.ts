@@ -9,9 +9,9 @@ describe('vBTC V2 — dryRun guard', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const common = { scIdentifier: 'sc-1', privateKey: '00' + '11'.repeat(32) };
-    await expect(
-      client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 }),
-    ).rejects.toThrow(/dryRun/);
+    await expect(client.transferVbtc({ ...common, fromAddress: 'xA', toAddress: 'xB', amount: 1 })).rejects.toThrow(
+      /dryRun/,
+    );
     await expect(
       client.createVbtcToken({ ...common, ownerAddress: 'xA', name: 'n', description: 'd', ticker: 'T' }),
     ).rejects.toThrow(/dryRun/);
@@ -578,12 +578,8 @@ describe('vBTC V2 — withdrawal completion failure stays resumable', () => {
       }),
     });
 
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /Contract not found/,
-    );
-    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(
-      /WR_HASH/,
-    );
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/Contract not found/);
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/WR_HASH/);
   });
 
   test('a request that never reached the chain does not masquerade as resumable', async () => {
@@ -594,5 +590,244 @@ describe('vBTC V2 — withdrawal completion failure stays resumable', () => {
     await expect(client.requestWithdrawal(withdrawParams())).rejects.not.toMatchObject({
       name: 'VbtcWithdrawalIncompleteError',
     });
+  });
+});
+
+describe('vBTC V2 — a post-broadcast failure must never advise re-signing', () => {
+  let client: VfxClient;
+  let privateKey: string;
+  let requestorAddress: string;
+
+  beforeEach(() => {
+    client = new VfxClient('testnet');
+    privateKey = client.generatePrivateKey();
+    requestorAddress = client.addressFromPrivate(privateKey);
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  const withdrawParams = () => ({
+    scIdentifier: 'sc-1',
+    requestorAddress,
+    btcAddress: 'bc1qBTC',
+    amount: 0.001,
+    feeRate: 10,
+    privateKey,
+    pollIntervalMs: 1,
+    timeoutMs: 50,
+  });
+
+  // Everything up to and including a successful BTC broadcast.
+  const throughBroadcast = () => ({
+    '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH', Fee: 1 }),
+    '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+    '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+      success: true,
+      SessionId: 'SES_W',
+      StartMessage: 'FROST_START',
+      StartTimestamp: 100,
+      ShareDistributionMessage: 'FROST_SHARE',
+      ShareDistributionTimestamp: 101,
+      Amount: 0.001,
+      BTCDestination: 'bc1qBTC',
+      FeeRate: 10,
+    }),
+    '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+    '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+      success: true,
+      status: 'complete',
+      signed_btc_tx_hex: 'DEADBEEF',
+      sc_identifier: 'sc-1',
+      withdrawal_request_hash: 'WR_HASH',
+    }),
+    '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+  });
+
+  test('Type 28 failure surfaces the txid and forbids completeWithdrawal', async () => {
+    installFetch({
+      ...throughBroadcast(),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: false, message: 'node unreachable' }),
+    });
+
+    // The BTC is gone. The caller must learn the txid, or the payout is
+    // stranded with no way to record it.
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toMatchObject({
+      name: 'VbtcWithdrawalUnrecordedError',
+      withdrawalRequestHash: 'WR_HASH',
+      btcTransactionHash: 'BTC_TXID',
+    });
+
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/Do NOT call completeWithdrawal/);
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/recordWithdrawalCompletion/);
+  });
+
+  test('a post-broadcast failure is not reported as merely incomplete', async () => {
+    installFetch({
+      ...throughBroadcast(),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: false, message: 'node unreachable' }),
+    });
+
+    // VbtcWithdrawalIncompleteError tells the caller to resume via
+    // completeWithdrawal, which re-runs the ceremony and can pay twice.
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.not.toMatchObject({
+      name: 'VbtcWithdrawalIncompleteError',
+    });
+  });
+
+  test('an accepted broadcast with no txid is flagged unrecoverable, not retryable', async () => {
+    installFetch({
+      ...throughBroadcast(),
+      '/btc/broadcast/': () => ({ success: true }),
+    });
+
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toMatchObject({
+      name: 'VbtcWithdrawalUnrecordedError',
+      btcTransactionHash: null,
+    });
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toThrow(/recover it from the Bitcoin network/);
+  });
+
+  test('a rejected broadcast stays pre-broadcast and remains resumable', async () => {
+    installFetch({
+      ...throughBroadcast(),
+      '/btc/broadcast/': () => ({ success: false, message: 'min relay fee not met' }),
+    });
+
+    // Nothing was spent, so re-driving the ceremony is the correct advice here.
+    await expect(client.requestWithdrawal(withdrawParams())).rejects.toMatchObject({
+      name: 'VbtcWithdrawalIncompleteError',
+      withdrawalRequestHash: 'WR_HASH',
+    });
+  });
+
+  test('recordWithdrawalCompletion records a broadcast withdrawal without re-signing', async () => {
+    const seen: string[] = [];
+    installFetch({
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => {
+        seen.push('prepare');
+        return { success: true, Hash: 'COMPLETION_PREP', Fee: 1 };
+      },
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => {
+        seen.push('send');
+        return { success: true, Hash: 'COMPLETION_HASH' };
+      },
+    });
+
+    const result = await client.recordWithdrawalCompletion({
+      scIdentifier: 'sc-1',
+      requestorAddress,
+      withdrawalRequestHash: 'WR_HASH',
+      btcTransactionHash: 'BTC_TXID',
+      amount: 0.001,
+      btcDestination: 'bc1qBTC',
+      privateKey,
+    });
+
+    expect(result).toEqual({
+      btcTransactionHash: 'BTC_TXID',
+      completionTransactionHash: 'COMPLETION_HASH',
+      withdrawalRequestHash: 'WR_HASH',
+    });
+    // No ceremony endpoints were touched — that is the whole point.
+    expect(seen).toEqual(['prepare', 'send']);
+  });
+
+  test('recording refuses to proceed without a txid', async () => {
+    installFetch({});
+    await expect(
+      client.recordWithdrawalCompletion({
+        scIdentifier: 'sc-1',
+        requestorAddress,
+        withdrawalRequestHash: 'WR_HASH',
+        btcTransactionHash: '',
+        amount: 0.001,
+        btcDestination: 'bc1qBTC',
+        privateKey,
+      }),
+    ).rejects.toThrow(/requires the broadcast btcTransactionHash/);
+  });
+});
+
+describe('vBTC V2 — FROST polling tolerates job registration lag', () => {
+  let client: VfxClient;
+  let privateKey: string;
+  let requestorAddress: string;
+
+  beforeEach(() => {
+    client = new VfxClient('testnet');
+    privateKey = client.generatePrivateKey();
+    requestorAddress = client.addressFromPrivate(privateKey);
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  const params = () => ({
+    scIdentifier: 'sc-1',
+    requestorAddress,
+    withdrawalRequestHash: 'WR_HASH',
+    btcAddress: 'bc1qBTC',
+    amount: 0.001,
+    feeRate: 10,
+    privateKey,
+    pollIntervalMs: 1,
+    timeoutMs: 2000,
+  });
+
+  const upToPolling = () => ({
+    '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+      success: true,
+      SessionId: 'SES_W',
+      StartMessage: 'FROST_START',
+      StartTimestamp: 100,
+      ShareDistributionMessage: 'FROST_SHARE',
+      ShareDistributionTimestamp: 101,
+      Amount: 0.001,
+      BTCDestination: 'bc1qBTC',
+      FeeRate: 10,
+    }),
+    '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+  });
+
+  test('rides out transient not-yet-registered failures and still completes', async () => {
+    let polls = 0;
+    installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => {
+        polls += 1;
+        // The job is not queryable yet for the first few polls.
+        if (polls <= 3) return { success: false, status: 'failed', message: 'job not found' };
+        return {
+          success: true,
+          status: 'complete',
+          signed_btc_tx_hex: 'DEADBEEF',
+          sc_identifier: 'sc-1',
+          withdrawal_request_hash: 'WR_HASH',
+        };
+      },
+      '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+    });
+
+    const result = await client.completeWithdrawal(params());
+    expect(result.btcTransactionHash).toBe('BTC_TXID');
+    expect(polls).toBeGreaterThan(3);
+  });
+
+  test('a persistent failure still aborts rather than polling to the deadline', async () => {
+    installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: false,
+        status: 'failed',
+        message: 'Invalid start signature',
+      }),
+    });
+
+    await expect(client.completeWithdrawal(params())).rejects.toThrow(/Invalid start signature/);
   });
 });

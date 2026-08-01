@@ -61,6 +61,45 @@ export class VbtcWithdrawalIncompleteError extends Error {
   }
 }
 
+/**
+ * Thrown when the Bitcoin transaction was broadcast but the VFX-side
+ * completion record was not written. The BTC has left the vault; only the
+ * Type 28 is missing.
+ *
+ * This is emphatically NOT resumable via completeWithdrawal — that restarts
+ * the signing ceremony, and a second ceremony can broadcast a second Bitcoin
+ * transaction against a different UTXO and pay the destination twice. Resume
+ * with recordWithdrawalCompletion, which needs no ceremony state.
+ *
+ * `btcTransactionHash` is null only in the narrow case where the broadcast was
+ * accepted but the node returned no txid. The coins are gone and the txid must
+ * be recovered from the Bitcoin network (look up spends of the contract's
+ * Taproot deposit address) before completion can be recorded. Retrying is
+ * unsafe in that state.
+ */
+export class VbtcWithdrawalUnrecordedError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly btcTransactionHash: string | null;
+  readonly cause: unknown;
+
+  constructor(withdrawalRequestHash: string, btcTransactionHash: string | null, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const resume = btcTransactionHash
+      ? `Resume with recordWithdrawalCompletion({ withdrawalRequestHash, btcTransactionHash: '${btcTransactionHash}' }).`
+      : 'The broadcast was accepted but returned no txid; recover it from the Bitcoin network before recording completion.';
+    super(
+      `Withdrawal request ${withdrawalRequestHash} broadcast its Bitcoin transaction ` +
+        `but the on-chain completion was not recorded: ${detail}. ` +
+        `Do NOT call completeWithdrawal — it would re-sign and may broadcast a second payout. ${resume}`,
+    );
+    this.name = 'VbtcWithdrawalUnrecordedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.btcTransactionHash = btcTransactionHash;
+    this.cause = cause;
+    Object.setPrototypeOf(this, VbtcWithdrawalUnrecordedError.prototype);
+  }
+}
+
 export interface VfxClientOptions {
   /** Return would-be hashes from sendCoin/domain purchases without broadcasting. */
   dryRun?: boolean;
@@ -92,9 +131,8 @@ export class VfxClient {
    */
   constructor(network: Network | 'mainnet' | 'testnet', dryRunOrOptions: boolean | VfxClientOptions = false) {
     // Convert string literals to Network enum values
-    const networkEnum = typeof network === 'string'
-      ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet)
-      : network;
+    const networkEnum =
+      typeof network === 'string' ? (network === 'mainnet' ? Network.Mainnet : Network.Testnet) : network;
 
     const options: VfxClientOptions =
       typeof dryRunOrOptions === 'boolean' ? { dryRun: dryRunOrOptions } : dryRunOrOptions;
@@ -234,7 +272,7 @@ export class VfxClient {
       throw new Error(`Domain already exists: ${domain}`);
     }
 
-    const message = `${Math.floor((Date.now() / 1000))}`;
+    const message = `${Math.floor(Date.now() / 1000)}`;
     const btcClient = new BtcClient(this.network);
 
     const signature = btcClient.getSignature(message, btcPrivateKey);
@@ -245,9 +283,8 @@ export class VfxClient {
       Name: domainWithoutSuffix(domain),
       BTCAddress: btcAccount.address,
       Message: message,
-      Signature: signature
+      Signature: signature,
     };
-
 
     const txBuilder = new RawTransactionService({
       network: this.network,
@@ -310,9 +347,7 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendTransfer(body),
-    );
+    const sent = await this.signAndSend(prepared, params.privateKey, (body) => this.vbtcV2ApiClient.sendTransfer(body));
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
@@ -405,9 +440,7 @@ export class VfxClient {
     });
     this.assertPrepared(createPrep, 'createVbtcToken:prepare');
 
-    const sent = await this.signAndSend(createPrep, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendCreate(body),
-    );
+    const sent = await this.signAndSend(createPrep, params.privateKey, (body) => this.vbtcV2ApiClient.sendCreate(body));
     this.assertSent(sent, 'createVbtcToken:send');
 
     onProgress({
@@ -474,6 +507,11 @@ export class VfxClient {
     try {
       return await this.completeWithdrawal({ ...params, withdrawalRequestHash });
     } catch (error) {
+      // A post-broadcast failure already carries the txid and the correct
+      // (do-not-re-sign) recovery instruction. Re-wrapping it as merely
+      // "incomplete" would tell the caller to resume via completeWithdrawal,
+      // which is the one thing that can pay the destination twice.
+      if (error instanceof VbtcWithdrawalUnrecordedError) throw error;
       throw new VbtcWithdrawalIncompleteError(withdrawalRequestHash, error);
     }
   };
@@ -558,6 +596,11 @@ export class VfxClient {
       intervalMs: pollIntervalMs,
       timeoutMs,
       label: 'frost',
+      // The job is registered a moment after execute returns, so the first
+      // polls can legitimately report failure for a job that does not exist
+      // yet. Aborting on the first one strands a withdrawal whose ceremony was
+      // about to start; the Flutter wallet rides out six for this reason.
+      toleratedFailures: 6,
     });
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
@@ -566,10 +609,22 @@ export class VfxClient {
 
     onProgress({ phase: 'frost_complete', message: 'FROST signing complete' });
 
-    // Broadcast BTC tx
+    // Broadcast BTC tx.
+    //
+    // The two failure modes here are opposites and must not be collapsed:
+    // a rejected broadcast leaves the coins untouched and is safe to re-drive,
+    // while an accepted broadcast that returns no txid means the coins are
+    // already gone and re-signing would risk a second payout.
     const broadcast = await this.vbtcV2ApiClient.broadcastBtc(frostFinal.signed_btc_tx_hex);
-    if (!broadcast?.success || !broadcast.txid) {
-      throw new Error(`completeWithdrawal broadcast failed: ${JSON.stringify(broadcast)}`);
+    if (!broadcast?.success) {
+      throw new Error(`completeWithdrawal broadcast rejected: ${JSON.stringify(broadcast)}`);
+    }
+    if (!broadcast.txid) {
+      throw new VbtcWithdrawalUnrecordedError(
+        withdrawalRequestHash,
+        null,
+        new Error(`broadcast accepted without a txid: ${JSON.stringify(broadcast)}`),
+      );
     }
 
     onProgress({
@@ -578,23 +633,77 @@ export class VfxClient {
       data: { txid: broadcast.txid },
     });
 
-    // Step 4: Record completion (Type 28)
+    // Step 4: Record completion (Type 28).
+    //
+    // Past this point the BTC has left the vault, so a failure here is not the
+    // same kind of failure as anything above it: the caller must record the
+    // completion for the txid we already have, never re-run the ceremony.
+    try {
+      return await this.recordWithdrawalCompletion({
+        scIdentifier: params.scIdentifier,
+        requestorAddress: params.requestorAddress,
+        withdrawalRequestHash,
+        btcTransactionHash: broadcast.txid,
+        // Caller's real values — frostPrep echoes are 0/"" when prepare raced
+        // the node's processing of the Type 27 block (same trap as execute).
+        amount: params.amount,
+        btcDestination: params.btcAddress,
+        privateKey: params.privateKey,
+        onProgress,
+      });
+    } catch (error) {
+      throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
+    }
+  };
+
+  /**
+   * Record an already-broadcast withdrawal on the VFX chain (Type 28) without
+   * re-running FROST.
+   *
+   * This is the resume path for a withdrawal whose Bitcoin transaction went out
+   * but whose completion was never recorded — the state that leaves BTC spent
+   * and the vBTC still unburned. `completeWithdrawal` cannot be used to recover
+   * it: that method restarts at the signing ceremony, and because UTXOs are
+   * re-selected live and the validators' double-sign guard is in-memory (so a
+   * validator restart or 24h clears it), a second ceremony can broadcast a
+   * SECOND Bitcoin transaction and pay the destination twice.
+   *
+   * Requires only the values a caller already holds once the broadcast
+   * succeeded — no ceremony session state — so it is safe to call from a fresh
+   * process after a crash, reload, or device switch, provided the txid was
+   * persisted.
+   */
+  public recordWithdrawalCompletion = async (params: {
+    scIdentifier: string;
+    requestorAddress: string;
+    withdrawalRequestHash: string;
+    btcTransactionHash: string;
+    amount: number;
+    btcDestination: string;
+    privateKey: string;
+    onProgress?: (event: VbtcProgressEvent) => void;
+  }): Promise<VbtcWithdrawalResult> => {
+    this.assertNotDryRun('recordWithdrawalCompletion');
+    const onProgress = params.onProgress ?? (() => undefined);
+
+    if (!params.btcTransactionHash) {
+      throw new Error('recordWithdrawalCompletion requires the broadcast btcTransactionHash');
+    }
+
     const completionPrep = await this.vbtcV2ApiClient.prepareWithdrawCompleteTx({
       sc_identifier: params.scIdentifier,
       from_address: params.requestorAddress,
-      withdrawal_request_hash: withdrawalRequestHash,
-      btc_transaction_hash: broadcast.txid,
-      // Caller's real values — frostPrep echoes are 0/"" when prepare raced
-      // the node's processing of the Type 27 block (same trap as execute).
+      withdrawal_request_hash: params.withdrawalRequestHash,
+      btc_transaction_hash: params.btcTransactionHash,
       amount: params.amount,
-      btc_destination: params.btcAddress,
+      btc_destination: params.btcDestination,
     });
-    this.assertPrepared(completionPrep, 'completeWithdrawal:completion:prepare');
+    this.assertPrepared(completionPrep, 'recordWithdrawalCompletion:prepare');
 
     const completionSent = await this.signAndSend(completionPrep, params.privateKey, (body) =>
       this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
     );
-    this.assertSent(completionSent, 'completeWithdrawal:completion:send');
+    this.assertSent(completionSent, 'recordWithdrawalCompletion:send');
 
     onProgress({
       phase: 'completion_recorded',
@@ -603,9 +712,9 @@ export class VfxClient {
     });
 
     return {
-      btcTransactionHash: broadcast.txid,
+      btcTransactionHash: params.btcTransactionHash,
       completionTransactionHash: completionSent.Hash,
-      withdrawalRequestHash,
+      withdrawalRequestHash: params.withdrawalRequestHash,
     };
   };
 
@@ -681,8 +790,16 @@ export class VfxClient {
     intervalMs: number;
     timeoutMs: number;
     label: string;
+    /**
+     * Consecutive failed statuses to ride out before giving up. A job is not
+     * queryable the instant it is created, so the first polls after submit can
+     * report failure for a job that is merely not registered yet.
+     */
+    toleratedFailures?: number;
   }): Promise<T> {
     const deadline = Date.now() + opts.timeoutMs;
+    const tolerated = opts.toleratedFailures ?? 0;
+    let consecutiveFailures = 0;
     // Best-effort short initial delay so callers don't hammer the API immediately after submit.
     await sleep(Math.min(opts.intervalMs, 1500));
 
@@ -691,10 +808,17 @@ export class VfxClient {
       opts.onTick?.(status);
 
       if (opts.isFailed(status)) {
-        throw new Error(`${opts.label} polling failed: ${JSON.stringify(status)}`);
-      }
-      if (opts.isDone(status)) {
-        return status;
+        consecutiveFailures += 1;
+        if (consecutiveFailures > tolerated) {
+          throw new Error(`${opts.label} polling failed: ${JSON.stringify(status)}`);
+        }
+      } else {
+        // Only an uninterrupted run counts — a real failure after the job is
+        // live must not be masked by earlier successful polls.
+        consecutiveFailures = 0;
+        if (opts.isDone(status)) {
+          return status;
+        }
       }
 
       await sleep(opts.intervalMs);

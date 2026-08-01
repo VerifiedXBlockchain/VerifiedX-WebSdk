@@ -44,7 +44,19 @@ describe('addressInfo', () => {
 
 describe('transactions', () => {
   test('returns the parsed transaction list', async () => {
-    const fakeTxs = [{ txid: 'ab'.repeat(32), version: 2, locktime: 0, vin: [], vout: [], size: 200, weight: 500, fee: 300, status: { confirmed: true, block_height: 1, block_hash: 'x', block_time: 1 } }];
+    const fakeTxs = [
+      {
+        txid: 'ab'.repeat(32),
+        version: 2,
+        locktime: 0,
+        vin: [],
+        vout: [],
+        size: 200,
+        weight: 500,
+        fee: 300,
+        status: { confirmed: true, block_height: 1, block_hash: 'x', block_time: 1 },
+      },
+    ];
     installFetch({ '/txs': () => fakeTxs });
 
     const txs = await service.transactions('tb1qtest');

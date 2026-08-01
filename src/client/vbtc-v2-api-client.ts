@@ -86,8 +86,9 @@ export class VbtcV2ApiClient extends BaseApiClient {
   // Reads
 
   async listAllTokens(): Promise<VbtcV2Token[]> {
-    const response: PaginatedResponse<VbtcV2Token> | { results: VbtcV2Token[] } =
-      await this.makeJsonRequest('/vbtc-v2/');
+    const response: PaginatedResponse<VbtcV2Token> | { results: VbtcV2Token[] } = await this.makeJsonRequest(
+      '/vbtc-v2/',
+    );
     return response?.results ?? [];
   }
 
@@ -101,9 +102,7 @@ export class VbtcV2ApiClient extends BaseApiClient {
   }
 
   async getTransfers(scIdentifier: string): Promise<VbtcTransfer[]> {
-    const response: { results: VbtcTransfer[] } = await this.makeJsonRequest(
-      `/vbtc-v2/transfers/${scIdentifier}/`,
-    );
+    const response: { results: VbtcTransfer[] } = await this.makeJsonRequest(`/vbtc-v2/transfers/${scIdentifier}/`);
     return response?.results ?? [];
   }
 

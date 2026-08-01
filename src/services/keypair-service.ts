@@ -65,7 +65,7 @@ export class KeypairService {
 
     // Create seed string with entropy
     let seed = `${email}|${password}|`;
-    seed = `${seed}${seed.length}|!@${((password.length * 7) + email.length) * 7}`;
+    seed = `${seed}${seed.length}|!@${(password.length * 7 + email.length) * 7}`;
 
     // Fixed values for cross-platform wallet compatibility
     const chars = 1;
