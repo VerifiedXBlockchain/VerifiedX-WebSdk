@@ -759,3 +759,85 @@ describe('vBTC V2 — a post-broadcast failure must never advise re-signing', ()
     ).rejects.toThrow(/requires the broadcast btcTransactionHash/);
   });
 });
+
+describe('vBTC V2 — FROST polling tolerates job registration lag', () => {
+  let client: VfxClient;
+  let privateKey: string;
+  let requestorAddress: string;
+
+  beforeEach(() => {
+    client = new VfxClient('testnet');
+    privateKey = client.generatePrivateKey();
+    requestorAddress = client.addressFromPrivate(privateKey);
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  const params = () => ({
+    scIdentifier: 'sc-1',
+    requestorAddress,
+    withdrawalRequestHash: 'WR_HASH',
+    btcAddress: 'bc1qBTC',
+    amount: 0.001,
+    feeRate: 10,
+    privateKey,
+    pollIntervalMs: 1,
+    timeoutMs: 2000,
+  });
+
+  const upToPolling = () => ({
+    '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+      success: true,
+      SessionId: 'SES_W',
+      StartMessage: 'FROST_START',
+      StartTimestamp: 100,
+      ShareDistributionMessage: 'FROST_SHARE',
+      ShareDistributionTimestamp: 101,
+      Amount: 0.001,
+      BTCDestination: 'bc1qBTC',
+      FeeRate: 10,
+    }),
+    '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+  });
+
+  test('rides out transient not-yet-registered failures and still completes', async () => {
+    let polls = 0;
+    installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => {
+        polls += 1;
+        // The job is not queryable yet for the first few polls.
+        if (polls <= 3) return { success: false, status: 'failed', message: 'job not found' };
+        return {
+          success: true,
+          status: 'complete',
+          signed_btc_tx_hex: 'DEADBEEF',
+          sc_identifier: 'sc-1',
+          withdrawal_request_hash: 'WR_HASH',
+        };
+      },
+      '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+    });
+
+    const result = await client.completeWithdrawal(params());
+    expect(result.btcTransactionHash).toBe('BTC_TXID');
+    expect(polls).toBeGreaterThan(3);
+  });
+
+  test('a persistent failure still aborts rather than polling to the deadline', async () => {
+    installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: false,
+        status: 'failed',
+        message: 'Invalid start signature',
+      }),
+    });
+
+    await expect(client.completeWithdrawal(params())).rejects.toThrow(/Invalid start signature/);
+  });
+});

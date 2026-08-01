@@ -602,6 +602,11 @@ export class VfxClient {
       intervalMs: pollIntervalMs,
       timeoutMs,
       label: 'frost',
+      // The job is registered a moment after execute returns, so the first
+      // polls can legitimately report failure for a job that does not exist
+      // yet. Aborting on the first one strands a withdrawal whose ceremony was
+      // about to start; the Flutter wallet rides out six for this reason.
+      toleratedFailures: 6,
     });
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
@@ -791,8 +796,16 @@ export class VfxClient {
     intervalMs: number;
     timeoutMs: number;
     label: string;
+    /**
+     * Consecutive failed statuses to ride out before giving up. A job is not
+     * queryable the instant it is created, so the first polls after submit can
+     * report failure for a job that is merely not registered yet.
+     */
+    toleratedFailures?: number;
   }): Promise<T> {
     const deadline = Date.now() + opts.timeoutMs;
+    const tolerated = opts.toleratedFailures ?? 0;
+    let consecutiveFailures = 0;
     // Best-effort short initial delay so callers don't hammer the API immediately after submit.
     await sleep(Math.min(opts.intervalMs, 1500));
 
@@ -801,10 +814,17 @@ export class VfxClient {
       opts.onTick?.(status);
 
       if (opts.isFailed(status)) {
-        throw new Error(`${opts.label} polling failed: ${JSON.stringify(status)}`);
-      }
-      if (opts.isDone(status)) {
-        return status;
+        consecutiveFailures += 1;
+        if (consecutiveFailures > tolerated) {
+          throw new Error(`${opts.label} polling failed: ${JSON.stringify(status)}`);
+        }
+      } else {
+        // Only an uninterrupted run counts — a real failure after the job is
+        // live must not be masked by earlier successful polls.
+        consecutiveFailures = 0;
+        if (opts.isDone(status)) {
+          return status;
+        }
       }
 
       await sleep(opts.intervalMs);
