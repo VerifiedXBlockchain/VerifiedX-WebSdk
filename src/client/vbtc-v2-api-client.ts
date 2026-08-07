@@ -38,6 +38,20 @@ export interface SentTransactionResponse {
   [key: string]: unknown;
 }
 
+/** One per transaction input; the Message strings must be signed verbatim. */
+export interface WithdrawStartMessage {
+  InputIndex: number;
+  SessionId: string;
+  Message: string;
+  Timestamp: number;
+}
+
+/** Informational: which vault UTXOs the withdrawal transaction will spend. */
+export interface WithdrawSelectedOutpoint {
+  TxId: string;
+  Vout: number;
+}
+
 export interface WithdrawCompletePrepareResponse {
   success: boolean;
   SessionId: string;
@@ -48,11 +62,27 @@ export interface WithdrawCompletePrepareResponse {
   Amount: number;
   BTCDestination: string;
   FeeRate: number;
+  /**
+   * Multi-input fields (nodes running the caster upgrade; absent before).
+   * StartMessages[0] is byte-identical to the top-level StartMessage /
+   * SessionId, so single-input flows are unchanged. SelectedOutpoints can be
+   * an empty array when the node could not probe the transaction — that is
+   * not an error.
+   */
+  InputCount?: number;
+  StartMessages?: WithdrawStartMessage[];
+  SelectedOutpoints?: WithdrawSelectedOutpoint[];
 }
 
 export interface WithdrawCompleteExecuteResponse {
   success: boolean;
   job_id: string;
+}
+
+export interface WithdrawValidatorFailure {
+  validator_address: string | null;
+  http_status: number | null;
+  message: string | null;
 }
 
 export type WithdrawCompleteStatusResponse =
@@ -64,7 +94,23 @@ export type WithdrawCompleteStatusResponse =
       sc_identifier: string;
       withdrawal_request_hash: string;
     }
-  | { success: false; status: 'failed'; message: string };
+  | {
+      success: false;
+      status: 'failed';
+      message: string;
+      /**
+       * Structured diagnostics, null/absent unless the failure came from an
+       * actual FROST ceremony (pre-ceremony failures carry only message).
+       * retryable === true means transient: wait ~60s (validator cooldown),
+       * then run a full fresh prepare → sign → execute cycle — session ids
+       * are never reusable across attempts.
+       */
+      failure_code?: string | null;
+      retryable?: boolean | null;
+      session_id?: string | null;
+      input_index?: number | null;
+      validator_failures?: WithdrawValidatorFailure[] | null;
+    };
 
 export interface BroadcastResponse {
   success: boolean;
@@ -207,6 +253,13 @@ export class VbtcV2ApiClient extends BaseApiClient {
     amount: number;
     btc_destination: string;
     fee_rate: number;
+    /**
+     * Multi-input only: one entry per StartMessages[k] with InputIndex >= 1.
+     * Input 0's signature always travels in start_signature — the node
+     * requires it there and ignores index-0 entries here. Omit entirely for
+     * single-input withdrawals.
+     */
+    start_signatures?: { input_index: number; signature: string }[];
   }): Promise<WithdrawCompleteExecuteResponse> {
     return this.makeJsonRequest('/vbtc-v2/withdraw/complete/execute/', 'POST', body);
   }

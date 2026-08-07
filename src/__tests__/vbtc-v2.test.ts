@@ -830,4 +830,102 @@ describe('vBTC V2 — FROST polling tolerates job registration lag', () => {
 
     await expect(client.completeWithdrawal(params())).rejects.toThrow(/Invalid start signature/);
   });
+
+  test('multi-input prepare gets every start message signed, input 0 in the legacy field', async () => {
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: true,
+        SessionId: 'SES_W',
+        StartMessage: 'FROST_START',
+        StartTimestamp: 100,
+        ShareDistributionMessage: 'FROST_SHARE',
+        ShareDistributionTimestamp: 101,
+        Amount: 0.001,
+        BTCDestination: 'bc1qBTC',
+        FeeRate: 10,
+        InputCount: 3,
+        StartMessages: [
+          { InputIndex: 0, SessionId: 'SES_W', Message: 'FROST_START', Timestamp: 100 },
+          { InputIndex: 1, SessionId: 'SES_W:i1', Message: 'SES_W:i1.OWNER.100', Timestamp: 100 },
+          { InputIndex: 2, SessionId: 'SES_W:i2', Message: 'SES_W:i2.OWNER.100', Timestamp: 100 },
+        ],
+        SelectedOutpoints: [
+          { TxId: 'aa', Vout: 0 },
+          { TxId: 'bb', Vout: 1 },
+          { TxId: 'cc', Vout: 0 },
+        ],
+      }),
+      '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: true,
+        status: 'complete',
+        signed_btc_tx_hex: 'DEADBEEF',
+        sc_identifier: 'sc-1',
+        withdrawal_request_hash: 'WR_HASH',
+      }),
+      '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+    });
+
+    await client.completeWithdrawal(params());
+
+    const frostExec = calls.find((c) => c.url.includes('/withdraw/complete/execute/'));
+    expect(frostExec).toBeDefined();
+    const body = frostExec!.body as {
+      start_signature: string;
+      start_signatures: { input_index: number; signature: string }[];
+    };
+
+    // Input 0 rides the legacy field only — never duplicated into the array.
+    expect(body.start_signature).toBe(client.getSignature('FROST_START', privateKey));
+    expect(body.start_signatures).toEqual([
+      { input_index: 1, signature: client.getSignature('SES_W:i1.OWNER.100', privateKey) },
+      { input_index: 2, signature: client.getSignature('SES_W:i2.OWNER.100', privateKey) },
+    ]);
+  });
+
+  test('single-input prepare keeps the execute payload byte-compatible (no start_signatures key)', async () => {
+    const { calls } = installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: true,
+        status: 'complete',
+        signed_btc_tx_hex: 'DEADBEEF',
+        sc_identifier: 'sc-1',
+        withdrawal_request_hash: 'WR_HASH',
+      }),
+      '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+      '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+    });
+
+    await client.completeWithdrawal(params());
+
+    const frostExec = calls.find((c) => c.url.includes('/withdraw/complete/execute/'));
+    expect(frostExec).toBeDefined();
+    expect('start_signatures' in (frostExec!.body as Record<string, unknown>)).toBe(false);
+  });
+
+  test('a retryable FROST failure names the code and says to retry fresh', async () => {
+    installFetch({
+      ...upToPolling(),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+        success: false,
+        status: 'failed',
+        message: 'FROST signing ceremony failed',
+        failure_code: 'Round2InsufficientShares',
+        retryable: true,
+        session_id: 'SES_W',
+        input_index: 0,
+        validator_failures: [
+          { validator_address: 'VAL1', http_status: 0, message: 'unreachable' },
+        ],
+      }),
+    });
+
+    await expect(client.completeWithdrawal(params())).rejects.toThrow(
+      /Round2InsufficientShares is transient.*wait ~60 seconds/s,
+    );
+  });
 });
