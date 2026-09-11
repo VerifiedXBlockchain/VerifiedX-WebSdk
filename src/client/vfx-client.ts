@@ -557,6 +557,20 @@ export class VfxClient {
     const frostStartSig = this.keypairService.getSignature(frostPrep.StartMessage, params.privateKey);
     const frostShareSig = this.keypairService.getSignature(frostPrep.ShareDistributionMessage, params.privateKey);
 
+    // Multi-input withdrawals (caster-upgrade nodes) return one start message
+    // per vault UTXO. StartMessages[0] is byte-identical to the legacy
+    // StartMessage and is already covered by frostStartSig; every later entry
+    // is signed verbatim — the validators verify the exact Message strings the
+    // node returned, so they must never be reconstructed locally. Signing
+    // fewer inputs than the transaction needs fails Execute with
+    // InputCountMismatch (retryable via a fresh prepare).
+    const extraStartSignatures = (frostPrep.StartMessages ?? [])
+      .filter((entry) => entry.InputIndex > 0)
+      .map((entry) => ({
+        input_index: entry.InputIndex,
+        signature: this.keypairService.getSignature(entry.Message, params.privateKey),
+      }));
+
     // Step 3: Execute FROST + poll
     const frostExec = await this.vbtcV2ApiClient.executeWithdrawComplete({
       sc_identifier: params.scIdentifier,
@@ -567,6 +581,9 @@ export class VfxClient {
       start_timestamp: frostPrep.StartTimestamp,
       share_distribution_signature: frostShareSig,
       share_distribution_timestamp: frostPrep.ShareDistributionTimestamp,
+      // Omitted for single-input withdrawals: the payload stays byte-identical
+      // to what pre-multi-input Spyglass/node versions expect.
+      ...(extraStartSignatures.length > 0 ? { start_signatures: extraStartSignatures } : {}),
       // Delegated params: the caller's REAL inputs, never frostPrep echoes.
       // This call races the node's processing of the Type 27 block (prepare
       // runs seconds after the request broadcast); when the node hasn't
@@ -583,25 +600,49 @@ export class VfxClient {
       throw new Error(`completeWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);
     }
 
-    const frostFinal = await this.pollUntilDone({
-      getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(frostExec.job_id),
-      isDone: (s) => s?.success === true && (s as { status?: string }).status === 'complete',
-      isFailed: (s) => s?.success === false || (s as { status?: string }).status === 'failed',
-      onTick: (s) =>
-        onProgress({
-          phase: 'frost_polling',
-          message: `FROST status: ${(s as { status?: string })?.status ?? 'pending'}`,
-          data: s,
-        }),
-      intervalMs: pollIntervalMs,
-      timeoutMs,
-      label: 'frost',
-      // The job is registered a moment after execute returns, so the first
-      // polls can legitimately report failure for a job that does not exist
-      // yet. Aborting on the first one strands a withdrawal whose ceremony was
-      // about to start; the Flutter wallet rides out six for this reason.
-      toleratedFailures: 6,
-    });
+    // The failed-status diagnostics (failure_code, retryable, ...) ride on
+    // the polled status object; captured here so the thrown error can say
+    // whether retrying is worthwhile instead of just dumping JSON.
+    let lastFrostFailure: { failure_code?: string | null; retryable?: boolean | null } | undefined;
+
+    let frostFinal;
+    try {
+      frostFinal = await this.pollUntilDone({
+        getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(frostExec.job_id),
+        isDone: (s) => s?.success === true && (s as { status?: string }).status === 'complete',
+        isFailed: (s) => {
+          const failed = s?.success === false || (s as { status?: string }).status === 'failed';
+          if (failed && (s as { status?: string }).status === 'failed') {
+            lastFrostFailure = s as { failure_code?: string | null; retryable?: boolean | null };
+          }
+          return failed;
+        },
+        onTick: (s) =>
+          onProgress({
+            phase: 'frost_polling',
+            message: `FROST status: ${(s as { status?: string })?.status ?? 'pending'}`,
+            data: s,
+          }),
+        intervalMs: pollIntervalMs,
+        timeoutMs,
+        label: 'frost',
+        // The job is registered a moment after execute returns, so the first
+        // polls can legitimately report failure for a job that does not exist
+        // yet. Aborting on the first one strands a withdrawal whose ceremony was
+        // about to start; the Flutter wallet rides out six for this reason.
+        toleratedFailures: 6,
+      });
+    } catch (e) {
+      if (lastFrostFailure?.retryable === true) {
+        const detail = e instanceof Error ? e.message : String(e);
+        throw new Error(
+          `${detail} — FailureCode ${lastFrostFailure.failure_code ?? 'unknown'} is transient: ` +
+            `wait ~60 seconds (validator-side cooldown), then call completeWithdrawal again. ` +
+            `Each retry runs a fresh ceremony; old sessions are never reused.`,
+        );
+      }
+      throw e;
+    }
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
       throw new Error(`completeWithdrawal frost completed without signed_btc_tx_hex: ${JSON.stringify(frostFinal)}`);

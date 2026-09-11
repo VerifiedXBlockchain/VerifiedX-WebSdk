@@ -1,5 +1,84 @@
 # Changelog
 
+## 3.3.0 (2026-09-11)
+
+Tracks the mainnet network upgrade (multi-input vBTC withdrawals). No public
+API removals or renames. A single-input withdrawal sends a byte-identical
+payload to 3.2.0, so this version also works against nodes that have not
+upgraded yet.
+
+### Added
+
+- **Multi-input withdrawal signing.** `completeWithdrawal` now signs every
+  start message the FROST prepare step returns — one per vault UTXO the
+  Bitcoin transaction spends — and sends the extra signatures in
+  `start_signatures[]` (input 0 keeps riding `start_signature`). Against an
+  upgraded node, earlier SDK versions fail any withdrawal that needs more than
+  one vault UTXO with `InputCountMismatch`; upgrade to fix that.
+- **Structured FROST failure diagnostics.** A failed withdrawal-completion
+  job now reports `failure_code`, `retryable`, `session_id`, `input_index` and
+  `validator_failures`. They reach `onProgress` ticks unchanged (`data` on
+  the `frost_polling` phase). When the ceremony fails with `retryable: true`,
+  the thrown error names the failure code and says to wait ~60 seconds
+  (validator-side cooldown), then call `completeWithdrawal` again. Each retry
+  is a fresh ceremony; sessions are never reused.
+
+## 3.2.0 (2026-08-01)
+
+vBTC withdrawal recovery. No public API removals or renames; one behavioral
+change is called out below because code may rely on the old return value.
+
+### Behavioral fixes (read these)
+
+- **`RawTransactionService.process()` throws `TransactionDispatchError`
+  when the send itself fails.** Previously every failure returned `null`,
+  which told the caller "definitely not sent" even when a dropped connection
+  or timeout left it unknown whether the node accepted the transaction — and
+  a caller that resent could spend twice. `null` is unchanged for pre-dispatch
+  validation failures and explicit node rejections; only the ambiguous case
+  now throws, carrying the transaction hash so the caller can check the chain
+  before resending.
+- **A post-broadcast withdrawal failure no longer tells you to resume with
+  `completeWithdrawal`.** Once the Bitcoin transaction is broadcast, re-running
+  the ceremony re-selects UTXOs and can pay the destination twice. That state
+  now throws `VbtcWithdrawalUnrecordedError` (carrying the BTC txid) with
+  instructions to call `recordWithdrawalCompletion` instead. Failures before
+  the broadcast still throw `VbtcWithdrawalIncompleteError` and remain
+  resumable.
+
+### Added
+
+- **`recordWithdrawalCompletion`** — records an already-broadcast Bitcoin
+  withdrawal (the Type 28 completion) without re-running the FROST ceremony.
+  It needs no session state, so it is safe from a fresh process after a
+  crash, reload or device switch, provided the caller persisted the txid.
+  `completeWithdrawal` uses it for its final step.
+- **`VbtcWithdrawalStatus`** widened to
+  `'requested' | 'pending_btc' | 'completed' | 'cancelled' | 'cancellation_requested'`
+  (Spyglass's lowercase values). `pending_btc` means a signed Bitcoin
+  transaction exists — the state where re-running a withdrawal can pay twice —
+  and only appears for ceremonies run through Spyglass; see the doc comment
+  on the type for the caveats.
+
+### Fixes
+
+- **FROST status polling rides out job-registration lag.** The first polls
+  after execute can report failure for a job that is not registered yet; the
+  SDK now tolerates up to six consecutive early failures (as the Flutter
+  wallet does) instead of abandoning a withdrawal whose request is already
+  committed on chain.
+
+## 3.1.1 (2026-08-01)
+
+### Fixes
+
+- **A failed withdrawal completion is resumable.** When `requestWithdrawal`
+  commits the request on chain but completion fails, the rejection is now
+  `VbtcWithdrawalIncompleteError` carrying `withdrawalRequestHash` and the
+  underlying error, so the caller can hand it straight to
+  `completeWithdrawal`. Previously the hash was lost with the rejection,
+  stranding a request the chain refuses to re-issue while it stands.
+
 ## 3.1.0 (2026-07-07)
 
 Security-and-correctness release. No public API removals or renames; two
