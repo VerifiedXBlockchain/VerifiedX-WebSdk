@@ -107,7 +107,27 @@ export class KeypairService {
     const normalized = normalizePrivateKey(privateKey.toLowerCase());
     const buffer = Buffer.from(normalized, 'hex');
     const keyPair = secp256k1Curve.keyFromPrivate(buffer);
-    const publicKey = keyPair.getPublic('hex');
+    return this.addressFromPublic(keyPair.getPublic('hex'));
+  }
+
+  /**
+   * Derive the network address for an uncompressed secp256k1 public key (hex,
+   * with or without the `04` prefix). This is how an external signer's address
+   * is obtained without the SDK ever seeing the private key.
+   */
+  public addressFromPublic(publicKeyHex: string): string {
+    const hex = publicKeyHex.trim().toLowerCase();
+    let publicKey: string;
+    if (hex.length === 130 && hex.startsWith('04')) {
+      publicKey = hex;
+    } else if (hex.length === 128) {
+      publicKey = '04' + hex;
+    } else {
+      throw new Error(`Invalid public key: expected 128 hex chars (optional 04 prefix), got ${hex.length} chars`);
+    }
+    if (!/^[0-9a-f]+$/.test(publicKey)) {
+      throw new Error('Invalid public key: not hex');
+    }
 
     const pubKeySha = CryptoJS.SHA256(hexToString(publicKey));
 
