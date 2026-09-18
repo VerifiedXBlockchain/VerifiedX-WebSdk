@@ -42,6 +42,14 @@ TypeScript will now accept an options object that omits them.
   the network does. `VfxAddress` gains `deactivated`. Golden vectors for the
   derivation were captured from the wallet's compiled keygen and
   `scripts/verify-wallet-compat.js` cross-checks it live.
+- **`transferVbtcMulti`** — one `TransferVBTCMultiV2()` drawing from several
+  vBTC contracts, allocated with the CLI's rule from Spyglass's
+  `available_balances` (now on `VbtcV2Token`) or from caller-supplied
+  inputs; single-contract cases fall back to `transferVbtc`.
+  `allocateVbtcInputs` and `vbtcMultiTransferData` are exported.
+- **Domain management.** `transferVfxDomain`, `deleteVfxDomain`,
+  `transferBtcDomain`, `deleteBtcDomain` (5 VFX each), completing the
+  domain API alongside the existing purchases.
 
 ### Changed
 

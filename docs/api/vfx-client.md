@@ -186,6 +186,47 @@ const result = await client.buyVfxDomain(keypair, "myawesomeapp.vfx");
 - Address must not already own a domain
 - Sufficient VFX balance for domain cost
 
+### `transferVfxDomain(keypair, toAddress)`
+
+Hands the signer's .vfx domain to `toAddress`. Costs 5 VFX. The owned name is
+read from Spyglass and the recipient is checked for an existing domain, both
+strictly: an API outage fails the call rather than reading as "no domain".
+
+### `deleteVfxDomain(keypair)`
+
+Releases the signer's .vfx domain. Costs 5 VFX.
+
+### `transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress })`
+
+Moves a .btc domain to another Bitcoin address, managed by `vfxToAddress`
+from then on. Costs 5 VFX. The signer must be the VFX account that currently
+manages the domain for `btcFromAddress`; the node checks that pairing and that
+`btcToAddress` has no domain. No Bitcoin signature is needed.
+
+### `deleteBtcDomain(keypair, { btcFromAddress })`
+
+Releases the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX.
+
+The network refuses every domain operation from a reserve (xRBX) account.
+
+## vBTC Multi-Contract Transfer
+
+### `transferVbtcMulti({ toAddress, totalAmount, privateKey | signer, inputs? })`
+
+Sends `totalAmount` vBTC in one transaction drawn from several V2 contracts
+the signer holds spendable balance on. Without `inputs`, balances come from
+Spyglass's `available_balances` (the address's balance minus its open
+withdrawal requests) and are allocated the way the CLI does: largest first,
+ties by contract id, greedy, in whole satoshis so the inputs sum to the total
+exactly. A transfer that one contract can cover goes through `transferVbtc`
+instead, as the wallet does. The node caps a transfer at 25 contracts and
+refuses it from a reserve account or to a shielded address.
+
+**Returns:** `Promise<{ transactionHash: string; inputs: Array<{ scIdentifier: string; amount: number }> }>`
+
+`allocateVbtcInputs(balances, total)` and `vbtcMultiTransferData(...)` are
+exported for callers that fetch balances or choose contracts themselves.
+
 ## Fungible Token Methods (VFX20)
 
 Every mutating method returns `Promise<string | null>` with the `sendCoin`
