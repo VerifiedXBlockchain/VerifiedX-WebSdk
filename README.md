@@ -89,9 +89,9 @@ const address = vfxClient.addressFromPrivate(privateKey);
 
 // Send transaction
 const result = await vfxClient.sendCoin({
-  private: privateKey,
-  public: vfxClient.publicFromPrivate(privateKey),
-  address: address
+  privateKey,
+  publicKey: vfxClient.publicFromPrivate(privateKey),
+  address,
 }, 'recipient-address', 1000);
 ```
 
