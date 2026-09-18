@@ -151,3 +151,62 @@ describe('RawTransactionService.process — dispatch ambiguity', () => {
     expect(await buildService().process()).toBeNull();
   });
 });
+
+describe('RawTransactionService with an external signer', () => {
+  // Stand-in for an HSM: signs the digest with elliptic and returns DER, the
+  // same way the signer unit tests do, so the result can be compared with the
+  // local keypair path byte-for-byte.
+  const externalSigner = {
+    address: keypair.address,
+    publicKey: keypair.publicKey,
+    signDigest: (digestHex: string): Uint8Array => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const EC = require('elliptic');
+      const curve = new EC.ec('secp256k1');
+      const signature = curve.keyFromPrivate(Buffer.from(privateKey, 'hex')).sign(Buffer.from(digestHex, 'hex'), {
+        canonical: true,
+      });
+      return Uint8Array.from(signature.toDER());
+    },
+  };
+
+  test('the signer option drives the pipeline and signs what the keypair would have', async () => {
+    const { calls } = installPipeline();
+    const service = new RawTransactionService({
+      network: Network.Testnet,
+      signer: externalSigner,
+      toAddress: 'xRecipient00000000000000000000000',
+      amount: 1.5,
+    });
+    const hash = await service.process();
+    expect(hash).toBe('TX_HASH_ABC');
+
+    const sendTx = (calls[6].body as { transaction: Record<string, unknown> }).transaction;
+    expect(sendTx.FromAddress).toBe(keypair.address);
+    expect(sendTx.Signature).toBe(keypairService.getSignature('TX_HASH_ABC', privateKey));
+    // The signature is validated against the signer's address, not a
+    // caller-supplied one.
+    expect(calls[4].url).toContain(`/${keypair.address}/`);
+  });
+
+  test('a signer whose address does not belong to its key is refused at construction', () => {
+    expect(
+      () =>
+        new RawTransactionService({
+          network: Network.Testnet,
+          signer: { ...externalSigner, address: 'xSomeoneElse000000000000000000000' },
+          toAddress: 'xRecipient00000000000000000000000',
+        }),
+    ).toThrow(/does not match its public key/);
+  });
+
+  test('a keypair or signer is required', () => {
+    expect(
+      () =>
+        new RawTransactionService({
+          network: Network.Testnet,
+          toAddress: 'xRecipient00000000000000000000000',
+        }),
+    ).toThrow(/requires a keypair or a signer/);
+  });
+});
