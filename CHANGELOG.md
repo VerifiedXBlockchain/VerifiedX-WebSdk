@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+External signing and fungible tokens. No public API removals or renames; the
+`privateKey` parameters that became optional are called out below because
+TypeScript will now accept an options object that omits them.
+
+### Added
+
+- **`Signer` — sign with a key the SDK never sees.** Every signing path
+  (`sendCoin`, `buyVfxDomain`, `buyBtcDomain`, the six vBTC flows, and the
+  new token methods) accepts a `Signer` in place of a `Keypair`. The SDK hands
+  the signer the SHA-256 digest of the message; the signer returns a plain
+  DER-encoded secp256k1 ECDSA signature (bytes, hex or base64), which is what a
+  KMS or HSM emits natively. The SDK assembles the network's
+  `base64(DER).base58(publicKey)` string and normalises high-s signatures, so
+  AWS KMS-style signers need no wrapper. The signer's address is verified
+  against its public key on the client's network before any request is made.
+  `vfxSignatureFromDer(der, publicKey)` is exported for callers that drive the
+  raw API themselves.
+- **`addressFromPublic(publicKeyHex)`** on `VfxClient` and `KeypairService`:
+  the address for an HSM-held key.
+- **Fungible tokens (VFX20).** `deployToken`, `mintToken`, `transferToken`,
+  `burnToken`, `toggleTokenPause`, `banTokenAddress`,
+  `transferTokenOwnership`, `createTokenVoteTopic`, `castTokenVote`, and the
+  reads `listFungibleTokens`, `getFungibleToken`, `getFungibleTokenBalances`,
+  `listTokenVotingTopics`, `getTokenVotingTopic`. Payloads mirror the web
+  wallet field-for-field. Pause is exposed as a toggle because the node flips
+  the state and ignores the requested value; ban is permanent on the network.
+- `RawTransactionService` accepts `signer` (or a `Signer` as `keypair`) and
+  fails at construction on a key/address mismatch.
+
+### Changed
+
+- vBTC flows: `privateKey` is now optional in the params object and `signer`
+  is accepted instead. Exactly one must be given — passing both, or neither,
+  throws before any request is made. Behaviour with `privateKey` alone is
+  unchanged.
+
 ## 3.3.0 (2026-09-11)
 
 Tracks the mainnet network upgrade (multi-input vBTC withdrawals). No public
