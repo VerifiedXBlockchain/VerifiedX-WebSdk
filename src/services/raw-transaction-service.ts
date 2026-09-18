@@ -1,7 +1,6 @@
 import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
 import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
-import { Keypair } from '../types';
 import KeypairService from './keypair-service';
 
 export interface IRawTransactionServiceOptions {
@@ -11,8 +10,8 @@ export interface IRawTransactionServiceOptions {
    * elsewhere (HSM, MPC). `signer` is the same option under a name that reads
    * correctly for external signers; pass one or the other.
    */
-  keypair?: KeypairOrSigner;
-  signer?: KeypairOrSigner;
+  keypair?: KeypairOrSigner | ResolvedSigner;
+  signer?: KeypairOrSigner | ResolvedSigner;
   toAddress: string;
   txType?: number;
   amount?: number;

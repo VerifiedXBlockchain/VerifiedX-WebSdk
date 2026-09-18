@@ -2,9 +2,9 @@ import BtcClient from '../btc';
 import { DOMAIN_PURCHASE_COST, Network, TxType } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
+import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
 import {
   CreateVbtcResult,
-  Keypair,
   PaginatedResponse,
   Transaction,
   VbtcCancelResult,
@@ -23,7 +23,6 @@ import {
   generateRandomStringSecure,
   isValidBtcDomain,
   isValidVfxDomain,
-  normalizePrivateKey,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
@@ -178,6 +177,15 @@ export class VfxClient {
     return this.keypairService.addressFromPrivate(privateKey);
   };
 
+  /**
+   * Derive the network address for an uncompressed secp256k1 public key. This
+   * is how the address of an external signer (HSM, MPC) is obtained: the SDK
+   * never needs the private key.
+   */
+  public addressFromPublic = (publicKeyHex: string): string => {
+    return this.keypairService.addressFromPublic(publicKeyHex);
+  };
+
   public getSignature = (message: string, privateKey: string): string => {
     return this.keypairService.getSignature(message, privateKey);
   };
@@ -197,7 +205,7 @@ export class VfxClient {
   };
 
   // Transactions
-  public sendCoin = async (keypair: Keypair, toAddress: string, amount: number): Promise<string | null> => {
+  public sendCoin = async (keypair: KeypairOrSigner, toAddress: string, amount: number): Promise<string | null> => {
     const txBuilder = new RawTransactionService({
       network: this.network,
       keypair: keypair,
@@ -220,16 +228,18 @@ export class VfxClient {
     return this.adnrApiClient.lookupBtcDomainFromBtcAddress(address);
   };
 
-  public buyVfxDomain = async (keypair: Keypair, domain: string): Promise<string | null> => {
+  public buyVfxDomain = async (keypair: KeypairOrSigner, domain: string): Promise<string | null> => {
     domain = cleanVfxDomain(domain);
 
     if (!isValidVfxDomain(domain)) {
       throw new Error(`Invalid vfx domain: ${domain}`);
     }
 
+    const signer = this.resolve(keypair);
+
     // strict: an API outage must fail the purchase, not read as
     // "no domain yet / domain available".
-    const addressDetails = await this.addressApiClient.getAddressDetails(keypair.address, { strict: true });
+    const addressDetails = await this.addressApiClient.getAddressDetails(signer.address, { strict: true });
     if (addressDetails && addressDetails.adnr != null) {
       throw new Error(`Address already has a domain: ${addressDetails.adnr}`);
     }
@@ -247,7 +257,7 @@ export class VfxClient {
 
     const txBuilder = new RawTransactionService({
       network: this.network,
-      keypair: keypair,
+      signer,
       toAddress: 'Adnr_Base',
       amount: DOMAIN_PURCHASE_COST,
       txType: TxType.Adnr,
@@ -258,7 +268,11 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
-  public buyBtcDomain = async (keypair: Keypair, domain: string, btcPrivateKey: string): Promise<string | null> => {
+  public buyBtcDomain = async (
+    keypair: KeypairOrSigner,
+    domain: string,
+    btcPrivateKey: string,
+  ): Promise<string | null> => {
     domain = cleanBtcDomain(domain);
 
     if (!isValidBtcDomain(domain)) {
@@ -336,9 +350,13 @@ export class VfxClient {
     fromAddress: string;
     toAddress: string;
     amount: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
   }): Promise<VbtcTransferResult> => {
     this.assertNotDryRun('transferVbtc');
+    const signer = this.signerFor(params, 'transferVbtc');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
@@ -347,7 +365,7 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) => this.vbtcV2ApiClient.sendTransfer(body));
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendTransfer(body));
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
@@ -355,7 +373,10 @@ export class VfxClient {
 
   public createVbtcToken = async (params: {
     ownerAddress: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     name: string;
     description: string;
     ticker: string;
@@ -364,6 +385,7 @@ export class VfxClient {
     timeoutMs?: number;
   }): Promise<CreateVbtcResult> => {
     this.assertNotDryRun('createVbtcToken');
+    const signer = this.signerFor(params, 'createVbtcToken');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 4000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -374,14 +396,8 @@ export class VfxClient {
       throw new Error(`createVbtcToken ceremony prepare failed: ${JSON.stringify(ceremonyPrep)}`);
     }
 
-    const startSignature = this.keypairService.getSignature(
-      ceremonyPrep.messages_to_sign.start_message,
-      params.privateKey,
-    );
-    const shareSignature = this.keypairService.getSignature(
-      ceremonyPrep.messages_to_sign.share_distribution_message,
-      params.privateKey,
-    );
+    const startSignature = await signer.sign(ceremonyPrep.messages_to_sign.start_message);
+    const shareSignature = await signer.sign(ceremonyPrep.messages_to_sign.share_distribution_message);
 
     onProgress({
       phase: 'ceremony_started',
@@ -424,7 +440,7 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = this.keypairService.getSignature(ownershipMessage, params.privateKey);
+    const ownerSignature = await signer.sign(ownershipMessage);
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -440,7 +456,7 @@ export class VfxClient {
     });
     this.assertPrepared(createPrep, 'createVbtcToken:prepare');
 
-    const sent = await this.signAndSend(createPrep, params.privateKey, (body) => this.vbtcV2ApiClient.sendCreate(body));
+    const sent = await this.signAndSend(createPrep, signer, (body) => this.vbtcV2ApiClient.sendCreate(body));
     this.assertSent(sent, 'createVbtcToken:send');
 
     onProgress({
@@ -465,12 +481,16 @@ export class VfxClient {
     btcAddress: string;
     amount: number;
     feeRate: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('requestWithdrawal');
+    const signer = this.signerFor(params, 'requestWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
 
     // Step 1: Request (Type 27)
@@ -483,7 +503,7 @@ export class VfxClient {
     });
     this.assertPrepared(requestPrep, 'requestWithdrawal:request:prepare');
 
-    const requestSent = await this.signAndSend(requestPrep, params.privateKey, (body) =>
+    const requestSent = await this.signAndSend(requestPrep, signer, (body) =>
       this.vbtcV2ApiClient.sendWithdrawRequest(body),
     );
     this.assertSent(requestSent, 'requestWithdrawal:request:send');
@@ -531,12 +551,16 @@ export class VfxClient {
     btcAddress: string;
     amount: number;
     feeRate: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('completeWithdrawal');
+    const signer = this.signerFor(params, 'completeWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -554,8 +578,8 @@ export class VfxClient {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
 
-    const frostStartSig = this.keypairService.getSignature(frostPrep.StartMessage, params.privateKey);
-    const frostShareSig = this.keypairService.getSignature(frostPrep.ShareDistributionMessage, params.privateKey);
+    const frostStartSig = await signer.sign(frostPrep.StartMessage);
+    const frostShareSig = await signer.sign(frostPrep.ShareDistributionMessage);
 
     // Multi-input withdrawals (caster-upgrade nodes) return one start message
     // per vault UTXO. StartMessages[0] is byte-identical to the legacy
@@ -564,12 +588,12 @@ export class VfxClient {
     // node returned, so they must never be reconstructed locally. Signing
     // fewer inputs than the transaction needs fails Execute with
     // InputCountMismatch (retryable via a fresh prepare).
-    const extraStartSignatures = (frostPrep.StartMessages ?? [])
-      .filter((entry) => entry.InputIndex > 0)
-      .map((entry) => ({
-        input_index: entry.InputIndex,
-        signature: this.keypairService.getSignature(entry.Message, params.privateKey),
-      }));
+    const extraStartSignatures: Array<{ input_index: number; signature: string }> = [];
+    for (const entry of frostPrep.StartMessages ?? []) {
+      if (entry.InputIndex > 0) {
+        extraStartSignatures.push({ input_index: entry.InputIndex, signature: await signer.sign(entry.Message) });
+      }
+    }
 
     // Step 3: Execute FROST + poll
     const frostExec = await this.vbtcV2ApiClient.executeWithdrawComplete({
@@ -690,6 +714,7 @@ export class VfxClient {
         amount: params.amount,
         btcDestination: params.btcAddress,
         privateKey: params.privateKey,
+        signer: params.signer,
         onProgress,
       });
     } catch (error) {
@@ -721,10 +746,14 @@ export class VfxClient {
     btcTransactionHash: string;
     amount: number;
     btcDestination: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('recordWithdrawalCompletion');
+    const signer = this.signerFor(params, 'recordWithdrawalCompletion');
     const onProgress = params.onProgress ?? (() => undefined);
 
     if (!params.btcTransactionHash) {
@@ -741,7 +770,7 @@ export class VfxClient {
     });
     this.assertPrepared(completionPrep, 'recordWithdrawalCompletion:prepare');
 
-    const completionSent = await this.signAndSend(completionPrep, params.privateKey, (body) =>
+    const completionSent = await this.signAndSend(completionPrep, signer, (body) =>
       this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
     );
     this.assertSent(completionSent, 'recordWithdrawalCompletion:send');
@@ -763,9 +792,13 @@ export class VfxClient {
     scIdentifier: string;
     ownerAddress: string;
     withdrawalRequestHash: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
   }): Promise<VbtcCancelResult> => {
     this.assertNotDryRun('cancelWithdrawal');
+    const signer = this.signerFor(params, 'cancelWithdrawal');
     const prepared = await this.vbtcV2ApiClient.prepareWithdrawCancel({
       sc_identifier: params.scIdentifier,
       owner_address: params.ownerAddress,
@@ -773,9 +806,7 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'cancelWithdrawal:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendWithdrawCancel(body),
-    );
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawCancel(body));
     this.assertSent(sent, 'cancelWithdrawal:send');
 
     return { transactionHash: sent.Hash };
@@ -807,20 +838,37 @@ export class VfxClient {
     }
   }
 
+  private resolve(input: KeypairOrSigner | ResolvedSigner | { privateKey: string }): ResolvedSigner {
+    return resolveSigner(input, this.keypairService);
+  }
+
+  /**
+   * Pick the signing key for a flow that historically took `privateKey` and
+   * now also accepts `signer`. Exactly one must be given: silently preferring
+   * one over the other would hide a wiring mistake in exactly the setups
+   * (HSM alongside a leftover dev key) where it matters most.
+   */
+  private signerFor(params: { privateKey?: string; signer?: Signer }, label: string): ResolvedSigner {
+    if (params.signer && params.privateKey) {
+      throw new Error(`${label}: pass either privateKey or signer, not both`);
+    }
+    if (params.signer) {
+      return this.resolve(params.signer);
+    }
+    if (params.privateKey) {
+      return this.resolve({ privateKey: params.privateKey });
+    }
+    throw new Error(`${label} requires a privateKey or a signer`);
+  }
+
   private async signAndSend(
     prepared: PreparedTransactionResponse,
-    privateKey: string,
+    signer: ResolvedSigner,
     sendFn: SendFn,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = this.keypairService.getSignature(hash, privateKey);
-
-    let publicKey = this.keypairService.publicFromPrivate(normalizePrivateKey(privateKey));
-    if (publicKey.startsWith('04')) {
-      publicKey = publicKey.substring(2);
-    }
-
-    return sendFn({ hash, signature, public_key: publicKey });
+    const signature = await signer.sign(hash);
+    return sendFn({ hash, signature, public_key: signer.publicKey });
   }
 
   private async pollUntilDone<T>(opts: {

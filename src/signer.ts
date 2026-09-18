@@ -46,6 +46,16 @@ export interface ResolvedSigner {
 const SECP256K1_N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
 const SECP256K1_HALF_N = SECP256K1_N >> BigInt(1);
 
+export function isResolvedSigner(value: unknown): value is ResolvedSigner {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ResolvedSigner).sign === 'function' &&
+    typeof (value as ResolvedSigner).address === 'string' &&
+    typeof (value as ResolvedSigner).publicKey === 'string'
+  );
+}
+
 export function isSigner(value: unknown): value is Signer {
   return (
     typeof value === 'object' &&
@@ -204,9 +214,12 @@ export function vfxSignatureFromDer(der: Uint8Array | string, publicKeyHex: stri
  * means the wrong key (or the wrong network) was wired up.
  */
 export function resolveSigner(
-  input: KeypairOrSigner | { privateKey: string },
+  input: KeypairOrSigner | { privateKey: string } | ResolvedSigner,
   keypairService: KeypairService,
 ): ResolvedSigner {
+  if (isResolvedSigner(input)) {
+    return input;
+  }
   if (isSigner(input)) {
     const publicKey = stripPublicKeyPrefix(input.publicKey);
     const derivedAddress = keypairService.addressFromPublic(publicKey);
