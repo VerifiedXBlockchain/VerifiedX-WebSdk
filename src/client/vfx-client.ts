@@ -1,11 +1,29 @@
 import BtcClient from '../btc';
-import { DOMAIN_PURCHASE_COST, Network, TxType } from '../constants';
+import { DOMAIN_PURCHASE_COST, Network, TOKEN_BASE_ADDRESS, TxType } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
+import {
+  TokenTxData,
+  tokenBanAddressData,
+  tokenBurnData,
+  tokenDeployPayload,
+  tokenMintData,
+  tokenOwnerChangeData,
+  tokenPauseData,
+  tokenTransferData,
+  tokenVoteCastData,
+  tokenVoteTopicCreateData,
+} from '../services/token-data';
 import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
 import {
   CreateVbtcResult,
+  DeployTokenParams,
+  DeployTokenResult,
+  FungibleToken,
+  FungibleTokenBalance,
+  FungibleTokenDetail,
   PaginatedResponse,
+  TokenVotingTopic,
   Transaction,
   VbtcCancelResult,
   VbtcProgressEvent,
@@ -26,7 +44,9 @@ import {
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
+import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
+import { TokenApiClient } from './token-api-client';
 import { TransactionApiClient } from './transaction-api.client';
 import { PreparedTransactionResponse, SentTransactionResponse, VbtcV2ApiClient } from './vbtc-v2-api-client';
 
@@ -122,6 +142,8 @@ export class VfxClient {
   private rawTransactionApiClient: RawTransactionApiClient;
   private transactionApiClient: TransactionApiClient;
   private vbtcV2ApiClient: VbtcV2ApiClient;
+  private tokenApiClient: TokenApiClient;
+  private blockApiClient: BlockApiClient;
 
   /**
    * @param network 'mainnet' | 'testnet' (or the Network enum)
@@ -145,6 +167,8 @@ export class VfxClient {
     this.rawTransactionApiClient = new RawTransactionApiClient(networkEnum, this.apiOptions);
     this.transactionApiClient = new TransactionApiClient(networkEnum, this.apiOptions);
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
+    this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
+    this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
   }
 
   // Keypairs
@@ -812,7 +836,249 @@ export class VfxClient {
     return { transactionHash: sent.Hash };
   };
 
+  // ---------------------------------------------------------------------------
+  // Fungible tokens (VFX20)
+  //
+  // Every mutating method returns the transaction hash, or null when the
+  // transaction never reached the node (same contract as sendCoin), and
+  // honours dryRun. The signer's address is the token-side FromAddress: the
+  // owner for mint / pause / ban / ownership change / topic creation, the
+  // holder for transfer / burn / vote.
+  // ---------------------------------------------------------------------------
+
+  public listFungibleTokens = async (page = 1, limit = 10): Promise<PaginatedResponse<FungibleToken>> => {
+    return this.tokenApiClient.listTokens(page, limit);
+  };
+
+  public getFungibleToken = async (scIdentifier: string): Promise<FungibleTokenDetail> => {
+    return this.tokenApiClient.getToken(scIdentifier);
+  };
+
+  public getFungibleTokenBalances = async (address: string): Promise<FungibleTokenBalance[]> => {
+    return this.addressApiClient.getTokenBalances(address);
+  };
+
+  public listTokenVotingTopics = async (
+    scIdentifier: string,
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResponse<TokenVotingTopic>> => {
+    return this.tokenApiClient.listVotingTopics(scIdentifier, page, limit);
+  };
+
+  public getTokenVotingTopic = async (topicId: string): Promise<TokenVotingTopic> => {
+    return this.tokenApiClient.getVotingTopic(topicId);
+  };
+
+  /**
+   * Deploy a fungible token contract owned by the signer. The payload is
+   * compiled on the node (via Spyglass), and the resulting Type 17 deploy is
+   * sent from the signer's address to itself. The contract id is known before
+   * the send, so it is returned even in dryRun.
+   */
+  public deployToken = async (
+    signer: KeypairOrSigner,
+    params: DeployTokenParams,
+  ): Promise<DeployTokenResult | null> => {
+    const resolved = this.resolve(signer);
+    const payload = tokenDeployPayload({ ...params, minterAddress: resolved.address });
+    const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
+    const scIdentifier = data[0].ContractUID as string;
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: resolved.address,
+      amount: 0,
+      txType: TxType.TokenDeploy,
+      data,
+      apiOptions: this.apiOptions,
+    });
+    const transactionHash = await txBuilder.process(this.dryRun);
+    return transactionHash ? { transactionHash, scIdentifier } : null;
+  };
+
+  /** Owner only; the token must be mintable. Tokens are credited to the signer. */
+  public mintToken = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenMintData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+  };
+
+  public transferToken = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; toAddress: string; amount: number; ticker?: string; name?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenTransferData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress: params.toAddress,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, params.toAddress, data);
+  };
+
+  /** Burns from the signer's own balance; the token must be burnable. */
+  public burnToken = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenBurnData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+  };
+
+  /**
+   * Owner only. Flips the token between paused (no transfers) and active.
+   * The node toggles whatever the current state is — there is no way to
+   * "set paused" — so read `is_paused` from getFungibleToken first, and never
+   * send this twice for one intended change: the second one undoes the first.
+   */
+  public toggleTokenPause = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const data = tokenPauseData({ scIdentifier: params.scIdentifier, fromAddress: resolved.address });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+  };
+
+  /**
+   * Owner only. Stops `address` from sending the token. It can still receive,
+   * and the network has no way to lift a ban, so treat this as permanent.
+   */
+  public banTokenAddress = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; address: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const data = tokenBanAddressData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      banAddress: params.address,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+  };
+
+  /** Owner only. Hands the owner role (mint, pause, ban, topics) to `toAddress`. */
+  public transferTokenOwnership = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; toAddress: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const data = tokenOwnerChangeData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress: params.toAddress,
+    });
+    return this.sendTokenTx(resolved, params.toAddress, data);
+  };
+
+  /**
+   * Owner only; the token must have voting enabled. Opens a yes/no topic that
+   * holders can vote on for `votingDays` days. The topic is anchored to the
+   * current block height, fetched from Spyglass unless `blockHeight` is given.
+   */
+  public createTokenVoteTopic = async (
+    signer: KeypairOrSigner,
+    params: {
+      scIdentifier: string;
+      name: string;
+      description: string;
+      votingDays: number;
+      minimumVoteRequirement: number;
+      blockHeight?: number;
+    },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    if (!Number.isInteger(params.votingDays) || params.votingDays < 1) {
+      throw new Error('votingDays must be a whole number of days, at least 1');
+    }
+    const blockHeight = params.blockHeight ?? (await this.blockApiClient.getLatestHeight());
+    const createdAt = Math.round(Date.now() / 1000);
+    const data = tokenVoteTopicCreateData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      topicUid: `${generateRandomStringSecure(8, VBTC_UNIQUE_ID_CHARSET)}${createdAt}`,
+      name: params.name,
+      description: params.description,
+      minimumVoteRequirement: params.minimumVoteRequirement,
+      blockHeight,
+      createdAt,
+      votingEndsAt: createdAt + params.votingDays * 24 * 60 * 60,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+  };
+
+  /**
+   * Cast the signer's vote on a topic. The transaction is addressed to the
+   * token owner, looked up from Spyglass unless `ownerAddress` is given.
+   */
+  public castTokenVote = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; topicUid: string; vote: boolean; ownerAddress?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const ownerAddress =
+      params.ownerAddress ?? (await this.tokenApiClient.getToken(params.scIdentifier)).token.owner_address;
+    const data = tokenVoteCastData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      topicUid: params.topicUid,
+      vote: params.vote,
+    });
+    return this.sendTokenTx(resolved, ownerAddress, data);
+  };
+
   // -- Internal helpers --------------------------------------------------------
+
+  /**
+   * Ticker and name travel in every token transaction for indexers and
+   * wallets. Callers that know them skip a round-trip; otherwise they are read
+   * from Spyglass.
+   */
+  private async tokenIdentity(params: {
+    scIdentifier: string;
+    ticker?: string;
+    name?: string;
+  }): Promise<{ ticker: string; name: string }> {
+    if (params.ticker && params.name) {
+      return { ticker: params.ticker, name: params.name };
+    }
+    const detail = await this.tokenApiClient.getToken(params.scIdentifier);
+    return { ticker: params.ticker ?? detail.token.ticker, name: params.name ?? detail.token.name };
+  }
+
+  private async sendTokenTx(signer: ResolvedSigner, toAddress: string, data: TokenTxData): Promise<string | null> {
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: 0,
+      txType: TxType.TokenTx,
+      data,
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  }
 
   private assertNotDryRun(label: string): void {
     // vBTC flows run MPC/FROST ceremonies and broadcast immediately — there

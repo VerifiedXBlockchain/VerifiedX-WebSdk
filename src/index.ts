@@ -28,7 +28,19 @@ export type {
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,
+  FungibleToken,
+  FungibleTokenDetail,
+  FungibleTokenBalance,
+  TokenVotingTopic,
+  TokenImage,
+  DeployTokenParams,
+  DeployTokenResult,
 } from './types';
+
+// External signing (HSM / MPC)
+export type { Signer, KeypairOrSigner } from './signer';
+export { vfxSignatureFromDer } from './signer';
+export { TOKEN_BASE_ADDRESS } from './constants';
 
 // Export BTC namespace
 export * as btc from './btc';
