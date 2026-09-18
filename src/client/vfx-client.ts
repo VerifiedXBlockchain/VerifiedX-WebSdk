@@ -1,5 +1,14 @@
 import BtcClient from '../btc';
-import { DOMAIN_PURCHASE_COST, Network, TOKEN_BASE_ADDRESS, TxType } from '../constants';
+import {
+  DOMAIN_PURCHASE_COST,
+  Network,
+  RESERVE_ACTIVATION_COST,
+  RESERVE_ADDRESS_PREFIX,
+  RESERVE_BASE_ADDRESS,
+  RESERVE_MIN_UNLOCK_HOURS,
+  TOKEN_BASE_ADDRESS,
+  TxType,
+} from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
 import {
@@ -23,6 +32,7 @@ import {
   FungibleTokenBalance,
   FungibleTokenDetail,
   PaginatedResponse,
+  ReserveKeypair,
   TokenVotingTopic,
   Transaction,
   VbtcCancelResult,
@@ -51,6 +61,19 @@ import { TransactionApiClient } from './transaction-api.client';
 import { PreparedTransactionResponse, SentTransactionResponse, VbtcV2ApiClient } from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
+
+/**
+ * Accepted by every method that can be signed from a reserve (vault) account.
+ * Ignored for ordinary accounts, where it is an error to set it.
+ */
+export interface ReserveSendOptions {
+  /**
+   * Hours until the transaction settles when sent from a reserve (xRBX)
+   * account. Defaults to 24, the network minimum; during that window the
+   * sender can call it back. Setting it from an ordinary account is an error.
+   */
+  unlockHours?: number;
+}
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
 
@@ -210,6 +233,33 @@ export class VfxClient {
     return this.keypairService.addressFromPublic(publicKeyHex);
   };
 
+  // Reserve (Vault) account keys — see KeypairService for the derivation.
+
+  /** The vault the web wallet pairs with this main private key. */
+  public reserveKeypairFromPrivateKey = (mainPrivateKey: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
+  };
+
+  /** A vault from its own private key; the recovery key is derived from it. */
+  public reserveKeypairFromReservePrivateKey = (reservePrivateKey: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  };
+
+  /** Restore a vault from the CLI / web wallet restore code. */
+  public reserveKeypairFromRestoreCode = (restoreCode: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromRestoreCode(restoreCode);
+  };
+
+  /** A standalone vault on a fresh key, not tied to a main account. */
+  public generateReserveKeypair = (): ReserveKeypair => {
+    return this.keypairService.generateReserveKeypair();
+  };
+
+  /** The xRBX address for a public key — how an HSM-held vault key's address is obtained. */
+  public reserveAddressFromPublic = (publicKeyHex: string): string => {
+    return this.keypairService.reserveAddressFromPublic(publicKeyHex);
+  };
+
   public getSignature = (message: string, privateKey: string): string => {
     return this.keypairService.getSignature(message, privateKey);
   };
@@ -229,12 +279,23 @@ export class VfxClient {
   };
 
   // Transactions
-  public sendCoin = async (keypair: KeypairOrSigner, toAddress: string, amount: number): Promise<string | null> => {
+  /**
+   * Send VFX. From a reserve (vault) account the send waits `unlockHours`
+   * (default 24) before settling and can be called back in the meantime.
+   */
+  public sendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
     const txBuilder = new RawTransactionService({
       network: this.network,
-      keypair: keypair,
+      signer,
       toAddress: toAddress,
       amount: amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
     });
     return await txBuilder.process(this.dryRun);
@@ -260,6 +321,7 @@ export class VfxClient {
     }
 
     const signer = this.resolve(keypair);
+    this.assertNotReserve(signer, 'buyVfxDomain');
 
     // strict: an API outage must fail the purchase, not read as
     // "no domain yet / domain available".
@@ -302,6 +364,7 @@ export class VfxClient {
     if (!isValidBtcDomain(domain)) {
       throw new Error(`Invalid btc domain: ${domain}`);
     }
+    this.assertNotReserve(this.resolve(keypair), 'buyBtcDomain');
 
     // strict: an API outage must fail the purchase, not read as available.
     const available = await this.addressApiClient.domainAvailable(domain, { strict: true });
@@ -881,6 +944,7 @@ export class VfxClient {
     params: DeployTokenParams,
   ): Promise<DeployTokenResult | null> => {
     const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'deployToken');
     const payload = tokenDeployPayload({ ...params, minterAddress: resolved.address });
     const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
     const scIdentifier = data[0].ContractUID as string;
@@ -901,7 +965,7 @@ export class VfxClient {
   /** Owner only; the token must be mintable. Tokens are credited to the signer. */
   public mintToken = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; amount: number; ticker?: string; name?: string },
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const identity = await this.tokenIdentity(params);
@@ -911,12 +975,18 @@ export class VfxClient {
       amount: params.amount,
       ...identity,
     });
-    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
 
   public transferToken = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; toAddress: string; amount: number; ticker?: string; name?: string },
+    params: {
+      scIdentifier: string;
+      toAddress: string;
+      amount: number;
+      ticker?: string;
+      name?: string;
+    } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const identity = await this.tokenIdentity(params);
@@ -927,13 +997,13 @@ export class VfxClient {
       amount: params.amount,
       ...identity,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data);
+    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
   };
 
   /** Burns from the signer's own balance; the token must be burnable. */
   public burnToken = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; amount: number; ticker?: string; name?: string },
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const identity = await this.tokenIdentity(params);
@@ -943,7 +1013,7 @@ export class VfxClient {
       amount: params.amount,
       ...identity,
     });
-    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
 
   /**
@@ -956,7 +1026,7 @@ export class VfxClient {
    */
   public toggleTokenPause = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string },
+    params: { scIdentifier: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const { token } = await this.getFungibleToken(params.scIdentifier);
@@ -965,7 +1035,7 @@ export class VfxClient {
       fromAddress: resolved.address,
       pause: !token.is_paused,
     });
-    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
 
   /**
@@ -974,7 +1044,7 @@ export class VfxClient {
    */
   public banTokenAddress = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; address: string },
+    params: { scIdentifier: string; address: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const data = tokenBanAddressData({
@@ -982,13 +1052,13 @@ export class VfxClient {
       fromAddress: resolved.address,
       banAddress: params.address,
     });
-    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
 
   /** Owner only. Hands the owner role (mint, pause, ban, topics) to `toAddress`. */
   public transferTokenOwnership = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; toAddress: string },
+    params: { scIdentifier: string; toAddress: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const data = tokenOwnerChangeData({
@@ -996,7 +1066,7 @@ export class VfxClient {
       fromAddress: resolved.address,
       toAddress: params.toAddress,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data);
+    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
   };
 
   /**
@@ -1013,7 +1083,7 @@ export class VfxClient {
       votingDays: number;
       minimumVoteRequirement: number;
       blockHeight?: number;
-    },
+    } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     if (!Number.isInteger(params.votingDays) || params.votingDays < 1) {
@@ -1032,7 +1102,7 @@ export class VfxClient {
       createdAt,
       votingEndsAt: createdAt + params.votingDays * 24 * 60 * 60,
     });
-    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
 
   /**
@@ -1041,7 +1111,7 @@ export class VfxClient {
    */
   public castTokenVote = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; topicUid: string; vote: boolean; ownerAddress?: string },
+    params: { scIdentifier: string; topicUid: string; vote: boolean; ownerAddress?: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const ownerAddress =
@@ -1052,7 +1122,7 @@ export class VfxClient {
       topicUid: params.topicUid,
       vote: params.vote,
     });
-    return this.sendTokenTx(resolved, ownerAddress, data);
+    return this.sendTokenTx(resolved, ownerAddress, data, params.unlockHours);
   };
 
   // -- Internal helpers --------------------------------------------------------
@@ -1074,7 +1144,12 @@ export class VfxClient {
     return { ticker: params.ticker ?? detail.token.ticker, name: params.name ?? detail.token.name };
   }
 
-  private async sendTokenTx(signer: ResolvedSigner, toAddress: string, data: TokenTxData): Promise<string | null> {
+  private async sendTokenTx(
+    signer: ResolvedSigner,
+    toAddress: string,
+    data: TokenTxData,
+    unlockHours?: number,
+  ): Promise<string | null> {
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
@@ -1082,9 +1157,166 @@ export class VfxClient {
       amount: 0,
       txType: TxType.TokenTx,
       data,
+      unlockTime: this.unlockTimeFor(signer, unlockHours),
       apiOptions: this.apiOptions,
     });
     return txBuilder.process(this.dryRun);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reserve (Vault) accounts
+  //
+  // A reserve account is funded like any address, then activated with
+  // registerReserveAccount. From then on every send from it waits behind an
+  // unlock time (24 hours minimum) and can be called back until it settles;
+  // recoverReserveAccount sweeps pending sends and the balance to the
+  // recovery address if the vault key is ever compromised. The node applies
+  // the delay to VFX, vBTC and NFT sends; a fungible-token transfer from a
+  // vault carries the unlock time the node insists on but settles at once.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Activate a funded reserve account on the network: a 4 VFX Register()
+   * naming the recovery address. The vault must already hold the 4 VFX plus
+   * the fee plus the 0.5 VFX floor the node keeps on reserve accounts.
+   * `recoveryAddress` is taken from a ReserveKeypair; a Signer must supply it.
+   */
+  public registerReserveAccount = async (
+    signer: KeypairOrSigner,
+    params: { recoveryAddress?: string } = {},
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'registerReserveAccount');
+    const recoveryAddress = params.recoveryAddress ?? (signer as Partial<ReserveKeypair>).recoveryAddress;
+    if (!recoveryAddress) {
+      throw new Error('registerReserveAccount requires a recoveryAddress when the signer is not a ReserveKeypair');
+    }
+    if (recoveryAddress === resolved.address || recoveryAddress.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error('recoveryAddress must be an ordinary account, not a reserve account');
+    }
+    return this.sendReserveTx(
+      resolved,
+      { Function: 'Register()', RecoveryAddress: recoveryAddress },
+      {
+        amount: RESERVE_ACTIVATION_COST,
+        unlockTime: null,
+      },
+    );
+  };
+
+  /**
+   * Cancel a pending send from the vault before its unlock time. `hash` is
+   * the hash of the send being called back; the node refuses once it has
+   * settled, and only the vault that sent it can call it back.
+   */
+  public callBackReserveTransaction = async (
+    signer: KeypairOrSigner,
+    params: { hash: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'callBackReserveTransaction');
+    if (!params.hash) {
+      throw new Error('callBackReserveTransaction requires the hash of the pending transaction');
+    }
+    return this.sendReserveTx(resolved, { Function: 'CallBack()', Hash: params.hash }, { amount: 0, unlockTime: 0 });
+  };
+
+  /**
+   * Sweep the vault to its recovery address: pending sends are reversed and
+   * the balance moves. Two signatures are needed — the vault key signs the
+   * transaction, and the recovery key signs `${SignatureTime}${recoveryAddress}`
+   * to prove control of the recovery account. A ReserveKeypair carries both;
+   * with a Signer for the vault, pass `recoverySigner` for the recovery key.
+   * The node accepts the recovery signature for ten minutes.
+   */
+  public recoverReserveAccount = async (
+    signer: KeypairOrSigner,
+    params: { recoverySigner?: KeypairOrSigner; recoveryAddress?: string } = {},
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'recoverReserveAccount');
+
+    const recoveryPrivateKey = (signer as Partial<ReserveKeypair>).recoveryPrivateKey;
+    const recoveryInput =
+      params.recoverySigner ?? (recoveryPrivateKey ? { privateKey: recoveryPrivateKey } : undefined);
+    if (!recoveryInput) {
+      throw new Error('recoverReserveAccount requires a recoverySigner when the signer is not a ReserveKeypair');
+    }
+    const recovery = this.resolve(recoveryInput);
+    const recoveryAddress = params.recoveryAddress ?? recovery.address;
+    if (recovery.address !== recoveryAddress) {
+      throw new Error(
+        `recoverReserveAccount: the recovery key signs for ${recovery.address}, not the recoveryAddress ${recoveryAddress}`,
+      );
+    }
+
+    const signatureTime = Math.round(Date.now() / 1000);
+    const recoverySigScript = await recovery.sign(`${signatureTime}${recoveryAddress}`);
+
+    return this.sendReserveTx(
+      resolved,
+      {
+        Function: 'Recover()',
+        RecoveryAddress: recoveryAddress,
+        RecoverySigScript: recoverySigScript,
+        SignatureTime: signatureTime,
+      },
+      { amount: 0, unlockTime: 0 },
+    );
+  };
+
+  private async sendReserveTx(
+    signer: ResolvedSigner,
+    data: Record<string, unknown>,
+    opts: { amount: number; unlockTime: number | null },
+  ): Promise<string | null> {
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: RESERVE_BASE_ADDRESS,
+      amount: opts.amount,
+      txType: TxType.Reserve,
+      data,
+      unlockTime: opts.unlockTime,
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  }
+
+  private resolveReserve(signer: KeypairOrSigner, label: string): ResolvedSigner {
+    const resolved = this.resolve(signer);
+    if (!resolved.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error(
+        `${label} must be signed by a reserve (${RESERVE_ADDRESS_PREFIX}) account, got ${resolved.address}. ` +
+          'Pass the ReserveKeypair itself, or a Signer whose address is the reserve form of its key.',
+      );
+    }
+    return resolved;
+  }
+
+  private assertNotReserve(signer: ResolvedSigner, label: string): void {
+    if (signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error(
+        `${label} cannot be sent from a reserve account; the network only allows it from an ordinary account`,
+      );
+    }
+  }
+
+  /**
+   * The unlock time a send needs. Reserve accounts must delay every send by
+   * at least 24 hours (the node checks this); ordinary accounts never set one.
+   */
+  private unlockTimeFor(signer: ResolvedSigner, unlockHours?: number): number | null {
+    if (!signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      if (unlockHours !== undefined) {
+        throw new Error('unlockHours applies only to sends from a reserve (xRBX) account');
+      }
+      return null;
+    }
+    const hours = unlockHours ?? RESERVE_MIN_UNLOCK_HOURS;
+    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < RESERVE_MIN_UNLOCK_HOURS) {
+      throw new Error(
+        `A send from a reserve account must wait at least ${RESERVE_MIN_UNLOCK_HOURS} hours, got ${hours}`,
+      );
+    }
+    return Math.round(Date.now() / 1000) + Math.round(hours * 3600);
   }
 
   private assertNotDryRun(label: string): void {

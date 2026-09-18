@@ -36,6 +36,7 @@ export class AddressApiClient extends BaseApiClient {
           balanceLocked: result.balance_locked,
           adnr: result.adnr,
           activated: result.activated,
+          deactivated: result.deactivated ?? false,
         };
       }
 

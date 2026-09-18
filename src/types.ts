@@ -17,7 +17,10 @@ export interface VfxAddress {
   balanceTotal: number;
   balanceLocked: number;
   adnr: string | null;
+  /** Reserve accounts only: a Register() has been sent from this address. */
   activated: boolean;
+  /** Reserve accounts only: a Recover() has been sent, so the vault is retired. */
+  deactivated?: boolean;
 }
 
 export interface Transaction {

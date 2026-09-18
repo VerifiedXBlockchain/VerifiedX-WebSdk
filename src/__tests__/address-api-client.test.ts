@@ -18,6 +18,7 @@ describe('getAddressDetails', () => {
         balance_locked: 7.5,
         adnr: 'someone.vfx',
         activated: true,
+        deactivated: false,
       }),
     });
 
@@ -29,6 +30,7 @@ describe('getAddressDetails', () => {
       balanceLocked: 7.5,
       adnr: 'someone.vfx',
       activated: true,
+      deactivated: false,
     });
   });
 
@@ -43,6 +45,7 @@ describe('getAddressDetails', () => {
       balanceLocked: 0,
       adnr: null,
       activated: false,
+      deactivated: false,
     });
   });
 });
