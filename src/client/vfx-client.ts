@@ -1,6 +1,8 @@
 import BtcClient from '../btc';
 import {
+  DOMAIN_DELETE_COST,
   DOMAIN_PURCHASE_COST,
+  DOMAIN_TRANSFER_COST,
   Network,
   RESERVE_ACTIVATION_COST,
   RESERVE_ADDRESS_PREFIX,
@@ -24,6 +26,7 @@ import {
   tokenVoteTopicCreateData,
 } from '../services/token-data';
 import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
+import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
   CreateVbtcResult,
   DeployTokenParams,
@@ -36,6 +39,7 @@ import {
   TokenVotingTopic,
   Transaction,
   VbtcCancelResult,
+  VbtcMultiTransferResult,
   VbtcProgressEvent,
   VbtcTransfer,
   VbtcTransferResult,
@@ -61,6 +65,15 @@ import { TransactionApiClient } from './transaction-api.client';
 import { PreparedTransactionResponse, SentTransactionResponse, VbtcV2ApiClient } from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
+
+/** The network refuses domain operations and multi-contract vBTC transfers from a reserve (xRBX) account. */
+function assertNotReserveSender(signer: ResolvedSigner, label: string): void {
+  if (signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+    throw new Error(
+      `${label} cannot be sent from a reserve account; the network only allows it from an ordinary account`,
+    );
+  }
+}
 
 /**
  * Accepted by every method that can be signed from a reserve (vault) account.
@@ -400,6 +413,110 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
+  /**
+   * Hand the signer's .vfx domain to `toAddress`. Costs 5 VFX. The sender
+   * must own a domain and the recipient must not; both are checked against
+   * Spyglass first (strictly — an outage fails the call rather than reading
+   * as "no domain").
+   */
+  public transferVfxDomain = async (keypair: KeypairOrSigner, toAddress: string): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'transferVfxDomain');
+    if (!toAddress || toAddress === signer.address) {
+      throw new Error('transferVfxDomain requires a recipient other than the sender');
+    }
+
+    const domain = await this.ownedVfxDomain(signer.address, 'transferVfxDomain');
+    const recipient = await this.addressApiClient.getAddressDetails(toAddress, { strict: true });
+    if (recipient?.adnr) {
+      throw new Error(`Recipient already has a domain: ${recipient.adnr}`);
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: DOMAIN_TRANSFER_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'AdnrTransfer()', Name: domain },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Release the signer's .vfx domain. Costs 5 VFX. */
+  public deleteVfxDomain = async (keypair: KeypairOrSigner): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'deleteVfxDomain');
+    const domain = await this.ownedVfxDomain(signer.address, 'deleteVfxDomain');
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: 'Adnr_Base',
+      amount: DOMAIN_DELETE_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'AdnrDelete()', Name: domain },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * Move a .btc domain to another Bitcoin address, managed by `vfxToAddress`
+   * from then on. Costs 5 VFX. The signer must be the VFX account that
+   * currently manages the domain for `btcFromAddress`; the node checks that
+   * pairing and that `btcToAddress` has no domain.
+   */
+  public transferBtcDomain = async (
+    keypair: KeypairOrSigner,
+    params: { btcFromAddress: string; btcToAddress: string; vfxToAddress: string },
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'transferBtcDomain');
+    if (!params.btcFromAddress || !params.btcToAddress || !params.vfxToAddress) {
+      throw new Error('transferBtcDomain requires btcFromAddress, btcToAddress and vfxToAddress');
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: params.vfxToAddress,
+      amount: DOMAIN_TRANSFER_COST,
+      txType: TxType.Adnr,
+      data: {
+        Function: 'BTCAdnrTransfer()',
+        BTCToAddress: params.btcToAddress,
+        BTCFromAddress: params.btcFromAddress,
+      },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Release the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX. */
+  public deleteBtcDomain = async (
+    keypair: KeypairOrSigner,
+    params: { btcFromAddress: string },
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'deleteBtcDomain');
+    if (!params.btcFromAddress) {
+      throw new Error('deleteBtcDomain requires btcFromAddress');
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: 'Adnr_Base',
+      amount: DOMAIN_DELETE_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'BTCAdnrDelete()', BTCFromAddress: params.btcFromAddress },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
   public listTransactionsForAddress = async (
     address: string,
     page = 1,
@@ -456,6 +573,86 @@ export class VfxClient {
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
+  };
+
+  /**
+   * Send `totalAmount` vBTC to `toAddress` drawn from every V2 contract the
+   * signer holds spendable balance on, as one transaction. Inputs are chosen
+   * with the CLI's own rule (largest balance first, greedy, whole satoshis)
+   * unless `inputs` is given. A transfer that a single contract can cover goes
+   * through the ordinary `transferVbtc` path instead, exactly as the wallet
+   * does. Not available from a reserve account, and capped at 25 contracts.
+   */
+  public transferVbtcMulti = async (params: {
+    toAddress: string;
+    totalAmount: number;
+    privateKey?: string;
+    signer?: Signer;
+    /** Skip the balance lookup and allocation: the exact contracts and amounts to draw. */
+    inputs?: VbtcAllocationInput[];
+  }): Promise<VbtcMultiTransferResult> => {
+    this.assertNotDryRun('transferVbtcMulti');
+    const signer = this.signerFor(params, 'transferVbtcMulti');
+    assertNotReserveSender(signer, 'transferVbtcMulti');
+    if (!(params.totalAmount > 0)) {
+      throw new Error('transferVbtcMulti requires a positive totalAmount');
+    }
+
+    let inputs = params.inputs;
+    if (!inputs) {
+      const tokens = await this.vbtcV2ApiClient.getTokensForAddress(signer.address);
+      const balances: Record<string, number> = {};
+      for (const token of tokens) {
+        balances[token.sc_identifier] =
+          token.available_balances?.[signer.address] ?? token.addresses?.[signer.address] ?? 0;
+      }
+      const allocation = allocateVbtcInputs(balances, params.totalAmount);
+      if (allocation.failure === 'insufficientBalance') {
+        throw new Error(
+          `Insufficient vBTC: ${allocation.available} available across ${Object.keys(balances).length} contracts, ${
+            params.totalAmount
+          } requested`,
+        );
+      }
+      if (allocation.failure === 'tooManyInputs') {
+        throw new Error(`Sending ${params.totalAmount} vBTC would need more than the maximum contract inputs`);
+      }
+      inputs = allocation.inputs;
+    }
+
+    if (inputs.length === 1) {
+      const single = inputs[0];
+      const sent = await this.transferVbtc({
+        scIdentifier: single.scIdentifier,
+        fromAddress: signer.address,
+        toAddress: params.toAddress,
+        amount: single.amount,
+        privateKey: params.privateKey,
+        signer: params.signer,
+      });
+      return { transactionHash: sent.transactionHash, inputs };
+    }
+
+    const data = vbtcMultiTransferData({
+      fromAddress: signer.address,
+      toAddress: params.toAddress,
+      totalAmount: params.totalAmount,
+      inputs,
+    });
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: params.toAddress,
+      amount: 0,
+      txType: TxType.VbtcV2Transfer,
+      data,
+      apiOptions: this.apiOptions,
+    });
+    const transactionHash = await txBuilder.process(false);
+    if (!transactionHash) {
+      throw new Error('transferVbtcMulti: the transaction was rejected before it reached the node');
+    }
+    return { transactionHash, inputs };
   };
 
   public createVbtcToken = async (params: {
@@ -1329,6 +1526,15 @@ export class VfxClient {
           'Construct the VfxClient without dryRun to use it.',
       );
     }
+  }
+
+  /** The .vfx name (without suffix) the address owns, or throw. Strict: an outage is an error, not "no domain". */
+  private async ownedVfxDomain(address: string, label: string): Promise<string> {
+    const details = await this.addressApiClient.getAddressDetails(address, { strict: true });
+    if (!details?.adnr) {
+      throw new Error(`${label}: ${address} does not own a .vfx domain`);
+    }
+    return domainWithoutSuffix(details.adnr);
   }
 
   private assertPrepared(response: PreparedTransactionResponse | undefined, label: string): void {

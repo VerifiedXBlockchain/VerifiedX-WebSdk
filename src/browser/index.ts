@@ -19,6 +19,7 @@ export type {
   VbtcTransfer,
   CreateVbtcResult,
   VbtcTransferResult,
+  VbtcMultiTransferResult,
   VbtcWithdrawalResult,
   VbtcCancelResult,
   VbtcProgressPhase,
@@ -36,6 +37,8 @@ export type {
 // External signing (HSM / MPC)
 export type { Signer, KeypairOrSigner } from '../signer';
 export { vfxSignatureFromDer } from '../signer';
+export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from '../services/vbtc-multi';
+export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from '../services/vbtc-multi';
 export {
   TOKEN_BASE_ADDRESS,
   RESERVE_BASE_ADDRESS,
