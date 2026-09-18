@@ -1,5 +1,6 @@
 import base58 from 'bs58';
 import CryptoJS from 'crypto-js';
+import { RESERVE_ADDRESS_PREFIX } from './constants';
 import KeypairService from './services/keypair-service';
 import { Keypair } from './types';
 
@@ -29,7 +30,12 @@ export interface Signer {
   signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
 }
 
-/** Anything the SDK can sign with: a local keypair or an external signer. */
+/**
+ * Anything the SDK can sign with: a local keypair or an external signer. A
+ * ReserveKeypair is a Keypair whose address is the xRBX form, and resolves to
+ * the vault; pass the reserve keypair object itself, not just its private
+ * key, or the ordinary address of that key is what gets signed for.
+ */
 export type KeypairOrSigner = Keypair | Signer;
 
 /**
@@ -222,7 +228,11 @@ export function resolveSigner(
   }
   if (isSigner(input)) {
     const publicKey = stripPublicKeyPrefix(input.publicKey);
-    const derivedAddress = keypairService.addressFromPublic(publicKey);
+    // A reserve (vault) signer presents its xRBX address; the same key also
+    // has an ordinary address, so which one is meant is read off the prefix.
+    const derivedAddress = input.address.startsWith(RESERVE_ADDRESS_PREFIX)
+      ? keypairService.reserveAddressFromPublic(publicKey)
+      : keypairService.addressFromPublic(publicKey);
     if (input.address !== derivedAddress) {
       throw new Error(
         `Signer address ${input.address} does not match its public key (which derives ${derivedAddress} on this network)`,
@@ -243,8 +253,10 @@ export function resolveSigner(
   if (typeof privateKey !== 'string' || privateKey.length === 0) {
     throw new Error('A keypair with a privateKey or a Signer with signDigest() is required');
   }
-  const address = keypairService.addressFromPrivate(privateKey);
   const suppliedAddress = (input as { address?: string }).address;
+  const address = suppliedAddress?.startsWith(RESERVE_ADDRESS_PREFIX)
+    ? keypairService.reserveAddressFromPrivate(privateKey)
+    : keypairService.addressFromPrivate(privateKey);
   if (suppliedAddress && suppliedAddress !== address) {
     throw new Error(
       `Keypair address ${suppliedAddress} does not match its private key (which derives ${address} on this network)`,

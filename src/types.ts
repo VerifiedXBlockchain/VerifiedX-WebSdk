@@ -247,3 +247,18 @@ export interface DeployTokenResult {
   /** The contract id every later token operation is addressed to. */
   scIdentifier: string;
 }
+
+// Reserve (Vault) accounts
+
+/**
+ * A reserve (vault) account: an `xRBX…` address whose outgoing sends wait
+ * behind an unlock time and can be called back, plus the recovery key that
+ * can sweep it. `restoreCode` is `base64("<privateKey>//<recoveryPrivateKey>")`,
+ * the format the CLI and web wallet both restore from.
+ */
+export interface ReserveKeypair extends Keypair {
+  recoveryPrivateKey: string;
+  recoveryPublicKey: string;
+  recoveryAddress: string;
+  restoreCode: string;
+}
