@@ -19,7 +19,7 @@ export function getSecureRandomBytes(length: number): Uint8Array {
   if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
     throw new Error(
       'vfx-web-sdk: no cryptographically secure random source available (crypto.getRandomValues). ' +
-        'Node >= 18.13 and all modern browsers provide this.',
+        'Node.js 20+ and all modern browsers provide it; Node 18 does not without a flag.',
     );
   }
   const bytes = new Uint8Array(length);
