@@ -1,13 +1,45 @@
 import BtcClient from '../btc';
-import { DOMAIN_PURCHASE_COST, Network, TxType } from '../constants';
+import {
+  DOMAIN_DELETE_COST,
+  DOMAIN_PURCHASE_COST,
+  DOMAIN_TRANSFER_COST,
+  Network,
+  RESERVE_ACTIVATION_COST,
+  RESERVE_ADDRESS_PREFIX,
+  RESERVE_BASE_ADDRESS,
+  RESERVE_MIN_UNLOCK_HOURS,
+  TOKEN_BASE_ADDRESS,
+  TxType,
+} from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
 import {
+  TokenTxData,
+  tokenBanAddressData,
+  tokenBurnData,
+  tokenDeployPayload,
+  tokenMintData,
+  tokenOwnerChangeData,
+  tokenPauseData,
+  tokenTransferData,
+  tokenVoteCastData,
+  tokenVoteTopicCreateData,
+} from '../services/token-data';
+import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
+import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
+import {
   CreateVbtcResult,
-  Keypair,
+  DeployTokenParams,
+  DeployTokenResult,
+  FungibleToken,
+  FungibleTokenBalance,
+  FungibleTokenDetail,
   PaginatedResponse,
+  ReserveKeypair,
+  TokenVotingTopic,
   Transaction,
   VbtcCancelResult,
+  VbtcMultiTransferResult,
   VbtcProgressEvent,
   VbtcTransfer,
   VbtcTransferResult,
@@ -23,15 +55,38 @@ import {
   generateRandomStringSecure,
   isValidBtcDomain,
   isValidVfxDomain,
-  normalizePrivateKey,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
 import { AdnrApiClient } from './adnr-client';
+import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
+import { TokenApiClient } from './token-api-client';
 import { TransactionApiClient } from './transaction-api.client';
 import { PreparedTransactionResponse, SentTransactionResponse, VbtcV2ApiClient } from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
+
+/** The network refuses domain operations and multi-contract vBTC transfers from a reserve (xRBX) account. */
+function assertNotReserveSender(signer: ResolvedSigner, label: string): void {
+  if (signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+    throw new Error(
+      `${label} cannot be sent from a reserve account; the network only allows it from an ordinary account`,
+    );
+  }
+}
+
+/**
+ * Accepted by every method that can be signed from a reserve (vault) account.
+ * Ignored for ordinary accounts, where it is an error to set it.
+ */
+export interface ReserveSendOptions {
+  /**
+   * Hours until the transaction settles when sent from a reserve (xRBX)
+   * account. Defaults to 24, the network minimum; during that window the
+   * sender can call it back. Setting it from an ordinary account is an error.
+   */
+  unlockHours?: number;
+}
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
 
@@ -123,6 +178,8 @@ export class VfxClient {
   private rawTransactionApiClient: RawTransactionApiClient;
   private transactionApiClient: TransactionApiClient;
   private vbtcV2ApiClient: VbtcV2ApiClient;
+  private tokenApiClient: TokenApiClient;
+  private blockApiClient: BlockApiClient;
 
   /**
    * @param network 'mainnet' | 'testnet' (or the Network enum)
@@ -146,6 +203,8 @@ export class VfxClient {
     this.rawTransactionApiClient = new RawTransactionApiClient(networkEnum, this.apiOptions);
     this.transactionApiClient = new TransactionApiClient(networkEnum, this.apiOptions);
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
+    this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
+    this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
   }
 
   // Keypairs
@@ -178,6 +237,42 @@ export class VfxClient {
     return this.keypairService.addressFromPrivate(privateKey);
   };
 
+  /**
+   * Derive the network address for an uncompressed secp256k1 public key. This
+   * is how the address of an external signer (HSM, MPC) is obtained: the SDK
+   * never needs the private key.
+   */
+  public addressFromPublic = (publicKeyHex: string): string => {
+    return this.keypairService.addressFromPublic(publicKeyHex);
+  };
+
+  // Reserve (Vault) account keys — see KeypairService for the derivation.
+
+  /** The vault the web wallet pairs with this main private key. */
+  public reserveKeypairFromPrivateKey = (mainPrivateKey: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
+  };
+
+  /** A vault from its own private key; the recovery key is derived from it. */
+  public reserveKeypairFromReservePrivateKey = (reservePrivateKey: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  };
+
+  /** Restore a vault from the CLI / web wallet restore code. */
+  public reserveKeypairFromRestoreCode = (restoreCode: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromRestoreCode(restoreCode);
+  };
+
+  /** A standalone vault on a fresh key, not tied to a main account. */
+  public generateReserveKeypair = (): ReserveKeypair => {
+    return this.keypairService.generateReserveKeypair();
+  };
+
+  /** The xRBX address for a public key — how an HSM-held vault key's address is obtained. */
+  public reserveAddressFromPublic = (publicKeyHex: string): string => {
+    return this.keypairService.reserveAddressFromPublic(publicKeyHex);
+  };
+
   public getSignature = (message: string, privateKey: string): string => {
     return this.keypairService.getSignature(message, privateKey);
   };
@@ -197,12 +292,23 @@ export class VfxClient {
   };
 
   // Transactions
-  public sendCoin = async (keypair: Keypair, toAddress: string, amount: number): Promise<string | null> => {
+  /**
+   * Send VFX. From a reserve (vault) account the send waits `unlockHours`
+   * (default 24) before settling and can be called back in the meantime.
+   */
+  public sendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
     const txBuilder = new RawTransactionService({
       network: this.network,
-      keypair: keypair,
+      signer,
       toAddress: toAddress,
       amount: amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
     });
     return await txBuilder.process(this.dryRun);
@@ -220,16 +326,19 @@ export class VfxClient {
     return this.adnrApiClient.lookupBtcDomainFromBtcAddress(address);
   };
 
-  public buyVfxDomain = async (keypair: Keypair, domain: string): Promise<string | null> => {
+  public buyVfxDomain = async (keypair: KeypairOrSigner, domain: string): Promise<string | null> => {
     domain = cleanVfxDomain(domain);
 
     if (!isValidVfxDomain(domain)) {
       throw new Error(`Invalid vfx domain: ${domain}`);
     }
 
+    const signer = this.resolve(keypair);
+    this.assertNotReserve(signer, 'buyVfxDomain');
+
     // strict: an API outage must fail the purchase, not read as
     // "no domain yet / domain available".
-    const addressDetails = await this.addressApiClient.getAddressDetails(keypair.address, { strict: true });
+    const addressDetails = await this.addressApiClient.getAddressDetails(signer.address, { strict: true });
     if (addressDetails && addressDetails.adnr != null) {
       throw new Error(`Address already has a domain: ${addressDetails.adnr}`);
     }
@@ -247,7 +356,7 @@ export class VfxClient {
 
     const txBuilder = new RawTransactionService({
       network: this.network,
-      keypair: keypair,
+      signer,
       toAddress: 'Adnr_Base',
       amount: DOMAIN_PURCHASE_COST,
       txType: TxType.Adnr,
@@ -258,12 +367,17 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
-  public buyBtcDomain = async (keypair: Keypair, domain: string, btcPrivateKey: string): Promise<string | null> => {
+  public buyBtcDomain = async (
+    keypair: KeypairOrSigner,
+    domain: string,
+    btcPrivateKey: string,
+  ): Promise<string | null> => {
     domain = cleanBtcDomain(domain);
 
     if (!isValidBtcDomain(domain)) {
       throw new Error(`Invalid btc domain: ${domain}`);
     }
+    this.assertNotReserve(this.resolve(keypair), 'buyBtcDomain');
 
     // strict: an API outage must fail the purchase, not read as available.
     const available = await this.addressApiClient.domainAvailable(domain, { strict: true });
@@ -297,6 +411,110 @@ export class VfxClient {
     });
 
     return await txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * Hand the signer's .vfx domain to `toAddress`. Costs 5 VFX. The sender
+   * must own a domain and the recipient must not; both are checked against
+   * Spyglass first (strictly — an outage fails the call rather than reading
+   * as "no domain").
+   */
+  public transferVfxDomain = async (keypair: KeypairOrSigner, toAddress: string): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'transferVfxDomain');
+    if (!toAddress || toAddress === signer.address) {
+      throw new Error('transferVfxDomain requires a recipient other than the sender');
+    }
+
+    const domain = await this.ownedVfxDomain(signer.address, 'transferVfxDomain');
+    const recipient = await this.addressApiClient.getAddressDetails(toAddress, { strict: true });
+    if (recipient?.adnr) {
+      throw new Error(`Recipient already has a domain: ${recipient.adnr}`);
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: DOMAIN_TRANSFER_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'AdnrTransfer()', Name: domain },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Release the signer's .vfx domain. Costs 5 VFX. */
+  public deleteVfxDomain = async (keypair: KeypairOrSigner): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'deleteVfxDomain');
+    const domain = await this.ownedVfxDomain(signer.address, 'deleteVfxDomain');
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: 'Adnr_Base',
+      amount: DOMAIN_DELETE_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'AdnrDelete()', Name: domain },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * Move a .btc domain to another Bitcoin address, managed by `vfxToAddress`
+   * from then on. Costs 5 VFX. The signer must be the VFX account that
+   * currently manages the domain for `btcFromAddress`; the node checks that
+   * pairing and that `btcToAddress` has no domain.
+   */
+  public transferBtcDomain = async (
+    keypair: KeypairOrSigner,
+    params: { btcFromAddress: string; btcToAddress: string; vfxToAddress: string },
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'transferBtcDomain');
+    if (!params.btcFromAddress || !params.btcToAddress || !params.vfxToAddress) {
+      throw new Error('transferBtcDomain requires btcFromAddress, btcToAddress and vfxToAddress');
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: params.vfxToAddress,
+      amount: DOMAIN_TRANSFER_COST,
+      txType: TxType.Adnr,
+      data: {
+        Function: 'BTCAdnrTransfer()',
+        BTCToAddress: params.btcToAddress,
+        BTCFromAddress: params.btcFromAddress,
+      },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Release the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX. */
+  public deleteBtcDomain = async (
+    keypair: KeypairOrSigner,
+    params: { btcFromAddress: string },
+  ): Promise<string | null> => {
+    const signer = this.resolve(keypair);
+    assertNotReserveSender(signer, 'deleteBtcDomain');
+    if (!params.btcFromAddress) {
+      throw new Error('deleteBtcDomain requires btcFromAddress');
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: 'Adnr_Base',
+      amount: DOMAIN_DELETE_COST,
+      txType: TxType.Adnr,
+      data: { Function: 'BTCAdnrDelete()', BTCFromAddress: params.btcFromAddress },
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
   };
 
   public listTransactionsForAddress = async (
@@ -336,9 +554,13 @@ export class VfxClient {
     fromAddress: string;
     toAddress: string;
     amount: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
   }): Promise<VbtcTransferResult> => {
     this.assertNotDryRun('transferVbtc');
+    const signer = this.signerFor(params, 'transferVbtc');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
@@ -347,15 +569,98 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) => this.vbtcV2ApiClient.sendTransfer(body));
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendTransfer(body));
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
   };
 
+  /**
+   * Send `totalAmount` vBTC to `toAddress` drawn from every V2 contract the
+   * signer holds spendable balance on, as one transaction. Inputs are chosen
+   * with the CLI's own rule (largest balance first, greedy, whole satoshis)
+   * unless `inputs` is given. A transfer that a single contract can cover goes
+   * through the ordinary `transferVbtc` path instead, exactly as the wallet
+   * does. Not available from a reserve account, and capped at 25 contracts.
+   */
+  public transferVbtcMulti = async (params: {
+    toAddress: string;
+    totalAmount: number;
+    privateKey?: string;
+    signer?: Signer;
+    /** Skip the balance lookup and allocation: the exact contracts and amounts to draw. */
+    inputs?: VbtcAllocationInput[];
+  }): Promise<VbtcMultiTransferResult> => {
+    this.assertNotDryRun('transferVbtcMulti');
+    const signer = this.signerFor(params, 'transferVbtcMulti');
+    assertNotReserveSender(signer, 'transferVbtcMulti');
+    if (!(params.totalAmount > 0)) {
+      throw new Error('transferVbtcMulti requires a positive totalAmount');
+    }
+
+    let inputs = params.inputs;
+    if (!inputs) {
+      const tokens = await this.vbtcV2ApiClient.getTokensForAddress(signer.address);
+      const balances: Record<string, number> = {};
+      for (const token of tokens) {
+        balances[token.sc_identifier] =
+          token.available_balances?.[signer.address] ?? token.addresses?.[signer.address] ?? 0;
+      }
+      const allocation = allocateVbtcInputs(balances, params.totalAmount);
+      if (allocation.failure === 'insufficientBalance') {
+        throw new Error(
+          `Insufficient vBTC: ${allocation.available} available across ${Object.keys(balances).length} contracts, ${
+            params.totalAmount
+          } requested`,
+        );
+      }
+      if (allocation.failure === 'tooManyInputs') {
+        throw new Error(`Sending ${params.totalAmount} vBTC would need more than the maximum contract inputs`);
+      }
+      inputs = allocation.inputs;
+    }
+
+    if (inputs.length === 1) {
+      const single = inputs[0];
+      const sent = await this.transferVbtc({
+        scIdentifier: single.scIdentifier,
+        fromAddress: signer.address,
+        toAddress: params.toAddress,
+        amount: single.amount,
+        privateKey: params.privateKey,
+        signer: params.signer,
+      });
+      return { transactionHash: sent.transactionHash, inputs };
+    }
+
+    const data = vbtcMultiTransferData({
+      fromAddress: signer.address,
+      toAddress: params.toAddress,
+      totalAmount: params.totalAmount,
+      inputs,
+    });
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: params.toAddress,
+      amount: 0,
+      txType: TxType.VbtcV2Transfer,
+      data,
+      apiOptions: this.apiOptions,
+    });
+    const transactionHash = await txBuilder.process(false);
+    if (!transactionHash) {
+      throw new Error('transferVbtcMulti: the transaction was rejected before it reached the node');
+    }
+    return { transactionHash, inputs };
+  };
+
   public createVbtcToken = async (params: {
     ownerAddress: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     name: string;
     description: string;
     ticker: string;
@@ -364,6 +669,7 @@ export class VfxClient {
     timeoutMs?: number;
   }): Promise<CreateVbtcResult> => {
     this.assertNotDryRun('createVbtcToken');
+    const signer = this.signerFor(params, 'createVbtcToken');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 4000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -374,14 +680,8 @@ export class VfxClient {
       throw new Error(`createVbtcToken ceremony prepare failed: ${JSON.stringify(ceremonyPrep)}`);
     }
 
-    const startSignature = this.keypairService.getSignature(
-      ceremonyPrep.messages_to_sign.start_message,
-      params.privateKey,
-    );
-    const shareSignature = this.keypairService.getSignature(
-      ceremonyPrep.messages_to_sign.share_distribution_message,
-      params.privateKey,
-    );
+    const startSignature = await signer.sign(ceremonyPrep.messages_to_sign.start_message);
+    const shareSignature = await signer.sign(ceremonyPrep.messages_to_sign.share_distribution_message);
 
     onProgress({
       phase: 'ceremony_started',
@@ -424,7 +724,7 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = this.keypairService.getSignature(ownershipMessage, params.privateKey);
+    const ownerSignature = await signer.sign(ownershipMessage);
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -440,7 +740,7 @@ export class VfxClient {
     });
     this.assertPrepared(createPrep, 'createVbtcToken:prepare');
 
-    const sent = await this.signAndSend(createPrep, params.privateKey, (body) => this.vbtcV2ApiClient.sendCreate(body));
+    const sent = await this.signAndSend(createPrep, signer, (body) => this.vbtcV2ApiClient.sendCreate(body));
     this.assertSent(sent, 'createVbtcToken:send');
 
     onProgress({
@@ -465,12 +765,16 @@ export class VfxClient {
     btcAddress: string;
     amount: number;
     feeRate: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('requestWithdrawal');
+    const signer = this.signerFor(params, 'requestWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
 
     // Step 1: Request (Type 27)
@@ -483,7 +787,7 @@ export class VfxClient {
     });
     this.assertPrepared(requestPrep, 'requestWithdrawal:request:prepare');
 
-    const requestSent = await this.signAndSend(requestPrep, params.privateKey, (body) =>
+    const requestSent = await this.signAndSend(requestPrep, signer, (body) =>
       this.vbtcV2ApiClient.sendWithdrawRequest(body),
     );
     this.assertSent(requestSent, 'requestWithdrawal:request:send');
@@ -531,12 +835,16 @@ export class VfxClient {
     btcAddress: string;
     amount: number;
     feeRate: number;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
     pollIntervalMs?: number;
     timeoutMs?: number;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('completeWithdrawal');
+    const signer = this.signerFor(params, 'completeWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
@@ -554,8 +862,8 @@ export class VfxClient {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
 
-    const frostStartSig = this.keypairService.getSignature(frostPrep.StartMessage, params.privateKey);
-    const frostShareSig = this.keypairService.getSignature(frostPrep.ShareDistributionMessage, params.privateKey);
+    const frostStartSig = await signer.sign(frostPrep.StartMessage);
+    const frostShareSig = await signer.sign(frostPrep.ShareDistributionMessage);
 
     // Multi-input withdrawals (caster-upgrade nodes) return one start message
     // per vault UTXO. StartMessages[0] is byte-identical to the legacy
@@ -564,12 +872,12 @@ export class VfxClient {
     // node returned, so they must never be reconstructed locally. Signing
     // fewer inputs than the transaction needs fails Execute with
     // InputCountMismatch (retryable via a fresh prepare).
-    const extraStartSignatures = (frostPrep.StartMessages ?? [])
-      .filter((entry) => entry.InputIndex > 0)
-      .map((entry) => ({
-        input_index: entry.InputIndex,
-        signature: this.keypairService.getSignature(entry.Message, params.privateKey),
-      }));
+    const extraStartSignatures: Array<{ input_index: number; signature: string }> = [];
+    for (const entry of frostPrep.StartMessages ?? []) {
+      if (entry.InputIndex > 0) {
+        extraStartSignatures.push({ input_index: entry.InputIndex, signature: await signer.sign(entry.Message) });
+      }
+    }
 
     // Step 3: Execute FROST + poll
     const frostExec = await this.vbtcV2ApiClient.executeWithdrawComplete({
@@ -690,6 +998,7 @@ export class VfxClient {
         amount: params.amount,
         btcDestination: params.btcAddress,
         privateKey: params.privateKey,
+        signer: params.signer,
         onProgress,
       });
     } catch (error) {
@@ -721,10 +1030,14 @@ export class VfxClient {
     btcTransactionHash: string;
     amount: number;
     btcDestination: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
     onProgress?: (event: VbtcProgressEvent) => void;
   }): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('recordWithdrawalCompletion');
+    const signer = this.signerFor(params, 'recordWithdrawalCompletion');
     const onProgress = params.onProgress ?? (() => undefined);
 
     if (!params.btcTransactionHash) {
@@ -741,7 +1054,7 @@ export class VfxClient {
     });
     this.assertPrepared(completionPrep, 'recordWithdrawalCompletion:prepare');
 
-    const completionSent = await this.signAndSend(completionPrep, params.privateKey, (body) =>
+    const completionSent = await this.signAndSend(completionPrep, signer, (body) =>
       this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
     );
     this.assertSent(completionSent, 'recordWithdrawalCompletion:send');
@@ -763,9 +1076,13 @@ export class VfxClient {
     scIdentifier: string;
     ownerAddress: string;
     withdrawalRequestHash: string;
-    privateKey: string;
+    /** Local key to sign with. Pass either this or `signer`. */
+    privateKey?: string;
+    /** External signer (HSM, MPC) to sign with instead of a local key. */
+    signer?: Signer;
   }): Promise<VbtcCancelResult> => {
     this.assertNotDryRun('cancelWithdrawal');
+    const signer = this.signerFor(params, 'cancelWithdrawal');
     const prepared = await this.vbtcV2ApiClient.prepareWithdrawCancel({
       sc_identifier: params.scIdentifier,
       owner_address: params.ownerAddress,
@@ -773,15 +1090,431 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'cancelWithdrawal:prepare');
 
-    const sent = await this.signAndSend(prepared, params.privateKey, (body) =>
-      this.vbtcV2ApiClient.sendWithdrawCancel(body),
-    );
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawCancel(body));
     this.assertSent(sent, 'cancelWithdrawal:send');
 
     return { transactionHash: sent.Hash };
   };
 
+  // ---------------------------------------------------------------------------
+  // Fungible tokens (VFX20)
+  //
+  // Every mutating method returns the transaction hash, or null when the
+  // transaction never reached the node (same contract as sendCoin), and
+  // honours dryRun. The signer's address is the token-side FromAddress: the
+  // owner for mint / pause / ban / ownership change / topic creation, the
+  // holder for transfer / burn / vote.
+  // ---------------------------------------------------------------------------
+
+  public listFungibleTokens = async (page = 1, limit = 10): Promise<PaginatedResponse<FungibleToken>> => {
+    return this.tokenApiClient.listTokens(page, limit);
+  };
+
+  public getFungibleToken = async (scIdentifier: string): Promise<FungibleTokenDetail> => {
+    return this.tokenApiClient.getToken(scIdentifier);
+  };
+
+  public getFungibleTokenBalances = async (address: string): Promise<FungibleTokenBalance[]> => {
+    return this.addressApiClient.getTokenBalances(address);
+  };
+
+  public listTokenVotingTopics = async (
+    scIdentifier: string,
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResponse<TokenVotingTopic>> => {
+    return this.tokenApiClient.listVotingTopics(scIdentifier, page, limit);
+  };
+
+  public getTokenVotingTopic = async (topicId: string): Promise<TokenVotingTopic> => {
+    return this.tokenApiClient.getVotingTopic(topicId);
+  };
+
+  /**
+   * Deploy a fungible token contract owned by the signer. The payload is
+   * compiled on the node (via Spyglass), and the resulting Type 17 deploy is
+   * sent from the signer's address to itself. The contract id is known before
+   * the send, so it is returned even in dryRun.
+   */
+  public deployToken = async (
+    signer: KeypairOrSigner,
+    params: DeployTokenParams,
+  ): Promise<DeployTokenResult | null> => {
+    const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'deployToken');
+    const payload = tokenDeployPayload({ ...params, minterAddress: resolved.address });
+    const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
+    const scIdentifier = data[0].ContractUID as string;
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: resolved.address,
+      amount: 0,
+      txType: TxType.TokenDeploy,
+      data,
+      apiOptions: this.apiOptions,
+    });
+    const transactionHash = await txBuilder.process(this.dryRun);
+    return transactionHash ? { transactionHash, scIdentifier } : null;
+  };
+
+  /** Owner only; the token must be mintable. Tokens are credited to the signer. */
+  public mintToken = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenMintData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
+  };
+
+  public transferToken = async (
+    signer: KeypairOrSigner,
+    params: {
+      scIdentifier: string;
+      toAddress: string;
+      amount: number;
+      ticker?: string;
+      name?: string;
+    } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenTransferData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress: params.toAddress,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+  };
+
+  /** Burns from the signer's own balance; the token must be burnable. */
+  public burnToken = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const identity = await this.tokenIdentity(params);
+    const data = tokenBurnData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      amount: params.amount,
+      ...identity,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
+  };
+
+  /**
+   * Owner only. Flips the token between paused (no transfers) and active.
+   * The node toggles whatever the current state is — there is no way to
+   * "set paused" — so never send this twice for one intended change: the
+   * second one undoes the first. The current state is read from Spyglass so
+   * the transaction carries the state it produces, which is what explorers
+   * and wallets display.
+   */
+  public toggleTokenPause = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const { token } = await this.getFungibleToken(params.scIdentifier);
+    const data = tokenPauseData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      pause: !token.is_paused,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
+  };
+
+  /**
+   * Owner only. Stops `address` from sending the token. It can still receive,
+   * and the network has no way to lift a ban, so treat this as permanent.
+   */
+  public banTokenAddress = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; address: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const data = tokenBanAddressData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      banAddress: params.address,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
+  };
+
+  /** Owner only. Hands the owner role (mint, pause, ban, topics) to `toAddress`. */
+  public transferTokenOwnership = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; toAddress: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const data = tokenOwnerChangeData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress: params.toAddress,
+    });
+    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+  };
+
+  /**
+   * Owner only; the token must have voting enabled. Opens a yes/no topic that
+   * holders can vote on for `votingDays` days. The topic is anchored to the
+   * current block height, fetched from Spyglass unless `blockHeight` is given.
+   */
+  public createTokenVoteTopic = async (
+    signer: KeypairOrSigner,
+    params: {
+      scIdentifier: string;
+      name: string;
+      description: string;
+      votingDays: number;
+      minimumVoteRequirement: number;
+      blockHeight?: number;
+    } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    if (!Number.isInteger(params.votingDays) || params.votingDays < 1) {
+      throw new Error('votingDays must be a whole number of days, at least 1');
+    }
+    const blockHeight = params.blockHeight ?? (await this.blockApiClient.getLatestHeight());
+    const createdAt = Math.round(Date.now() / 1000);
+    const data = tokenVoteTopicCreateData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      topicUid: `${generateRandomStringSecure(8, VBTC_UNIQUE_ID_CHARSET)}${createdAt}`,
+      name: params.name,
+      description: params.description,
+      minimumVoteRequirement: params.minimumVoteRequirement,
+      blockHeight,
+      createdAt,
+      votingEndsAt: createdAt + params.votingDays * 24 * 60 * 60,
+    });
+    return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
+  };
+
+  /**
+   * Cast the signer's vote on a topic. The transaction is addressed to the
+   * token owner, looked up from Spyglass unless `ownerAddress` is given.
+   */
+  public castTokenVote = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; topicUid: string; vote: boolean; ownerAddress?: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const ownerAddress =
+      params.ownerAddress ?? (await this.tokenApiClient.getToken(params.scIdentifier)).token.owner_address;
+    const data = tokenVoteCastData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      topicUid: params.topicUid,
+      vote: params.vote,
+    });
+    return this.sendTokenTx(resolved, ownerAddress, data, params.unlockHours);
+  };
+
   // -- Internal helpers --------------------------------------------------------
+
+  /**
+   * Ticker and name travel in every token transaction for indexers and
+   * wallets. Callers that know them skip a round-trip; otherwise they are read
+   * from Spyglass.
+   */
+  private async tokenIdentity(params: {
+    scIdentifier: string;
+    ticker?: string;
+    name?: string;
+  }): Promise<{ ticker: string; name: string }> {
+    if (params.ticker && params.name) {
+      return { ticker: params.ticker, name: params.name };
+    }
+    const detail = await this.tokenApiClient.getToken(params.scIdentifier);
+    return { ticker: params.ticker ?? detail.token.ticker, name: params.name ?? detail.token.name };
+  }
+
+  private async sendTokenTx(
+    signer: ResolvedSigner,
+    toAddress: string,
+    data: TokenTxData,
+    unlockHours?: number,
+  ): Promise<string | null> {
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: 0,
+      txType: TxType.TokenTx,
+      data,
+      unlockTime: this.unlockTimeFor(signer, unlockHours),
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reserve (Vault) accounts
+  //
+  // A reserve account is funded like any address, then activated with
+  // registerReserveAccount. From then on every send from it waits behind an
+  // unlock time (24 hours minimum) and can be called back until it settles;
+  // recoverReserveAccount sweeps pending sends and the balance to the
+  // recovery address if the vault key is ever compromised. The node applies
+  // the delay to VFX, vBTC and NFT sends; a fungible-token transfer from a
+  // vault carries the unlock time the node insists on but settles at once.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Activate a funded reserve account on the network: a 4 VFX Register()
+   * naming the recovery address. The vault must already hold the 4 VFX plus
+   * the fee plus the 0.5 VFX floor the node keeps on reserve accounts.
+   * `recoveryAddress` is taken from a ReserveKeypair; a Signer must supply it.
+   */
+  public registerReserveAccount = async (
+    signer: KeypairOrSigner,
+    params: { recoveryAddress?: string } = {},
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'registerReserveAccount');
+    const recoveryAddress = params.recoveryAddress ?? (signer as Partial<ReserveKeypair>).recoveryAddress;
+    if (!recoveryAddress) {
+      throw new Error('registerReserveAccount requires a recoveryAddress when the signer is not a ReserveKeypair');
+    }
+    if (recoveryAddress === resolved.address || recoveryAddress.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error('recoveryAddress must be an ordinary account, not a reserve account');
+    }
+    return this.sendReserveTx(
+      resolved,
+      { Function: 'Register()', RecoveryAddress: recoveryAddress },
+      {
+        amount: RESERVE_ACTIVATION_COST,
+        unlockTime: null,
+      },
+    );
+  };
+
+  /**
+   * Cancel a pending send from the vault before its unlock time. `hash` is
+   * the hash of the send being called back; the node refuses once it has
+   * settled, and only the vault that sent it can call it back.
+   */
+  public callBackReserveTransaction = async (
+    signer: KeypairOrSigner,
+    params: { hash: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'callBackReserveTransaction');
+    if (!params.hash) {
+      throw new Error('callBackReserveTransaction requires the hash of the pending transaction');
+    }
+    return this.sendReserveTx(resolved, { Function: 'CallBack()', Hash: params.hash }, { amount: 0, unlockTime: 0 });
+  };
+
+  /**
+   * Sweep the vault to its recovery address: pending sends are reversed and
+   * the balance moves. Two signatures are needed — the vault key signs the
+   * transaction, and the recovery key signs `${SignatureTime}${recoveryAddress}`
+   * to prove control of the recovery account. A ReserveKeypair carries both;
+   * with a Signer for the vault, pass `recoverySigner` for the recovery key.
+   * The node accepts the recovery signature for ten minutes.
+   */
+  public recoverReserveAccount = async (
+    signer: KeypairOrSigner,
+    params: { recoverySigner?: KeypairOrSigner; recoveryAddress?: string } = {},
+  ): Promise<string | null> => {
+    const resolved = this.resolveReserve(signer, 'recoverReserveAccount');
+
+    const recoveryPrivateKey = (signer as Partial<ReserveKeypair>).recoveryPrivateKey;
+    const recoveryInput =
+      params.recoverySigner ?? (recoveryPrivateKey ? { privateKey: recoveryPrivateKey } : undefined);
+    if (!recoveryInput) {
+      throw new Error('recoverReserveAccount requires a recoverySigner when the signer is not a ReserveKeypair');
+    }
+    const recovery = this.resolve(recoveryInput);
+    const recoveryAddress = params.recoveryAddress ?? recovery.address;
+    if (recovery.address !== recoveryAddress) {
+      throw new Error(
+        `recoverReserveAccount: the recovery key signs for ${recovery.address}, not the recoveryAddress ${recoveryAddress}`,
+      );
+    }
+
+    const signatureTime = Math.round(Date.now() / 1000);
+    const recoverySigScript = await recovery.sign(`${signatureTime}${recoveryAddress}`);
+
+    return this.sendReserveTx(
+      resolved,
+      {
+        Function: 'Recover()',
+        RecoveryAddress: recoveryAddress,
+        RecoverySigScript: recoverySigScript,
+        SignatureTime: signatureTime,
+      },
+      { amount: 0, unlockTime: 0 },
+    );
+  };
+
+  private async sendReserveTx(
+    signer: ResolvedSigner,
+    data: Record<string, unknown>,
+    opts: { amount: number; unlockTime: number | null },
+  ): Promise<string | null> {
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: RESERVE_BASE_ADDRESS,
+      amount: opts.amount,
+      txType: TxType.Reserve,
+      data,
+      unlockTime: opts.unlockTime,
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  }
+
+  private resolveReserve(signer: KeypairOrSigner, label: string): ResolvedSigner {
+    const resolved = this.resolve(signer);
+    if (!resolved.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error(
+        `${label} must be signed by a reserve (${RESERVE_ADDRESS_PREFIX}) account, got ${resolved.address}. ` +
+          'Pass the ReserveKeypair itself, or a Signer whose address is the reserve form of its key.',
+      );
+    }
+    return resolved;
+  }
+
+  private assertNotReserve(signer: ResolvedSigner, label: string): void {
+    if (signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error(
+        `${label} cannot be sent from a reserve account; the network only allows it from an ordinary account`,
+      );
+    }
+  }
+
+  /**
+   * The unlock time a send needs. Reserve accounts must delay every send by
+   * at least 24 hours (the node checks this); ordinary accounts never set one.
+   */
+  private unlockTimeFor(signer: ResolvedSigner, unlockHours?: number): number | null {
+    if (!signer.address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      if (unlockHours !== undefined) {
+        throw new Error('unlockHours applies only to sends from a reserve (xRBX) account');
+      }
+      return null;
+    }
+    const hours = unlockHours ?? RESERVE_MIN_UNLOCK_HOURS;
+    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < RESERVE_MIN_UNLOCK_HOURS) {
+      throw new Error(
+        `A send from a reserve account must wait at least ${RESERVE_MIN_UNLOCK_HOURS} hours, got ${hours}`,
+      );
+    }
+    return Math.round(Date.now() / 1000) + Math.round(hours * 3600);
+  }
 
   private assertNotDryRun(label: string): void {
     // vBTC flows run MPC/FROST ceremonies and broadcast immediately — there
@@ -793,6 +1526,15 @@ export class VfxClient {
           'Construct the VfxClient without dryRun to use it.',
       );
     }
+  }
+
+  /** The .vfx name (without suffix) the address owns, or throw. Strict: an outage is an error, not "no domain". */
+  private async ownedVfxDomain(address: string, label: string): Promise<string> {
+    const details = await this.addressApiClient.getAddressDetails(address, { strict: true });
+    if (!details?.adnr) {
+      throw new Error(`${label}: ${address} does not own a .vfx domain`);
+    }
+    return domainWithoutSuffix(details.adnr);
   }
 
   private assertPrepared(response: PreparedTransactionResponse | undefined, label: string): void {
@@ -807,20 +1549,37 @@ export class VfxClient {
     }
   }
 
+  private resolve(input: KeypairOrSigner | ResolvedSigner | { privateKey: string }): ResolvedSigner {
+    return resolveSigner(input, this.keypairService);
+  }
+
+  /**
+   * Pick the signing key for a flow that historically took `privateKey` and
+   * now also accepts `signer`. Exactly one must be given: silently preferring
+   * one over the other would hide a wiring mistake in exactly the setups
+   * (HSM alongside a leftover dev key) where it matters most.
+   */
+  private signerFor(params: { privateKey?: string; signer?: Signer }, label: string): ResolvedSigner {
+    if (params.signer && params.privateKey) {
+      throw new Error(`${label}: pass either privateKey or signer, not both`);
+    }
+    if (params.signer) {
+      return this.resolve(params.signer);
+    }
+    if (params.privateKey) {
+      return this.resolve({ privateKey: params.privateKey });
+    }
+    throw new Error(`${label} requires a privateKey or a signer`);
+  }
+
   private async signAndSend(
     prepared: PreparedTransactionResponse,
-    privateKey: string,
+    signer: ResolvedSigner,
     sendFn: SendFn,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = this.keypairService.getSignature(hash, privateKey);
-
-    let publicKey = this.keypairService.publicFromPrivate(normalizePrivateKey(privateKey));
-    if (publicKey.startsWith('04')) {
-      publicKey = publicKey.substring(2);
-    }
-
-    return sendFn({ hash, signature, public_key: publicKey });
+    const signature = await signer.sign(hash);
+    return sendFn({ hash, signature, public_key: signer.publicKey });
   }
 
   private async pollUntilDone<T>(opts: {

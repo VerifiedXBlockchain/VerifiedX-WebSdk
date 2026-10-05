@@ -918,14 +918,116 @@ describe('vBTC V2 — FROST polling tolerates job registration lag', () => {
         retryable: true,
         session_id: 'SES_W',
         input_index: 0,
-        validator_failures: [
-          { validator_address: 'VAL1', http_status: 0, message: 'unreachable' },
-        ],
+        validator_failures: [{ validator_address: 'VAL1', http_status: 0, message: 'unreachable' }],
       }),
     });
 
     await expect(client.completeWithdrawal(params())).rejects.toThrow(
       /Round2InsufficientShares is transient.*wait ~60 seconds/s,
     );
+  });
+});
+
+describe('vBTC V2 — external signer', () => {
+  let client: VfxClient;
+  let privateKey: string;
+
+  beforeEach(() => {
+    client = new VfxClient('testnet');
+    privateKey = client.generatePrivateKey();
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  /** HSM stand-in: signs the digest with the same key so outputs can be compared. */
+  function externalSigner() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const EC = require('elliptic');
+    const curve = new EC.ec('secp256k1');
+    const normalized = privateKey.replace(/^00/, '');
+    return {
+      address: client.addressFromPrivate(privateKey),
+      publicKey: client.publicFromPrivate(privateKey),
+      signDigest: (digestHex: string): Uint8Array =>
+        Uint8Array.from(
+          curve
+            .keyFromPrivate(Buffer.from(normalized, 'hex'))
+            .sign(Buffer.from(digestHex, 'hex'), { canonical: true })
+            .toDER(),
+        ),
+    };
+  }
+
+  test('transferVbtc signs through the signer and posts the same signature a local key would', async () => {
+    const expectedHash = 'PREPARED_HASH_ABC';
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: expectedHash, Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: true, Hash: 'SENT_HASH_XYZ' }),
+    });
+
+    const result = await client.transferVbtc({
+      scIdentifier: 'sc-1',
+      fromAddress: 'xFrom',
+      toAddress: 'xTo',
+      amount: 5,
+      signer: externalSigner(),
+    });
+
+    expect(result).toEqual({ transactionHash: 'SENT_HASH_XYZ' });
+    const sendBody = calls[1].body as { hash: string; signature: string; public_key: string };
+    expect(sendBody.signature).toBe(client.getSignature(expectedHash, privateKey));
+    expect(sendBody.public_key).toBe(client.publicFromPrivate(privateKey).replace(/^04/, ''));
+  });
+
+  test('every vBTC flow refuses to run with neither privateKey nor signer, or with both', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      client.transferVbtc({ scIdentifier: 'sc-1', fromAddress: 'xA', toAddress: 'xB', amount: 1 }),
+    ).rejects.toThrow(/requires a privateKey or a signer/);
+    await expect(
+      client.transferVbtc({
+        scIdentifier: 'sc-1',
+        fromAddress: 'xA',
+        toAddress: 'xB',
+        amount: 1,
+        privateKey,
+        signer: externalSigner(),
+      }),
+    ).rejects.toThrow(/not both/);
+    await expect(
+      client.cancelWithdrawal({ scIdentifier: 'sc-1', ownerAddress: 'xA', withdrawalRequestHash: 'WR' }),
+    ).rejects.toThrow(/requires a privateKey or a signer/);
+    await expect(
+      client.recordWithdrawalCompletion({
+        scIdentifier: 'sc-1',
+        requestorAddress: 'xA',
+        withdrawalRequestHash: 'WR',
+        btcTransactionHash: 'btc',
+        amount: 1,
+        btcDestination: 'bc1q',
+      }),
+    ).rejects.toThrow(/requires a privateKey or a signer/);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('a signer whose address is not its key is rejected before any request', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(
+      client.transferVbtc({
+        scIdentifier: 'sc-1',
+        fromAddress: 'xA',
+        toAddress: 'xB',
+        amount: 1,
+        signer: { ...externalSigner(), address: 'xSomeoneElse000000000000000000000' },
+      }),
+    ).rejects.toThrow(/does not match its public key/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

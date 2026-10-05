@@ -1,5 +1,5 @@
 import { Network } from '../constants';
-import { VfxAddress } from '../types';
+import { FungibleTokenBalance, VfxAddress } from '../types';
 import { addressWithoutActivity } from '../utils';
 import { BaseApiClient, VfxApiError } from './base-api-client';
 
@@ -31,11 +31,14 @@ export class AddressApiClient extends BaseApiClient {
       if (result) {
         return {
           address: result.address,
-          balance: result.balance,
-          balanceTotal: result.balance_total,
-          balanceLocked: result.balance_locked,
+          // Spyglass sends some balances as decimal strings (seen on a
+          // recovered vault: "0.0000000000000000"); the type promises numbers.
+          balance: Number(result.balance),
+          balanceTotal: Number(result.balance_total),
+          balanceLocked: Number(result.balance_locked ?? 0),
           adnr: result.adnr,
           activated: result.activated,
+          deactivated: result.deactivated ?? false,
         };
       }
 
@@ -63,6 +66,24 @@ export class AddressApiClient extends BaseApiClient {
         throw e;
       }
       return true;
+    }
+  };
+
+  /**
+   * Every fungible token the address holds, with its balance. An address the
+   * explorer has never seen (404) simply holds nothing; other failures throw.
+   */
+  public getTokenBalances = async (address: string): Promise<FungibleTokenBalance[]> => {
+    try {
+      const result: { tokens?: FungibleTokenBalance[] } = await this.makeJsonRequest(
+        `/${encodeURIComponent(address)}/tokens/`,
+      );
+      return result?.tokens ?? [];
+    } catch (e) {
+      if (isNotFound(e)) {
+        return [];
+      }
+      throw e;
     }
   };
 

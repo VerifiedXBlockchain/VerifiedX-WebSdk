@@ -58,6 +58,21 @@ export class RawTransactionApiClient extends BaseApiClient {
     return response?.Result === 'Success';
   }
 
+  /**
+   * Compile a smart-contract payload on the node and return the transaction
+   * Data for its deploy: `[{ Function, ContractUID, Data, MD5List }]`. The
+   * node reports compile failures as a JSON object rather than the array, and
+   * Spyglass turns those into a 500, so anything but the array shape is an
+   * error here.
+   */
+  async getSmartContractDeployData(payload: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+    const response = await this.makeJsonRequest('/smart-contract-data/', 'POST', payload);
+    if (!Array.isArray(response) || typeof response[0]?.ContractUID !== 'string') {
+      throw new Error(`Unexpected smart-contract-data result: ${JSON.stringify(response)}`);
+    }
+    return response;
+  }
+
   async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
     const params = { transaction: txData };
     const response = await this.makeJsonRequest('/send/', 'POST', params);

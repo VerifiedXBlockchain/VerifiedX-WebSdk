@@ -1,5 +1,64 @@
 # Changelog
 
+## 3.4.0 (2026-10-05)
+
+External signing, fungible tokens, reserve (vault) accounts, multi-contract
+vBTC transfers and domain management. No public API removals or renames; the
+`privateKey` parameters that became optional are called out below because
+TypeScript will now accept an options object that omits them.
+
+### Added
+
+- **`Signer` — sign with a key the SDK never sees.** Every signing path
+  (`sendCoin`, `buyVfxDomain`, `buyBtcDomain`, the six vBTC flows, and the
+  new token methods) accepts a `Signer` in place of a `Keypair`. The SDK hands
+  the signer the SHA-256 digest of the message; the signer returns a plain
+  DER-encoded secp256k1 ECDSA signature (bytes, hex or base64), which is what a
+  KMS or HSM emits natively. The SDK assembles the network's
+  `base64(DER).base58(publicKey)` string and normalises high-s signatures, so
+  AWS KMS-style signers need no wrapper. The signer's address is verified
+  against its public key on the client's network before any request is made.
+  `vfxSignatureFromDer(der, publicKey)` is exported for callers that drive the
+  raw API themselves.
+- **`addressFromPublic(publicKeyHex)`** on `VfxClient` and `KeypairService`:
+  the address for an HSM-held key.
+- **Fungible tokens (VFX20).** `deployToken`, `mintToken`, `transferToken`,
+  `burnToken`, `toggleTokenPause`, `banTokenAddress`,
+  `transferTokenOwnership`, `createTokenVoteTopic`, `castTokenVote`, and the
+  reads `listFungibleTokens`, `getFungibleToken`, `getFungibleTokenBalances`,
+  `listTokenVotingTopics`, `getTokenVotingTopic`. Payloads mirror the web
+  wallet field-for-field. Pause is exposed as a toggle because the node flips
+  the state whatever is requested; the transaction still carries the state it
+  produces, read from Spyglass first, because explorers and wallets display it; ban is permanent on the network.
+- `RawTransactionService` accepts `signer` (or a `Signer` as `keypair`) and
+  fails at construction on a key/address mismatch, and takes an `unlockTime`.
+- **Reserve (vault) accounts.** Key derivation that is byte-compatible with
+  the web wallet and the CLI: `reserveKeypairFromPrivateKey` (the vault the
+  wallet pairs with a main key), `reserveKeypairFromReservePrivateKey`,
+  `reserveKeypairFromRestoreCode`, `generateReserveKeypair`,
+  `reserveAddressFromPublic`. Operations: `registerReserveAccount`,
+  `sendCoin(..., { unlockHours })`, `callBackReserveTransaction`,
+  `recoverReserveAccount`. Every token method accepts `unlockHours` for
+  sends from a vault; deploy and domain purchases refuse a vault signer, as
+  the network does. `VfxAddress` gains `deactivated`. Golden vectors for the
+  derivation were captured from the wallet's compiled keygen and
+  `scripts/verify-wallet-compat.js` cross-checks it live.
+- **`transferVbtcMulti`** — one `TransferVBTCMultiV2()` drawing from several
+  vBTC contracts, allocated with the CLI's rule from Spyglass's
+  `available_balances` (now on `VbtcV2Token`) or from caller-supplied
+  inputs; single-contract cases fall back to `transferVbtc`.
+  `allocateVbtcInputs` and `vbtcMultiTransferData` are exported.
+- **Domain management.** `transferVfxDomain`, `deleteVfxDomain`,
+  `transferBtcDomain`, `deleteBtcDomain` (5 VFX each), completing the
+  domain API alongside the existing purchases.
+
+### Changed
+
+- vBTC flows: `privateKey` is now optional in the params object and `signer`
+  is accepted instead. Exactly one must be given — passing both, or neither,
+  throws before any request is made. Behaviour with `privateKey` alone is
+  unchanged.
+
 ## 3.3.0 (2026-09-11)
 
 Tracks the mainnet network upgrade (multi-input vBTC withdrawals). No public

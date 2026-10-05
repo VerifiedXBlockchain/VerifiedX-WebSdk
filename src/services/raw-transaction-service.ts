@@ -1,26 +1,39 @@
 import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
-import { Keypair } from '../types';
+import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
 import KeypairService from './keypair-service';
 
 export interface IRawTransactionServiceOptions {
   network: Network;
-  keypair: Keypair;
+  /**
+   * Who signs and pays: a local keypair, or a Signer that holds the key
+   * elsewhere (HSM, MPC). `signer` is the same option under a name that reads
+   * correctly for external signers; pass one or the other.
+   */
+  keypair?: KeypairOrSigner | ResolvedSigner;
+  signer?: KeypairOrSigner | ResolvedSigner;
   toAddress: string;
   txType?: number;
   amount?: number;
   data?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  /**
+   * Unix seconds at which the transaction settles. Required by the node for
+   * every send from a reserve (xRBX) account except the reserve operations
+   * themselves; null (the default) for everything else.
+   */
+  unlockTime?: number | null;
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
 }
 
 export class RawTransactionService {
   private network: Network;
-  private keypair: Keypair;
+  private signer: ResolvedSigner;
   private toAddress: string;
   private txType: number;
   private amount: number;
   private data: Record<string, unknown> | Array<Record<string, unknown>> | null;
   private fromAddress: string;
+  private unlockTime: number | null;
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
 
   private hash: string | null = null;
@@ -31,12 +44,20 @@ export class RawTransactionService {
 
   constructor(options: IRawTransactionServiceOptions) {
     this.network = options.network;
-    this.keypair = options.keypair;
+    const signerInput = options.signer ?? options.keypair;
+    if (!signerInput) {
+      throw new Error('RawTransactionService requires a keypair or a signer');
+    }
+    // Resolved eagerly so a keypair whose address does not match its key, or a
+    // signer wired to the wrong network, fails at construction rather than
+    // after the fee and nonce round-trips.
+    this.signer = resolveSigner(signerInput, new KeypairService(this.network));
     this.toAddress = options.toAddress;
     this.txType = options.txType ?? 0;
     this.amount = options.amount ?? 0;
     this.data = options.data ?? null;
-    this.fromAddress = this.keypair.address;
+    this.fromAddress = this.signer.address;
+    this.unlockTime = options.unlockTime ?? null;
     this.apiOptions = options.apiOptions ?? {};
   }
 
@@ -53,13 +74,12 @@ export class RawTransactionService {
       Signature: this.signature || '',
       Height: 0,
       Data: this.data,
-      UnlockTime: null,
+      UnlockTime: this.unlockTime,
     };
   }
 
   async process(dryRun = false): Promise<string | null> {
     const client = new RawTransactionApiClient(this.network, this.apiOptions);
-    const keypairService = new KeypairService(this.network);
 
     try {
       this.timestamp = await client.getTimestamp();
@@ -72,9 +92,9 @@ export class RawTransactionService {
 
       this.hash = await client.getHash(txData);
 
-      this.signature = keypairService.getSignature(this.hash, this.keypair.privateKey);
+      this.signature = await this.signer.sign(this.hash);
 
-      if (this.signature == null) {
+      if (!this.signature) {
         throw new Error('Signature was null');
       }
 

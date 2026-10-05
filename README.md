@@ -9,6 +9,9 @@ A comprehensive TypeScript/JavaScript SDK for VerifiedX blockchain and Bitcoin s
 - **Universal Compatibility**: Works in Node.js, browsers, and modern bundlers
 - **TypeScript First**: Full type safety with comprehensive TypeScript definitions
 - **Multiple Build Targets**: CommonJS, ES Modules, and browser-ready bundles
+- **External Signing**: Every signing path accepts a `Signer` so keys can stay in an HSM or MPC service
+- **Fungible Tokens (VFX20)**: Deploy, mint, transfer, burn, pause, ban, ownership, and holder voting
+- **Reserve (Vault) Accounts**: Derive, activate, send with a delay, call back, and recover — wallet-compatible
 
 ## Installation
 
@@ -37,6 +40,40 @@ const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://mempool.sp
 const available = await vfx.domainAvailable('name.vfx', { strict: true }); // throws VfxApiError on outage
 ```
 
+### Signing with an HSM or MPC service
+
+Every method that signs — `sendCoin`, the domain purchases, the vBTC flows and
+the token methods — accepts either a `Keypair` or a `Signer`. A `Signer` never
+exposes the private key: the SDK hands it the SHA-256 digest of what needs
+signing and takes back a plain DER-encoded secp256k1 ECDSA signature, which is
+what a KMS or HSM produces natively. The SDK assembles the network's signature
+format itself and normalises high-s signatures, so a signer that does not
+canonicalise (AWS KMS, for one) works unchanged.
+
+```typescript
+import { VfxClient, Signer } from 'vfx-web-sdk';
+
+const client = new VfxClient('mainnet');
+
+const publicKey = await hsm.getPublicKeyHex(); // uncompressed secp256k1, 04-prefixed or not
+const signer: Signer = {
+  address: client.addressFromPublic(publicKey),
+  publicKey,
+  // digestHex is the 32-byte SHA-256 digest as hex; return DER bytes, hex, or base64.
+  signDigest: (digestHex) => hsm.signDigest(digestHex),
+};
+
+await client.sendCoin(signer, 'recipient-address', 10);
+await client.transferVbtc({ scIdentifier, fromAddress: signer.address, toAddress, amount: 0.5, signer });
+await client.mintToken(signer, { scIdentifier: tokenId, amount: 1000 });
+```
+
+The signer's `address` is checked against its public key on the client's
+network before anything is built, so a wrong key or a testnet address on a
+mainnet client fails immediately rather than at the node. Flows that take
+`privateKey` in an options object take `signer` in its place; passing both is
+an error.
+
 ## Quick Start
 
 ### VFX Operations
@@ -53,9 +90,9 @@ const address = vfxClient.addressFromPrivate(privateKey);
 
 // Send transaction
 const result = await vfxClient.sendCoin({
-  private: privateKey,
-  public: vfxClient.publicFromPrivate(privateKey),
-  address: address
+  privateKey,
+  publicKey: vfxClient.publicFromPrivate(privateKey),
+  address,
 }, 'recipient-address', 1000);
 ```
 
@@ -123,12 +160,122 @@ addressFromPrivate(privateKey: string): string
 #### Transactions
 
 ```typescript
-// Send VFX tokens
-sendCoin(keypair: Keypair, toAddress: string, amount: number): Promise<any>
+// Send VFX. Resolves to the transaction hash, or null if it never reached the node.
+sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<string | null>
 
-// Purchase VFX domain
-buyVfxDomain(keypair: Keypair, domain: string): Promise<any>
+// Domains (5 VFX each). Transfer and delete read the owned name from Spyglass.
+buyVfxDomain(keypair: Keypair | Signer, domain: string): Promise<string | null>
+transferVfxDomain(keypair, toAddress)
+deleteVfxDomain(keypair)
+transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress })
+deleteBtcDomain(keypair, { btcFromAddress })
+
+// Address for an external signer's public key (the SDK never sees the private key)
+addressFromPublic(publicKeyHex: string): string
 ```
+
+#### vBTC multi-contract transfer
+
+```typescript
+// One transaction drawing from several vBTC contracts the signer holds balance
+// on. Inputs are allocated the way the CLI does (largest spendable balance
+// first, whole satoshis) from Spyglass's available_balances, or pass `inputs`
+// to choose them yourself. One contract covering the amount falls back to
+// transferVbtc. Up to 25 contracts; not from a reserve account.
+transferVbtcMulti({ toAddress, totalAmount, privateKey | signer, inputs? })
+  : Promise<{ transactionHash: string; inputs: Array<{ scIdentifier, amount }> }>
+
+// The pieces, for callers that manage balances themselves:
+allocateVbtcInputs(balances: Record<scIdentifier, vbtc>, total)   // { inputs, available, failure? }
+vbtcMultiTransferData({ fromAddress, toAddress, totalAmount, inputs })
+```
+
+#### Fungible Tokens (VFX20)
+
+Every mutating method returns the transaction hash, or `null` when the
+transaction never reached the node (the `sendCoin` contract), and honours
+`dryRun`. The signer's address is the acting address: the owner for mint,
+pause, ban, ownership change and topic creation; the holder for transfer, burn
+and votes. Token operations pay the ordinary network fee in VFX.
+
+```typescript
+// Deploy a token contract owned by the signer. Returns the contract id
+// (scIdentifier) every later call is addressed to — even in dryRun.
+deployToken(signer, {
+  name, ticker,                      // ticker ≤ 20 chars, stored upper-case
+  description?,                      // defaults to name
+  decimalPlaces?,                    // 1–18, default 8
+  initialSupply?,                    // whole tokens minted to the deployer; must be 0 when mintable
+  mintable?, burnable?, voting?,     // default false
+  image?: { url, name?, extension?, fileSize?, thumbnailBase64? }, // url must be publicly fetchable
+}): Promise<{ transactionHash: string; scIdentifier: string } | null>
+
+mintToken(signer, { scIdentifier, amount, ticker?, name? })            // owner; token must be mintable
+transferToken(signer, { scIdentifier, toAddress, amount, ticker?, name? })
+burnToken(signer, { scIdentifier, amount, ticker?, name? })            // holder's own balance; token must be burnable
+toggleTokenPause(signer, { scIdentifier })                             // owner; flips paused ↔ active (see below)
+banTokenAddress(signer, { scIdentifier, address })                     // owner; permanent — the network cannot unban
+transferTokenOwnership(signer, { scIdentifier, toAddress })            // owner
+createTokenVoteTopic(signer, { scIdentifier, name, description, votingDays, minimumVoteRequirement, blockHeight? })
+castTokenVote(signer, { scIdentifier, topicUid, vote, ownerAddress? })
+
+// Reads (Spyglass)
+listFungibleTokens(page?, limit?): Promise<PaginatedResponse<FungibleToken>>
+getFungibleToken(scIdentifier): Promise<{ token: FungibleToken; holders: Record<string, number> }>
+getFungibleTokenBalances(address): Promise<Array<{ token: FungibleToken; balance: number }>>
+listTokenVotingTopics(scIdentifier, page?, limit?)
+getTokenVotingTopic(topicId)
+```
+
+Two behaviours worth knowing before wiring these into anything automated:
+
+- **Pause is a toggle.** The node flips the current state whatever the
+  transaction asks for, so never send `toggleTokenPause` twice for one
+  intended change. The SDK reads `is_paused` from Spyglass and labels the
+  transaction with the state it produces, which is what explorers and wallets
+  display.
+- **Ban cannot be undone**, and a banned address can still receive. Treat it as
+  permanent.
+
+`ticker` and `name` ride in every token transaction for indexers and wallets;
+pass them to skip the Spyglass lookup the SDK otherwise makes.
+
+#### Reserve (Vault) Accounts
+
+A reserve account is an `xRBX…` address whose outgoing sends wait behind an
+unlock time (24 hours minimum) and can be called back until they settle, with
+a recovery key that can sweep the vault if its key is compromised. The
+network applies the delay to VFX, vBTC and NFT sends. A fungible-token
+transfer from a vault must carry the unlock time but settles immediately, so
+a vault protects treasury, not fund tokens.
+
+```typescript
+// Keys. The vault the web wallet pairs with a main key is derived from it, so
+// the same wallet account gives the same vault here (pinned by golden vectors).
+const vault = client.reserveKeypairFromPrivateKey(mainPrivateKey); // ReserveKeypair
+client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code
+client.reserveKeypairFromReservePrivateKey(key)     // from the vault key alone
+client.generateReserveKeypair()                     // standalone vault
+client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM key
+
+// Lifecycle. Fund the vault first (5 VFX covers activation plus the 0.5 floor).
+await client.sendCoin(main, vault.address, 5);
+await client.registerReserveAccount(vault);                            // 4 VFX Register()
+await client.sendCoin(vault, toAddress, 100);                          // settles in 24h
+await client.sendCoin(vault, toAddress, 100, { unlockHours: 72 });     // or longer
+await client.callBackReserveTransaction(vault, { hash });             // before it settles
+await client.recoverReserveAccount(vault);                             // sweep to the recovery address
+
+// With an HSM: the vault Signer presents the xRBX address; recovery needs
+// its own signer (or keypair) for the second signature.
+await client.registerReserveAccount(vaultSigner, { recoveryAddress });
+await client.recoverReserveAccount(vaultSigner, { recoverySigner });
+```
+
+`getAddressDetails` reports `activated` (a Register() exists), `deactivated`
+(a Recover() exists) and `balanceLocked` (sends still waiting to settle).
+Pass the `ReserveKeypair` object itself when signing: its private key on its
+own resolves to the key's ordinary address, not the vault.
 
 #### Address Operations
 
@@ -240,9 +387,16 @@ The SDK provides comprehensive TypeScript definitions:
 ```typescript
 import type {
   Keypair,
+  Signer,
   VfxAddress,
   Transaction,
-  PaginatedResponse
+  PaginatedResponse,
+  FungibleToken,
+  FungibleTokenBalance,
+  DeployTokenParams,
+  DeployTokenResult,
+  ReserveKeypair,
+  ReserveSendOptions,
 } from 'vfx-web-sdk';
 
 import type {
@@ -395,7 +549,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 3.3.0
+- **Version**: 3.4.0
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
 - **Documentation**: See inline TypeScript definitions for detailed API documentation

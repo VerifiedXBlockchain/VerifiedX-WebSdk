@@ -2,7 +2,7 @@ import { VfxClient } from './client/vfx-client';
 
 // Export main VFX client
 export { VfxClient };
-export type { VfxClientOptions } from './client/vfx-client';
+export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
 
 // Export API error type + media client
 export { VfxApiError } from './client/base-api-client';
@@ -24,11 +24,32 @@ export type {
   VbtcTransfer,
   CreateVbtcResult,
   VbtcTransferResult,
+  VbtcMultiTransferResult,
   VbtcWithdrawalResult,
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,
+  FungibleToken,
+  FungibleTokenDetail,
+  FungibleTokenBalance,
+  TokenVotingTopic,
+  TokenImage,
+  DeployTokenParams,
+  DeployTokenResult,
+  ReserveKeypair,
 } from './types';
+
+// External signing (HSM / MPC)
+export type { Signer, KeypairOrSigner } from './signer';
+export { vfxSignatureFromDer } from './signer';
+export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from './services/vbtc-multi';
+export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
+export {
+  TOKEN_BASE_ADDRESS,
+  RESERVE_BASE_ADDRESS,
+  RESERVE_ACTIVATION_COST,
+  RESERVE_MIN_UNLOCK_HOURS,
+} from './constants';
 
 // Export BTC namespace
 export * as btc from './btc';

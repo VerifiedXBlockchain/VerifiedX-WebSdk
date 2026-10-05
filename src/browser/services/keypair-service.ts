@@ -3,6 +3,7 @@ import * as bip39 from 'bip39';
 import KeypairService from '../../services/keypair-service';
 import { isValidPrivateKey } from '../utils';
 import { Network } from '../../constants';
+import { ReserveKeypair } from '../../types';
 
 /**
  * Browser-facing keypair service.
@@ -134,6 +135,30 @@ export class BrowserKeypairService {
 
   public addressFromPrivate(privateKey: string): string {
     return this.inner.addressFromPrivate(privateKey);
+  }
+
+  public addressFromPublic(publicKeyHex: string): string {
+    return this.inner.addressFromPublic(publicKeyHex);
+  }
+
+  public reserveAddressFromPublic(publicKeyHex: string): string {
+    return this.inner.reserveAddressFromPublic(publicKeyHex);
+  }
+
+  public reserveKeypairFromPrivateKey(mainPrivateKey: string): ReserveKeypair {
+    return this.inner.reserveKeypairFromPrivateKey(mainPrivateKey);
+  }
+
+  public reserveKeypairFromReservePrivateKey(reservePrivateKey: string): ReserveKeypair {
+    return this.inner.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  }
+
+  public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
+    return this.inner.reserveKeypairFromRestoreCode(restoreCode);
+  }
+
+  public generateReserveKeypair(): ReserveKeypair {
+    return this.inner.generateReserveKeypair();
   }
 
   public getSignature(message: string, privateKeyHex: string): string {

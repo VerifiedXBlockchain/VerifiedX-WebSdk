@@ -30,6 +30,109 @@ interface Keypair {
 }
 ```
 
+### Signer Interface
+
+An external signing authority (HSM, MPC service, hardware wallet). Accepted
+everywhere a `Keypair` is.
+
+```typescript
+interface Signer {
+  address: string;     // VFX address the signature is verified against
+  publicKey: string;   // uncompressed secp256k1 public key, hex, 04 prefix optional
+  // Sign the 32-byte SHA-256 digest (hex). Return DER as bytes, hex, or base64.
+  signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
+}
+
+type KeypairOrSigner = Keypair | Signer;
+```
+
+### Reserve (Vault) Account Types
+
+```typescript
+interface ReserveKeypair extends Keypair {
+  // address is the xRBX form; privateKey/publicKey are the vault's own key
+  recoveryPrivateKey: string;
+  recoveryPublicKey: string;
+  recoveryAddress: string;   // ordinary address that can sweep the vault
+  restoreCode: string;       // base64("<privateKey>//<recoveryPrivateKey>"), CLI/wallet compatible
+}
+
+interface ReserveSendOptions {
+  unlockHours?: number;      // delay for a send from a vault; default 24, the network minimum
+}
+```
+
+### Fungible Token Types
+
+```typescript
+interface FungibleToken {
+  sc_identifier: string;
+  name: string;
+  ticker: string;
+  description: string | null;
+  owner_address: string;
+  can_mint: boolean;
+  can_burn: boolean;
+  can_vote: boolean;
+  created_at: string;
+  initial_supply: number;
+  circulating_supply: number;
+  decimal_places: number;
+  image_url: string | null;
+  is_paused: boolean;
+  banned_addresses: string[];
+  nsfw: boolean;
+}
+
+interface FungibleTokenDetail {
+  token: FungibleToken;
+  holders: Record<string, number>;   // address → balance
+}
+
+interface FungibleTokenBalance {
+  token: FungibleToken;
+  balance: number;
+}
+
+interface TokenImage {
+  url: string;               // publicly fetchable; becomes the contract's primary asset
+  name?: string;             // defaults to the last path segment of url
+  extension?: string;        // defaults to the extension of name
+  fileSize?: number;
+  thumbnailBase64?: string;  // small inline image wallets display
+}
+
+interface DeployTokenParams {
+  name: string;
+  ticker: string;            // ≤ 20 chars, stored upper-case
+  description?: string;      // defaults to name
+  decimalPlaces?: number;    // 1–18, default 8
+  initialSupply?: number;    // whole tokens; must be 0 when mintable
+  mintable?: boolean;
+  burnable?: boolean;
+  voting?: boolean;
+  image?: TokenImage;
+}
+
+interface DeployTokenResult {
+  transactionHash: string;
+  scIdentifier: string;
+}
+
+interface TokenVotingTopic {
+  sc_identifier: string;
+  token: FungibleToken;
+  from_address: string;
+  topic_id: string;
+  name: string;
+  description: string;
+  vote_requirement: number;
+  created_at: string;
+  voting_ends_at: string;
+  vote_data: unknown;
+}
+```
+
 ### VFX Address Information
 
 ```typescript
