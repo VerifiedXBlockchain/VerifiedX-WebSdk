@@ -4,7 +4,7 @@ This guide will walk you through the fundamentals of using the VerifiedX Web SDK
 
 ## Prerequisites
 
-- Node.js 18+ or a modern browser
+- Node.js 20+ or a modern browser
 - Basic JavaScript/TypeScript knowledge
 - `vfx-web-sdk` installed in your project
 
