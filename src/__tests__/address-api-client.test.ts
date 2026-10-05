@@ -34,6 +34,25 @@ describe('getAddressDetails', () => {
     });
   });
 
+  test('balances sent as decimal strings come back as numbers', async () => {
+    installFetch({
+      '/addresses/xRBXVault': () => ({
+        address: 'xRBXVault',
+        balance: '0.0000000000000000',
+        balance_total: '1.5000000000000000',
+        balance_locked: 0.0,
+        adnr: null,
+        activated: true,
+        deactivated: true,
+      }),
+    });
+
+    const details = await client.getAddressDetails('xRBXVault');
+    expect(details?.balance).toBe(0);
+    expect(details?.balanceTotal).toBe(1.5);
+    expect(details?.balanceLocked).toBe(0);
+  });
+
   test('returns the zero-activity shape for an unseen address (404)', async () => {
     installFetch({ '/addresses/xNew': () => jsonResponse({ detail: 'not found' }, 404) });
 
