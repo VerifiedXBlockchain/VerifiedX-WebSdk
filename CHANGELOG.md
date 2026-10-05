@@ -27,7 +27,8 @@ TypeScript will now accept an options object that omits them.
   reads `listFungibleTokens`, `getFungibleToken`, `getFungibleTokenBalances`,
   `listTokenVotingTopics`, `getTokenVotingTopic`. Payloads mirror the web
   wallet field-for-field. Pause is exposed as a toggle because the node flips
-  the state and ignores the requested value; ban is permanent on the network.
+  the state whatever is requested; the transaction still carries the state it
+  produces, read from Spyglass first, because explorers and wallets display it; ban is permanent on the network.
 - `RawTransactionService` accepts `signer` (or a `Signer` as `keypair`) and
   fails at construction on a key/address mismatch.
 

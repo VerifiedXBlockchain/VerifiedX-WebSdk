@@ -100,16 +100,17 @@ export function tokenBurnData(params: {
 }
 
 /**
- * The node ignores `Pause` and toggles the current state; the flag is sent
- * for parity with the wallets, which is what the chain has always carried.
+ * The node ignores `Pause` and toggles the current state, but indexers and
+ * wallets read it as the resulting state (paused or resumed). Send the state
+ * the toggle produces, as the node's own PauseTokenContract endpoint does.
  */
-export function tokenPauseData(params: { scIdentifier: string; fromAddress: string }): TokenTxData {
+export function tokenPauseData(params: { scIdentifier: string; fromAddress: string; pause: boolean }): TokenTxData {
   assertScIdentifier(params.scIdentifier);
   return {
     Function: 'TokenPause()',
     ContractUID: params.scIdentifier,
     FromAddress: params.fromAddress,
-    Pause: true,
+    Pause: params.pause,
   };
 }
 

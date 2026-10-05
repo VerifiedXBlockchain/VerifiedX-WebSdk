@@ -238,9 +238,11 @@ can burn its own tokens — there is no issuer-side burn.
 ### `toggleTokenPause(signer, { scIdentifier })`
 
 Owner only. Flips the token between paused (no transfers) and active. The node
-toggles whatever the current state is and ignores any requested value, so read
-`is_paused` from `getFungibleToken` first and never send this twice for one
-intended change.
+toggles whatever the current state is, so never send this twice for one
+intended change. The SDK reads the current `is_paused` from Spyglass first and
+sends the resulting state in the transaction's `Pause` field, as the node's own
+endpoint does; explorers and wallets display that field. It throws if the
+current state cannot be read.
 
 ### `banTokenAddress(signer, { scIdentifier, address })`
 

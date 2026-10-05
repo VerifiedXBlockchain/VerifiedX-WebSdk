@@ -96,11 +96,11 @@ describe('token Data builders', () => {
   });
 
   test('pause, ban and owner change', () => {
-    expect(tokenPauseData({ scIdentifier: SC, fromAddress: OWNER })).toEqual({
+    expect(tokenPauseData({ scIdentifier: SC, fromAddress: OWNER, pause: false })).toEqual({
       Function: 'TokenPause()',
       ContractUID: SC,
       FromAddress: OWNER,
-      Pause: true,
+      Pause: false,
     });
     expect(tokenBanAddressData({ scIdentifier: SC, fromAddress: OWNER, banAddress: RECIPIENT })).toEqual({
       Function: 'TokenBanAddress()',
@@ -335,6 +335,25 @@ describe('VfxClient token transactions', () => {
       Pause: true,
     });
     expect((sends[2].Data as Record<string, unknown>).BanAddress).toBe(RECIPIENT);
+  });
+
+  test('toggleTokenPause on a paused token carries Pause: false, the state it produces', async () => {
+    const { calls } = installTokenPipeline({
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({
+        token: { ...fakeToken, is_paused: true },
+        holders: {},
+      }),
+    });
+    await client.toggleTokenPause(keypair, { scIdentifier: SC });
+    expect((sentTransaction(calls).Data as Record<string, unknown>).Pause).toBe(false);
+  });
+
+  test('toggleTokenPause fails when the current state cannot be read', async () => {
+    const { calls } = installTokenPipeline({
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => jsonResponse({}, 503),
+    });
+    await expect(client.toggleTokenPause(keypair, { scIdentifier: SC })).rejects.toThrow(/503/);
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
   });
 
   test('transferTokenOwnership is addressed to the new owner', async () => {

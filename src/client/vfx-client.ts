@@ -949,15 +949,22 @@ export class VfxClient {
   /**
    * Owner only. Flips the token between paused (no transfers) and active.
    * The node toggles whatever the current state is — there is no way to
-   * "set paused" — so read `is_paused` from getFungibleToken first, and never
-   * send this twice for one intended change: the second one undoes the first.
+   * "set paused" — so never send this twice for one intended change: the
+   * second one undoes the first. The current state is read from Spyglass so
+   * the transaction carries the state it produces, which is what explorers
+   * and wallets display.
    */
   public toggleTokenPause = async (
     signer: KeypairOrSigner,
     params: { scIdentifier: string },
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
-    const data = tokenPauseData({ scIdentifier: params.scIdentifier, fromAddress: resolved.address });
+    const { token } = await this.getFungibleToken(params.scIdentifier);
+    const data = tokenPauseData({
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      pause: !token.is_paused,
+    });
     return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data);
   };
 

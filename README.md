@@ -208,9 +208,11 @@ getTokenVotingTopic(topicId)
 
 Two behaviours worth knowing before wiring these into anything automated:
 
-- **Pause is a toggle.** The node flips the current state and ignores any
-  requested value, so read `is_paused` from `getFungibleToken` first and never
-  send `toggleTokenPause` twice for one intended change.
+- **Pause is a toggle.** The node flips the current state whatever the
+  transaction asks for, so never send `toggleTokenPause` twice for one
+  intended change. The SDK reads `is_paused` from Spyglass and labels the
+  transaction with the state it produces, which is what explorers and wallets
+  display.
 - **Ban cannot be undone**, and a banned address can still receive. Treat it as
   permanent.
 
