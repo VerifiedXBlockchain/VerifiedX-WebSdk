@@ -1,6 +1,6 @@
 {
   "name": "vfx-web-sdk",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "Typescript/Javascript integration for VerifiedX with node and browser support.",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -92,7 +92,7 @@
   ],
   "engines": {
     "npm": ">=8.19.3",
-    "node": ">=18.13.0"
+    "node": ">=20"
   },
   "overrides": {
     "math-intrinsics": "1.1.0"

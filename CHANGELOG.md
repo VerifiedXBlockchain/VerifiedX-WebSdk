@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.4.1 (2026-10-05)
+
+### Changed
+
+- **Node.js 20 or newer is required** (`engines.node` is now `>=20`, was
+  `>=18.13.0`). Node 18 does not expose `globalThis.crypto` without a flag, so
+  `generatePrivateKey()` and every vBTC flow have thrown "no cryptographically
+  secure random source available" on it since 3.1.0; this makes the floor
+  match reality. Node 18 reached end of life in April 2025. Browsers are
+  unaffected.
+- CI now tests on Node 20 and 22 (it ran on 18.13 and had been failing on that
+  error since 3.1.0).
+
 ## 3.4.0 (2026-10-05)
 
 External signing, fungible tokens, reserve (vault) accounts, multi-contract

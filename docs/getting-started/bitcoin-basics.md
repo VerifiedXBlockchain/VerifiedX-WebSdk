@@ -4,7 +4,7 @@ This guide covers how to use the VerifiedX Web SDK for Bitcoin operations. The S
 
 ## Prerequisites
 
-- Node.js 18+ or a modern browser
+- Node.js 20+ or a modern browser
 - Basic understanding of Bitcoin concepts
 - `vfx-web-sdk` installed in your project
 
