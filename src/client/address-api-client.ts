@@ -31,11 +31,14 @@ export class AddressApiClient extends BaseApiClient {
       if (result) {
         return {
           address: result.address,
-          balance: result.balance,
-          balanceTotal: result.balance_total,
-          balanceLocked: result.balance_locked,
+          // Spyglass sends some balances as decimal strings (seen on a
+          // recovered vault: "0.0000000000000000"); the type promises numbers.
+          balance: Number(result.balance),
+          balanceTotal: Number(result.balance_total),
+          balanceLocked: Number(result.balance_locked ?? 0),
           adnr: result.adnr,
           activated: result.activated,
+          deactivated: result.deactivated ?? false,
         };
       }
 

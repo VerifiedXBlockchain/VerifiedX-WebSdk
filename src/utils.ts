@@ -295,5 +295,6 @@ export const addressWithoutActivity = (address: string): VfxAddress => {
     balanceLocked: 0,
     adnr: null,
     activated: false,
+    deactivated: false,
   };
 };

@@ -30,7 +30,18 @@ TypeScript will now accept an options object that omits them.
   the state whatever is requested; the transaction still carries the state it
   produces, read from Spyglass first, because explorers and wallets display it; ban is permanent on the network.
 - `RawTransactionService` accepts `signer` (or a `Signer` as `keypair`) and
-  fails at construction on a key/address mismatch.
+  fails at construction on a key/address mismatch, and takes an `unlockTime`.
+- **Reserve (vault) accounts.** Key derivation that is byte-compatible with
+  the web wallet and the CLI: `reserveKeypairFromPrivateKey` (the vault the
+  wallet pairs with a main key), `reserveKeypairFromReservePrivateKey`,
+  `reserveKeypairFromRestoreCode`, `generateReserveKeypair`,
+  `reserveAddressFromPublic`. Operations: `registerReserveAccount`,
+  `sendCoin(..., { unlockHours })`, `callBackReserveTransaction`,
+  `recoverReserveAccount`. Every token method accepts `unlockHours` for
+  sends from a vault; deploy and domain purchases refuse a vault signer, as
+  the network does. `VfxAddress` gains `deactivated`. Golden vectors for the
+  derivation were captured from the wallet's compiled keygen and
+  `scripts/verify-wallet-compat.js` cross-checks it live.
 
 ### Changed
 

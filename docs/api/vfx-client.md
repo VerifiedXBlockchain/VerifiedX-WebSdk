@@ -275,6 +275,71 @@ looked up from Spyglass unless supplied.
 `ticker` and `name` travel in every token transaction for indexers and
 wallets; when omitted the SDK reads them from Spyglass first.
 
+## Reserve (Vault) Account Methods
+
+A reserve account is an `xRBX…` address on the same key material as an
+ordinary address, with a different version prefix. Sends from it wait behind
+an unlock time (24 hours minimum) and can be called back until they settle;
+a recovery key can sweep the vault. The node applies the delay to VFX, vBTC
+and NFT sends; a fungible-token transfer from a vault carries the unlock time
+but settles at once.
+
+### Keys
+
+- `reserveKeypairFromPrivateKey(mainPrivateKey)` → `ReserveKeypair` — the vault the web wallet pairs with a main account, derived the same way (seed from the first 32 hex characters plus a counter, retried until the address is `xRBX`; recovery key seeded from the vault key). Pinned against the wallet's keygen bundle by the compat tests.
+- `reserveKeypairFromReservePrivateKey(reservePrivateKey)` — from the vault key alone; the recovery key is derived from it.
+- `reserveKeypairFromRestoreCode(code)` — from `base64("<privateKey>//<recoveryPrivateKey>")`, the code the CLI prints and the wallet backs up. The recovery key in the code is used as-is.
+- `generateReserveKeypair()` — a standalone vault on a fresh key.
+- `reserveAddressFromPublic(publicKeyHex)` — the `xRBX` address of a public key, for HSM-held vault keys.
+
+Sign with the `ReserveKeypair` object itself. Its private key on its own
+resolves to the key's ordinary address. A `Signer` whose `address` is the
+`xRBX` form is verified against `reserveAddressFromPublic` and signs for the
+vault.
+
+### `registerReserveAccount(signer, { recoveryAddress? })`
+
+Activates a funded vault with a 4 VFX `Register()` naming the recovery
+address. The vault must already hold the 4 VFX plus the fee plus the 0.5 VFX
+floor the node keeps on reserve accounts (5 VFX is the wallet's funding
+amount). `recoveryAddress` comes from a `ReserveKeypair`; a `Signer` must
+supply it, and it must be an ordinary account.
+
+### `sendCoin(keypair, toAddress, amount, { unlockHours? })`
+
+From a vault the send settles after `unlockHours` (default 24, the network
+minimum) and can be called back before then. Asking for less than 24 hours,
+or setting `unlockHours` from an ordinary account, throws before any request.
+Every token method accepts the same `unlockHours` for sends from a vault.
+
+### `callBackReserveTransaction(signer, { hash })`
+
+Cancels a pending send from the vault before its unlock time. `hash` is the
+hash of the send. The node refuses once it has settled, and only the vault
+that sent it can call it back.
+
+### `recoverReserveAccount(signer, { recoverySigner?, recoveryAddress? })`
+
+Sweeps the vault to its recovery address: pending sends are reversed and the
+balance moves. Two signatures are needed. The vault key signs the
+transaction; the recovery key signs `${SignatureTime}${recoveryAddress}`. A
+`ReserveKeypair` carries both. With a `Signer` for the vault, pass
+`recoverySigner` (a keypair or another `Signer`) for the recovery key. The
+node accepts the recovery signature for ten minutes.
+
+### Not available from a vault
+
+`deployToken`, `buyVfxDomain` and `buyBtcDomain` throw when signed by a
+vault: the network only allows those transaction types from an ordinary
+account.
+
+### Reading vault state
+
+`getAddressDetails` on the `xRBX` address returns `activated` (a `Register()`
+has been sent), `deactivated` (a `Recover()` has been sent) and
+`balanceLocked` (sends still waiting to settle). `listTransactionsForAddress`
+shows each pending send's `unlock_time` and any `callback_details`.
+
 ## Address Operations
 
 ### `getAddressDetails(address)`
@@ -405,6 +470,17 @@ interface Signer {
   address: string;
   publicKey: string;
   signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
+}
+```
+
+### ReserveKeypair
+
+```typescript
+interface ReserveKeypair extends Keypair {
+  recoveryPrivateKey: string;
+  recoveryPublicKey: string;
+  recoveryAddress: string;
+  restoreCode: string;   // base64("<privateKey>//<recoveryPrivateKey>")
 }
 ```
 

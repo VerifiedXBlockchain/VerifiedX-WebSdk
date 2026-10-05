@@ -16,6 +16,12 @@ export interface IRawTransactionServiceOptions {
   txType?: number;
   amount?: number;
   data?: Record<string, unknown> | Array<Record<string, unknown>> | null;
+  /**
+   * Unix seconds at which the transaction settles. Required by the node for
+   * every send from a reserve (xRBX) account except the reserve operations
+   * themselves; null (the default) for everything else.
+   */
+  unlockTime?: number | null;
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
 }
 
@@ -27,6 +33,7 @@ export class RawTransactionService {
   private amount: number;
   private data: Record<string, unknown> | Array<Record<string, unknown>> | null;
   private fromAddress: string;
+  private unlockTime: number | null;
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
 
   private hash: string | null = null;
@@ -50,6 +57,7 @@ export class RawTransactionService {
     this.amount = options.amount ?? 0;
     this.data = options.data ?? null;
     this.fromAddress = this.signer.address;
+    this.unlockTime = options.unlockTime ?? null;
     this.apiOptions = options.apiOptions ?? {};
   }
 
@@ -66,7 +74,7 @@ export class RawTransactionService {
       Signature: this.signature || '',
       Height: 0,
       Data: this.data,
-      UnlockTime: null,
+      UnlockTime: this.unlockTime,
     };
   }
 

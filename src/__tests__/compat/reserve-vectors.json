@@ -1,0 +1,127 @@
+{
+  "fixed": {
+    "mainPrivateKey": "47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+    "testnet": {
+      "mainAddress": "xQJTEE4H9H97SEGTx78esUJR8BkKLYktvB",
+      "vaultFromMain": {
+        "append": 0,
+        "seed": "47412619788fecb0ea0b152d1398e5ec0",
+        "reserve": {
+          "address": "xRBXNoMarnNnZk3BnVYhbujSXN1UpUFaZ4",
+          "publicKey": "04c0677bb807a03407a9da5d28c29cfb4f466b6134d57d6595b74ff37d95d9d37eb3ebc1bc41f6235342de0a5de14faf2a0f3bef46f0e8dcfd12bbae7f5f4ad43c",
+          "privateKey": "fa1d81cd70c1070fcfcec18b9aa7728b9e7b6c811b1279a8f2a2c97709d491de"
+        },
+        "recovery": {
+          "address": "xDBbTacZU2Q5B2EJTyCQLfcHzFXaBwL99D",
+          "publicKey": "0456e5a27e0bf76d748f5f76902746f3d9002ef0f4afd1d376be32939fa03ffb8c53dee01c54e09954857914e24b07c2db69700deabeda9c7b97e5d6aebd6b4ce6",
+          "privateKey": "19aa167d9c807302e6f6c4c3ec7de8dded86722586740ca5e14649fe5eee56a7"
+        },
+        "restoreCode": "ZmExZDgxY2Q3MGMxMDcwZmNmY2VjMThiOWFhNzcyOGI5ZTdiNmM4MTFiMTI3OWE4ZjJhMmM5NzcwOWQ0OTFkZS8vMTlhYTE2N2Q5YzgwNzMwMmU2ZjZjNGMzZWM3ZGU4ZGRlZDg2NzIyNTg2NzQwY2E1ZTE0NjQ5ZmU1ZWVlNTZhNw=="
+      }
+    },
+    "mainnet": {
+      "mainAddress": "RRH1Qs76UPTeTrXo4oV7XpLqfLugaReF1J",
+      "vaultFromMain": {
+        "append": 0,
+        "seed": "47412619788fecb0ea0b152d1398e5ec0",
+        "reserve": {
+          "address": "xRBXNoMarnNnZk3BnVYhbujSXN1UpUFaZ4",
+          "publicKey": "04c0677bb807a03407a9da5d28c29cfb4f466b6134d57d6595b74ff37d95d9d37eb3ebc1bc41f6235342de0a5de14faf2a0f3bef46f0e8dcfd12bbae7f5f4ad43c",
+          "privateKey": "fa1d81cd70c1070fcfcec18b9aa7728b9e7b6c811b1279a8f2a2c97709d491de"
+        },
+        "recovery": {
+          "address": "REA9eDfNo8icCeVdafYs11eiXQgwW2xn1f",
+          "publicKey": "0456e5a27e0bf76d748f5f76902746f3d9002ef0f4afd1d376be32939fa03ffb8c53dee01c54e09954857914e24b07c2db69700deabeda9c7b97e5d6aebd6b4ce6",
+          "privateKey": "19aa167d9c807302e6f6c4c3ec7de8dded86722586740ca5e14649fe5eee56a7"
+        },
+        "restoreCode": "ZmExZDgxY2Q3MGMxMDcwZmNmY2VjMThiOWFhNzcyOGI5ZTdiNmM4MTFiMTI3OWE4ZjJhMmM5NzcwOWQ0OTFkZS8vMTlhYTE2N2Q5YzgwNzMwMmU2ZjZjNGMzZWM3ZGU4ZGRlZDg2NzIyNTg2NzQwY2E1ZTE0NjQ5ZmU1ZWVlNTZhNw=="
+      }
+    }
+  },
+  "prefixed00": {
+    "mainPrivateKey": "009f0e1d2c3b4a59687766554433221100ffeeddccbbaa99887766554433221100",
+    "testnet": {
+      "mainAddress": "xDFrSQy4ZgEjyAN7B7i9qZjNJsmy1RHoLt",
+      "vaultFromMain": {
+        "append": 1,
+        "seed": "9f0e1d2c3b4a596877665544332211001",
+        "reserve": {
+          "address": "xRBX7UoxKVrb2GZuRWtnkhGk1z62gJrw2n",
+          "publicKey": "04f8d21d617598f077d04b06b7a531ad152c75afa5fc5e0308e7a2a7a3bec7b3d3652b49823e93eaefd68b62f297850f8d2d986e2c2b924f40773c3d55c41cf95e",
+          "privateKey": "ae98e8bc719e12a41c261d411c8b960d0a1b2eafcb101a7bace85280036bd798"
+        },
+        "recovery": {
+          "address": "xFpCHG72FHPSjZHMVyfcL9bXSircJWaL1M",
+          "publicKey": "0454568db29ccb633fe38af4873bbe6b2090fad47f7439bdd68e465f2a792aaf7be41a5aea7083738fac8b404cf8c05b9b0e0fed9ed37ac849bf627f89457c3f60",
+          "privateKey": "6417c0c7a78872dc655d9591755d7e67650d25976117af44018eb01b847f25d4"
+        },
+        "restoreCode": "YWU5OGU4YmM3MTllMTJhNDFjMjYxZDQxMWM4Yjk2MGQwYTFiMmVhZmNiMTAxYTdiYWNlODUyODAwMzZiZDc5OC8vNjQxN2MwYzdhNzg4NzJkYzY1NWQ5NTkxNzU1ZDdlNjc2NTBkMjU5NzYxMTdhZjQ0MDE4ZWIwMWI4NDdmMjVkNA=="
+      }
+    },
+    "mainnet": {
+      "mainAddress": "REEQd41stnZGzndSHp4cVumnr2wLJ5wD4s",
+      "vaultFromMain": {
+        "append": 1,
+        "seed": "9f0e1d2c3b4a596877665544332211001",
+        "reserve": {
+          "address": "xRBX7UoxKVrb2GZuRWtnkhGk1z62gJrw2n",
+          "publicKey": "04f8d21d617598f077d04b06b7a531ad152c75afa5fc5e0308e7a2a7a3bec7b3d3652b49823e93eaefd68b62f297850f8d2d986e2c2b924f40773c3d55c41cf95e",
+          "privateKey": "ae98e8bc719e12a41c261d411c8b960d0a1b2eafcb101a7bace85280036bd798"
+        },
+        "recovery": {
+          "address": "RGnkTu9qaPhymBYgcg24zVdwyt1yY27zUZ",
+          "publicKey": "0454568db29ccb633fe38af4873bbe6b2090fad47f7439bdd68e465f2a792aaf7be41a5aea7083738fac8b404cf8c05b9b0e0fed9ed37ac849bf627f89457c3f60",
+          "privateKey": "6417c0c7a78872dc655d9591755d7e67650d25976117af44018eb01b847f25d4"
+        },
+        "restoreCode": "YWU5OGU4YmM3MTllMTJhNDFjMjYxZDQxMWM4Yjk2MGQwYTFiMmVhZmNiMTAxYTdiYWNlODUyODAwMzZiZDc5OC8vNjQxN2MwYzdhNzg4NzJkYzY1NWQ5NTkxNzU1ZDdlNjc2NTBkMjU5NzYxMTdhZjQ0MDE4ZWIwMWI4NDdmMjVkNA=="
+      }
+    }
+  },
+  "leadingZeros": {
+    "mainPrivateKey": "0000ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56",
+    "testnet": {
+      "mainAddress": "xSTh2KY4b5JmEk6buiEbBssWSnWJPz9w7u",
+      "vaultFromMain": {
+        "append": 0,
+        "seed": "00ab12cd34ef56ab12cd34ef56ab12cd0",
+        "reserve": {
+          "address": "xRBX9m8G5LVgTPDwFF8T3TVKpM6tkWNLU1",
+          "publicKey": "04b80378949051d6da6f07b5fc89b6a8b322437988ad5bf415c9dda8534f332f89e910719396545bab191e1cf4c0e3d2c879c24a2f0ff5a553174a33fdac1d52ed",
+          "privateKey": "81aed9242537d427c5eec8f757fcd30d60e33d64a149947d43710955fab25a81"
+        },
+        "recovery": {
+          "address": "xPiAB4tiiPQLm6YxNC7wYyJABkLKaDR1NL",
+          "publicKey": "04b97313aeb301fb21bbda99becd308131d24f1d88aa2bbc35f9d55cf060eaaf514b7e188eee84e11f17ef96cec9cb5668007a1c2148b38f66fb56240cf5d4054c",
+          "privateKey": "f7c76495dd5016504d26f806177c3fd5738e6769bffc388d95a633944e3ce01f"
+        },
+        "restoreCode": "ODFhZWQ5MjQyNTM3ZDQyN2M1ZWVjOGY3NTdmY2QzMGQ2MGUzM2Q2NGExNDk5NDdkNDM3MTA5NTVmYWIyNWE4MS8vZjdjNzY0OTVkZDUwMTY1MDRkMjZmODA2MTc3YzNmZDU3MzhlNjc2OWJmZmMzODhkOTVhNjMzOTQ0ZTNjZTAxZg=="
+      }
+    },
+    "mainnet": {
+      "mainAddress": "RTSFCxasvBdJGNMw2Qb3rDuvywffhoSzoQ",
+      "vaultFromMain": {
+        "append": 0,
+        "seed": "00ab12cd34ef56ab12cd34ef56ab12cd0",
+        "reserve": {
+          "address": "xRBX9m8G5LVgTPDwFF8T3TVKpM6tkWNLU1",
+          "publicKey": "04b80378949051d6da6f07b5fc89b6a8b322437988ad5bf415c9dda8534f332f89e910719396545bab191e1cf4c0e3d2c879c24a2f0ff5a553174a33fdac1d52ed",
+          "privateKey": "81aed9242537d427c5eec8f757fcd30d60e33d64a149947d43710955fab25a81"
+        },
+        "recovery": {
+          "address": "RQgiMhwY3VisnipHUtUQDKLaiuVgrPgepZ",
+          "publicKey": "04b97313aeb301fb21bbda99becd308131d24f1d88aa2bbc35f9d55cf060eaaf514b7e188eee84e11f17ef96cec9cb5668007a1c2148b38f66fb56240cf5d4054c",
+          "privateKey": "f7c76495dd5016504d26f806177c3fd5738e6769bffc388d95a633944e3ce01f"
+        },
+        "restoreCode": "ODFhZWQ5MjQyNTM3ZDQyN2M1ZWVjOGY3NTdmY2QzMGQ2MGUzM2Q2NGExNDk5NDdkNDM3MTA5NTVmYWIyNWE4MS8vZjdjNzY0OTVkZDUwMTY1MDRkMjZmODA2MTc3YzNmZDU3MzhlNjc2OWJmZmMzODhkOTVhNjMzOTQ0ZTNjZTAxZg=="
+      }
+    }
+  },
+  "directFromReserveKey": {
+    "reservePrivateKey": "47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+    "reserveAddress": "xRBXFsVnvMB4v1tZrXawM83zNnyYG8jPtX",
+    "recoveryPrivateKey": "182d52efcafa08321fa6ad4104d4cdcce2eb29ad22cbf3729101d12ecd7bdb35",
+    "recoveryAddressTestnet": "xWfshfM2U4nexTLm9RpzQP98YjotRkqYcQ",
+    "recoveryAddressMainnet": "RXeRtJPqoB7Bz5c6G8BT4jBZ5tyFcSGWxi",
+    "restoreCode": "NDc0MTI2MTk3ODhmZWNiMGVhMGIxNTJkMTM5OGU1ZWM3NDIyMjNkMTRkZDhmNDYxMjFiODBjYzBiMTI2MGJhNS8vMTgyZDUyZWZjYWZhMDgzMjFmYTZhZDQxMDRkNGNkY2NlMmViMjlhZDIyY2JmMzcyOTEwMWQxMmVjZDdiZGIzNQ=="
+  }
+}

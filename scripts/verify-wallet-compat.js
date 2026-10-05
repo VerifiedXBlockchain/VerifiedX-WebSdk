@@ -19,9 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 const walletPath =
-  process.argv[2] ||
-  process.env.WALLET_KEYGEN_PATH ||
-  path.resolve(__dirname, '../../vfx-gui/assets/js/keygen-v3.js');
+  process.argv[2] || process.env.WALLET_KEYGEN_PATH || path.resolve(__dirname, '../../vfx-gui/assets/js/keygen-v3.js');
 
 if (!fs.existsSync(walletPath)) {
   console.error(`wallet keygen bundle not found at ${walletPath}`);
@@ -79,7 +77,63 @@ function sdkSeedPrep(email, password) {
 for (const v of vectors.email) {
   const seed = sdkSeedPrep(v.email, v.password);
   const walletKey = window.seedToPrivate(seed, v.index);
-  check(`email ${v.email} idx${v.index}`, svcTest.privateKeyFromEmailPassword(v.email, v.password, v.index), '00' + walletKey);
+  check(
+    `email ${v.email} idx${v.index}`,
+    svcTest.privateKeyFromEmailPassword(v.email, v.password, v.index),
+    '00' + walletKey,
+  );
+}
+
+// 4. Reserve (vault) accounts: replay the wallet's auth_utils.dart loop
+// against the bundle and compare with the SDK, on the pinned vectors and on
+// fresh random main keys.
+const reserveVectors = require('../src/__tests__/compat/reserve-vectors.json');
+function walletVaultFromMain(mainPrivate, isTestNet) {
+  let input = mainPrivate.startsWith('00') ? mainPrivate.slice(2) : mainPrivate;
+  for (let append = 0; append < 1000; append++) {
+    const raPriv = window.importPrivateKey(window.seedToPrivate(input.slice(0, 32) + append), isTestNet).split(':')[2];
+    const [ra, rec, code] = window.generateReserveAccountRestoreCode(raPriv, isTestNet).split('|');
+    if (ra.startsWith('xRBX')) {
+      return {
+        address: ra.split(':')[0],
+        privateKey: ra.split(':')[2],
+        recoveryAddress: rec.split(':')[0],
+        restoreCode: code,
+      };
+    }
+  }
+  throw new Error('wallet loop did not find an xRBX address');
+}
+function checkVault(label, sdkVault, walletVault) {
+  check(`${label} address`, sdkVault.address, walletVault.address);
+  check(`${label} privateKey`, sdkVault.privateKey, '00' + walletVault.privateKey);
+  check(`${label} recoveryAddress`, sdkVault.recoveryAddress, walletVault.recoveryAddress);
+  check(`${label} restoreCode`, sdkVault.restoreCode, walletVault.restoreCode);
+}
+for (const [name, v] of Object.entries(reserveVectors)) {
+  if (!v.mainPrivateKey) continue;
+  checkVault(
+    `reserve ${name} test`,
+    svcTest.reserveKeypairFromPrivateKey(v.mainPrivateKey),
+    walletVaultFromMain(v.mainPrivateKey, true),
+  );
+  checkVault(
+    `reserve ${name} main`,
+    svcMain.reserveKeypairFromPrivateKey(v.mainPrivateKey),
+    walletVaultFromMain(v.mainPrivateKey, false),
+  );
+}
+for (let i = 0; i < 50; i++) {
+  const pk = crypto.randomBytes(32).toString('hex');
+  checkVault(`reserve fuzz${i} test`, svcTest.reserveKeypairFromPrivateKey(pk), walletVaultFromMain(pk, true));
+  // Direct reserve-key path (restore-from-key), both networks for the recovery address.
+  const direct = window.generateReserveAccountRestoreCode(pk, false).split('|');
+  if (direct[0].startsWith('xRBX')) {
+    const sdk = svcMain.reserveKeypairFromReservePrivateKey(pk);
+    check(`reserve fuzz${i} direct address`, sdk.address, direct[0].split(':')[0]);
+    check(`reserve fuzz${i} direct recovery`, sdk.recoveryAddress, direct[1].split(':')[0]);
+    check(`reserve fuzz${i} direct code`, sdk.restoreCode, direct[2]);
+  }
 }
 
 console.log(`\nwallet-compat: pass=${pass} fail=${fail}`);

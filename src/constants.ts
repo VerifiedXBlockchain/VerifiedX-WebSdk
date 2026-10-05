@@ -45,3 +45,16 @@ export const TOKEN_TICKER_MAX_LENGTH = 20;
 export const SMART_CONTRACT_PLACEHOLDER_UUID = '00000000-0000-0000-0000-000000000000';
 /** Asset location that tells the node a contract carries no primary asset file. */
 export const SMART_CONTRACT_DEFAULT_ASSET_LOCATION = 'default';
+
+// Reserve (Vault) accounts
+
+/** Target address for reserve-account transactions (register, call back, recover). */
+export const RESERVE_BASE_ADDRESS = 'Reserve_Base';
+/** Every reserve address starts with this; the derivation retries until one does. */
+export const RESERVE_ADDRESS_PREFIX = 'xRBX';
+/** VFX sent with the Register() transaction to activate a reserve account. */
+export const RESERVE_ACTIVATION_COST = 4;
+/** A reserve account must keep at least this much VFX after any send. */
+export const RESERVE_MIN_REMAINING_BALANCE = 0.5;
+/** Minimum delay on a send from a reserve account, as the wallets enforce it. */
+export const RESERVE_MIN_UNLOCK_HOURS = 24;

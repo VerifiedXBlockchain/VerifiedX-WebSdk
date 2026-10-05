@@ -11,6 +11,7 @@ A comprehensive TypeScript/JavaScript SDK for VerifiedX blockchain and Bitcoin s
 - **Multiple Build Targets**: CommonJS, ES Modules, and browser-ready bundles
 - **External Signing**: Every signing path accepts a `Signer` so keys can stay in an HSM or MPC service
 - **Fungible Tokens (VFX20)**: Deploy, mint, transfer, burn, pause, ban, ownership, and holder voting
+- **Reserve (Vault) Accounts**: Derive, activate, send with a delay, call back, and recover — wallet-compatible
 
 ## Installation
 
@@ -219,6 +220,43 @@ Two behaviours worth knowing before wiring these into anything automated:
 `ticker` and `name` ride in every token transaction for indexers and wallets;
 pass them to skip the Spyglass lookup the SDK otherwise makes.
 
+#### Reserve (Vault) Accounts
+
+A reserve account is an `xRBX…` address whose outgoing sends wait behind an
+unlock time (24 hours minimum) and can be called back until they settle, with
+a recovery key that can sweep the vault if its key is compromised. The
+network applies the delay to VFX, vBTC and NFT sends. A fungible-token
+transfer from a vault must carry the unlock time but settles immediately, so
+a vault protects treasury, not fund tokens.
+
+```typescript
+// Keys. The vault the web wallet pairs with a main key is derived from it, so
+// the same wallet account gives the same vault here (pinned by golden vectors).
+const vault = client.reserveKeypairFromPrivateKey(mainPrivateKey); // ReserveKeypair
+client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code
+client.reserveKeypairFromReservePrivateKey(key)     // from the vault key alone
+client.generateReserveKeypair()                     // standalone vault
+client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM key
+
+// Lifecycle. Fund the vault first (5 VFX covers activation plus the 0.5 floor).
+await client.sendCoin(main, vault.address, 5);
+await client.registerReserveAccount(vault);                            // 4 VFX Register()
+await client.sendCoin(vault, toAddress, 100);                          // settles in 24h
+await client.sendCoin(vault, toAddress, 100, { unlockHours: 72 });     // or longer
+await client.callBackReserveTransaction(vault, { hash });             // before it settles
+await client.recoverReserveAccount(vault);                             // sweep to the recovery address
+
+// With an HSM: the vault Signer presents the xRBX address; recovery needs
+// its own signer (or keypair) for the second signature.
+await client.registerReserveAccount(vaultSigner, { recoveryAddress });
+await client.recoverReserveAccount(vaultSigner, { recoverySigner });
+```
+
+`getAddressDetails` reports `activated` (a Register() exists), `deactivated`
+(a Recover() exists) and `balanceLocked` (sends still waiting to settle).
+Pass the `ReserveKeypair` object itself when signing: its private key on its
+own resolves to the key's ordinary address, not the vault.
+
 #### Address Operations
 
 ```typescript
@@ -337,6 +375,8 @@ import type {
   FungibleTokenBalance,
   DeployTokenParams,
   DeployTokenResult,
+  ReserveKeypair,
+  ReserveSendOptions,
 } from 'vfx-web-sdk';
 
 import type {

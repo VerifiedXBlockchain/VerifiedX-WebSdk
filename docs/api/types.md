@@ -46,6 +46,22 @@ interface Signer {
 type KeypairOrSigner = Keypair | Signer;
 ```
 
+### Reserve (Vault) Account Types
+
+```typescript
+interface ReserveKeypair extends Keypair {
+  // address is the xRBX form; privateKey/publicKey are the vault's own key
+  recoveryPrivateKey: string;
+  recoveryPublicKey: string;
+  recoveryAddress: string;   // ordinary address that can sweep the vault
+  restoreCode: string;       // base64("<privateKey>//<recoveryPrivateKey>"), CLI/wallet compatible
+}
+
+interface ReserveSendOptions {
+  unlockHours?: number;      // delay for a send from a vault; default 24, the network minimum
+}
+```
+
 ### Fungible Token Types
 
 ```typescript
