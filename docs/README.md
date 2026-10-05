@@ -31,6 +31,11 @@ const btcClient = new btc.BtcClient('testnet');
 - **Bitcoin Integration**: Complete Bitcoin functionality including wallet management, transactions, and mempool interaction
 - **Cross-Chain Compatibility**: Seamless integration between VFX and Bitcoin operations
 
+### Issuance and Custody
+- **Fungible Tokens (VFX20)**: Deploy, mint, transfer, burn, pause, ban and vote
+- **External Signing**: Sign every transaction with an HSM, KMS or MPC key the SDK never sees
+- **Reserve Accounts**: Time-delayed vault sends that can be called back, with key recovery
+
 ### Developer Experience
 - **TypeScript First**: Full type safety with comprehensive definitions
 - **Universal Compatibility**: Works in Node.js, browsers, and modern bundlers
@@ -80,6 +85,9 @@ This documentation is organized into several sections:
 - [VFX Basics](./getting-started/vfx-basics.md) - Learn VerifiedX fundamentals
 - [Bitcoin Basics](./getting-started/bitcoin-basics.md) - Bitcoin operations with the SDK
 - [Cross-Chain Guide](./getting-started/cross-chain.md) - Building cross-chain applications
+- [Fungible Tokens](./getting-started/fungible-tokens.md) - Issuing and managing VFX20 tokens
+- [External Signing](./getting-started/external-signing.md) - HSM, KMS and MPC keys
+- [Reserve Accounts](./getting-started/reserve-accounts.md) - Time-delayed, recoverable vaults
 
 ### API Reference
 - [VfxClient API](./api/vfx-client.md) - Complete VFX client documentation

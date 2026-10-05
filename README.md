@@ -163,11 +163,31 @@ addressFromPrivate(privateKey: string): string
 // Send VFX. Resolves to the transaction hash, or null if it never reached the node.
 sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<string | null>
 
-// Purchase VFX domain
+// Domains (5 VFX each). Transfer and delete read the owned name from Spyglass.
 buyVfxDomain(keypair: Keypair | Signer, domain: string): Promise<string | null>
+transferVfxDomain(keypair, toAddress)
+deleteVfxDomain(keypair)
+transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress })
+deleteBtcDomain(keypair, { btcFromAddress })
 
 // Address for an external signer's public key (the SDK never sees the private key)
 addressFromPublic(publicKeyHex: string): string
+```
+
+#### vBTC multi-contract transfer
+
+```typescript
+// One transaction drawing from several vBTC contracts the signer holds balance
+// on. Inputs are allocated the way the CLI does (largest spendable balance
+// first, whole satoshis) from Spyglass's available_balances, or pass `inputs`
+// to choose them yourself. One contract covering the amount falls back to
+// transferVbtc. Up to 25 contracts; not from a reserve account.
+transferVbtcMulti({ toAddress, totalAmount, privateKey | signer, inputs? })
+  : Promise<{ transactionHash: string; inputs: Array<{ scIdentifier, amount }> }>
+
+// The pieces, for callers that manage balances themselves:
+allocateVbtcInputs(balances: Record<scIdentifier, vbtc>, total)   // { inputs, available, failure? }
+vbtcMultiTransferData({ fromAddress, toAddress, totalAmount, inputs })
 ```
 
 #### Fungible Tokens (VFX20)

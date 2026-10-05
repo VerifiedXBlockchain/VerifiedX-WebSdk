@@ -162,6 +162,28 @@ describe('sends from a reserve account carry an unlock time', () => {
     await expect(client.buyVfxDomain(vault, 'name.vfx')).rejects.toThrow(/cannot be sent from a reserve account/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  test('domain management and multi-contract vBTC refuse a vault sender, key or Signer, before any request', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const refused = /cannot be sent from a reserve account/;
+    for (const sender of [vault, vaultSigner()]) {
+      await expect(client.transferVfxDomain(sender, RECIPIENT)).rejects.toThrow(refused);
+      await expect(client.deleteVfxDomain(sender)).rejects.toThrow(refused);
+      await expect(
+        client.transferBtcDomain(sender, {
+          btcFromAddress: 'tb1qfrom',
+          btcToAddress: 'tb1qto',
+          vfxToAddress: RECIPIENT,
+        }),
+      ).rejects.toThrow(refused);
+      await expect(client.deleteBtcDomain(sender, { btcFromAddress: 'tb1qfrom' })).rejects.toThrow(refused);
+    }
+    await expect(
+      client.transferVbtcMulti({ toAddress: RECIPIENT, totalAmount: 0.1, signer: vaultSigner() }),
+    ).rejects.toThrow(refused);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('callBackReserveTransaction', () => {

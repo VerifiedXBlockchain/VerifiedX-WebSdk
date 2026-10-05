@@ -59,6 +59,12 @@ export interface VbtcV2Token {
   tx_count: number;
   is_pending_withdrawal: boolean;
   addresses: Record<string, number>;
+  /**
+   * `addresses` minus each address's open withdrawal requests — what can
+   * actually be sent. Absent from Spyglass deployments older than the
+   * release that added it; fall back to `addresses`.
+   */
+  available_balances?: Record<string, number>;
   nft: unknown;
   withdrawal_requests: VbtcWithdrawalRequest[];
   created_at: string;
@@ -128,6 +134,12 @@ export interface CreateVbtcResult {
 
 export interface VbtcTransferResult {
   transactionHash: string;
+}
+
+export interface VbtcMultiTransferResult {
+  transactionHash: string;
+  /** The contracts drawn from and how much from each. */
+  inputs: Array<{ scIdentifier: string; amount: number }>;
 }
 
 export interface VbtcWithdrawalResult {
