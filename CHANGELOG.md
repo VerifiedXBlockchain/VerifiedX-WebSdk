@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 3.4.0 (2026-10-05)
 
-External signing and fungible tokens. No public API removals or renames; the
+External signing, fungible tokens, reserve (vault) accounts, multi-contract
+vBTC transfers and domain management. No public API removals or renames; the
 `privateKey` parameters that became optional are called out below because
 TypeScript will now accept an options object that omits them.
 
