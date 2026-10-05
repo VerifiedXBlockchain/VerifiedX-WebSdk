@@ -1,5 +1,5 @@
 import { Network } from '../constants';
-import { VfxAddress } from '../types';
+import { FungibleTokenBalance, VfxAddress } from '../types';
 import { addressWithoutActivity } from '../utils';
 import { BaseApiClient, VfxApiError } from './base-api-client';
 
@@ -63,6 +63,24 @@ export class AddressApiClient extends BaseApiClient {
         throw e;
       }
       return true;
+    }
+  };
+
+  /**
+   * Every fungible token the address holds, with its balance. An address the
+   * explorer has never seen (404) simply holds nothing; other failures throw.
+   */
+  public getTokenBalances = async (address: string): Promise<FungibleTokenBalance[]> => {
+    try {
+      const result: { tokens?: FungibleTokenBalance[] } = await this.makeJsonRequest(
+        `/${encodeURIComponent(address)}/tokens/`,
+      );
+      return result?.tokens ?? [];
+    } catch (e) {
+      if (isNotFound(e)) {
+        return [];
+      }
+      throw e;
     }
   };
 

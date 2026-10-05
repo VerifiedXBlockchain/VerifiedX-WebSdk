@@ -136,6 +136,10 @@ export class BrowserKeypairService {
     return this.inner.addressFromPrivate(privateKey);
   }
 
+  public addressFromPublic(publicKeyHex: string): string {
+    return this.inner.addressFromPublic(publicKeyHex);
+  }
+
   public getSignature(message: string, privateKeyHex: string): string {
     return this.inner.getSignature(message, privateKeyHex);
   }

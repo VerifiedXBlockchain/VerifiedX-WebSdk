@@ -156,3 +156,94 @@ export interface VbtcProgressEvent {
   progress?: number;
   data?: unknown;
 }
+
+// Fungible tokens (VFX20)
+
+/** A fungible token as Spyglass indexes it. */
+export interface FungibleToken {
+  sc_identifier: string;
+  name: string;
+  ticker: string;
+  description: string | null;
+  owner_address: string;
+  can_mint: boolean;
+  can_burn: boolean;
+  can_vote: boolean;
+  created_at: string;
+  initial_supply: number;
+  circulating_supply: number;
+  decimal_places: number;
+  image_url: string | null;
+  is_paused: boolean;
+  banned_addresses: string[];
+  nsfw: boolean;
+}
+
+export interface FungibleTokenDetail {
+  token: FungibleToken;
+  /** Address → balance for every address that has ever held the token. */
+  holders: Record<string, number>;
+}
+
+export interface FungibleTokenBalance {
+  token: FungibleToken;
+  balance: number;
+}
+
+export interface TokenVotingTopic {
+  sc_identifier: string;
+  token: FungibleToken;
+  from_address: string;
+  topic_id: string;
+  name: string;
+  description: string;
+  vote_requirement: number;
+  created_at: string;
+  voting_ends_at: string;
+  vote_data: unknown;
+}
+
+/**
+ * The token's image. `url` must be publicly fetchable: Spyglass downloads it
+ * and places it on the node as the contract's primary asset. `thumbnailBase64`
+ * is the small inline image wallets display (the web wallet sends a 64px
+ * PNG); when omitted the node uses its default token image.
+ */
+export interface TokenImage {
+  url: string;
+  /** File name to record for the asset. Defaults to the last path segment of `url`. */
+  name?: string;
+  /** File extension without the dot. Defaults to the extension of `name`. */
+  extension?: string;
+  /** Size in bytes, if known. */
+  fileSize?: number;
+  thumbnailBase64?: string;
+}
+
+export interface DeployTokenParams {
+  name: string;
+  /** Up to 20 characters; stored upper-cased. */
+  ticker: string;
+  /** Defaults to `name`. */
+  description?: string;
+  /** 1–18, default 8. */
+  decimalPlaces?: number;
+  /**
+   * Whole-number supply minted to the deployer at creation. Must be 0 for a
+   * mintable token — mint after deploy instead, as the wallets do.
+   */
+  initialSupply?: number;
+  /** Owner may mint more after deploy (open-ended supply). Default false. */
+  mintable?: boolean;
+  /** Holders may burn from their own balance. Default false. */
+  burnable?: boolean;
+  /** Holders may vote on topics the owner creates. Default false. */
+  voting?: boolean;
+  image?: TokenImage;
+}
+
+export interface DeployTokenResult {
+  transactionHash: string;
+  /** The contract id every later token operation is addressed to. */
+  scIdentifier: string;
+}

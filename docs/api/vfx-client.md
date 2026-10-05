@@ -112,6 +112,35 @@ Signs a message with a private key.
 const signature = client.getSignature("Hello, VerifiedX!", privateKey);
 ```
 
+## External Signing
+
+Every method that signs accepts a `Keypair` or a `Signer`. A `Signer` keeps the
+private key elsewhere (HSM, MPC service, hardware wallet):
+
+```typescript
+interface Signer {
+  address: string;     // the VFX address the signature is verified against
+  publicKey: string;   // uncompressed secp256k1 public key, hex, 04 prefix optional
+  // digestHex: 32-byte SHA-256 digest of the message, as hex.
+  // Return the DER-encoded ECDSA signature as bytes, hex, or base64.
+  signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
+}
+```
+
+The SDK builds the network signature (`base64(DER).base58(publicKey)`) from
+the DER it receives and forces low-s, so signers that return high-s
+signatures (AWS KMS) need no wrapper. The address is verified against the
+public key on the client's network before any request is made.
+
+### `addressFromPublic(publicKeyHex)`
+
+Derives the network address for an uncompressed public key. Use it to obtain
+the address of an HSM-held key.
+
+```typescript
+const address = client.addressFromPublic(await hsm.getPublicKeyHex());
+```
+
 ## Transaction Methods
 
 ### `sendCoin(keypair, toAddress, amount)`
@@ -119,11 +148,11 @@ const signature = client.getSignature("Hello, VerifiedX!", privateKey);
 Sends VFX tokens to another address.
 
 **Parameters:**
-- `keypair` (Keypair): Object containing private key, public key, and address
+- `keypair` (Keypair | Signer): A local keypair, or a Signer (see External Signing)
 - `toAddress` (string): The recipient's VFX address
 - `amount` (number): The amount of VFX to send
 
-**Returns:** `Promise<any>` - Transaction result object
+**Returns:** `Promise<string | null>` - The transaction hash, or `null` when the transaction never reached the node. A send whose outcome is unknown (the request went out but no response came back) throws `TransactionDispatchError` carrying the hash.
 
 **Example:**
 ```typescript
@@ -156,6 +185,95 @@ const result = await client.buyVfxDomain(keypair, "myawesomeapp.vfx");
 - Domain must be available
 - Address must not already own a domain
 - Sufficient VFX balance for domain cost
+
+## Fungible Token Methods (VFX20)
+
+Every mutating method returns `Promise<string | null>` with the `sendCoin`
+contract, honours `dryRun`, and pays the ordinary network fee from the signer's
+VFX balance. The signer's address is the acting address: the owner for mint,
+pause, ban, ownership change and topic creation; the holder for transfer, burn
+and votes.
+
+### `deployToken(signer, params)`
+
+Deploys a fungible token contract owned by the signer. The payload is compiled
+on the node through Spyglass; the resulting Type 17 deploy is sent from the
+signer's address.
+
+**Parameters** (`DeployTokenParams`):
+- `name` (string)
+- `ticker` (string): at most 20 characters; stored upper-case
+- `description` (string, optional): defaults to `name`
+- `decimalPlaces` (number, optional): 1–18, default 8
+- `initialSupply` (number, optional): whole tokens minted to the deployer at creation. Must be `0` for a mintable token — mint the opening balance with `mintToken` after deploy. A non-mintable token needs a positive supply.
+- `mintable`, `burnable`, `voting` (boolean, optional): default `false`
+- `image` (`TokenImage`, optional): `url` must be publicly fetchable — Spyglass downloads it onto the node as the contract's primary asset. `thumbnailBase64` is the small inline image wallets show; without it the node uses its default token image.
+
+**Returns:** `Promise<{ transactionHash: string; scIdentifier: string } | null>` — the contract id is known before the send, so it is returned in `dryRun` too.
+
+```typescript
+const deployed = await client.deployToken(signer, {
+  name: 'Acme Fund I',
+  ticker: 'ACME1',
+  description: 'Units of Acme Fund I',
+  mintable: true,
+  burnable: true,
+});
+// deployed.scIdentifier is what every later call is addressed to
+```
+
+### `mintToken(signer, { scIdentifier, amount, ticker?, name? })`
+
+Owner only; the token must be mintable. Tokens are credited to the signer.
+
+### `transferToken(signer, { scIdentifier, toAddress, amount, ticker?, name? })`
+
+Moves `amount` from the signer to `toAddress`.
+
+### `burnToken(signer, { scIdentifier, amount, ticker?, name? })`
+
+Burns from the signer's own balance; the token must be burnable. Only a holder
+can burn its own tokens — there is no issuer-side burn.
+
+### `toggleTokenPause(signer, { scIdentifier })`
+
+Owner only. Flips the token between paused (no transfers) and active. The node
+toggles whatever the current state is, so never send this twice for one
+intended change. The SDK reads the current `is_paused` from Spyglass first and
+sends the resulting state in the transaction's `Pause` field, as the node's own
+endpoint does; explorers and wallets display that field. It throws if the
+current state cannot be read.
+
+### `banTokenAddress(signer, { scIdentifier, address })`
+
+Owner only. Stops `address` from sending the token. It can still receive, and
+the network has no way to lift a ban.
+
+### `transferTokenOwnership(signer, { scIdentifier, toAddress })`
+
+Owner only. Hands the owner role to `toAddress`.
+
+### `createTokenVoteTopic(signer, { scIdentifier, name, description, votingDays, minimumVoteRequirement, blockHeight? })`
+
+Owner only; the token must have voting enabled. Opens a yes/no topic for
+`votingDays` days, anchored to the current block height (fetched from Spyglass
+unless `blockHeight` is given).
+
+### `castTokenVote(signer, { scIdentifier, topicUid, vote, ownerAddress? })`
+
+Casts the signer's vote. The transaction is addressed to the token owner,
+looked up from Spyglass unless supplied.
+
+### Token reads
+
+- `listFungibleTokens(page?, limit?)` → `PaginatedResponse<FungibleToken>`
+- `getFungibleToken(scIdentifier)` → `{ token: FungibleToken; holders: Record<string, number> }`
+- `getFungibleTokenBalances(address)` → `FungibleTokenBalance[]` (an address Spyglass has never seen yields `[]`)
+- `listTokenVotingTopics(scIdentifier, page?, limit?)` → `PaginatedResponse<TokenVotingTopic>`
+- `getTokenVotingTopic(topicId)` → `TokenVotingTopic`
+
+`ticker` and `name` travel in every token transaction for indexers and
+wallets; when omitted the SDK reads them from Spyglass first.
 
 ## Address Operations
 
@@ -277,6 +395,39 @@ interface Keypair {
   private: string;
   public: string;
   address: string;
+}
+```
+
+### Signer
+
+```typescript
+interface Signer {
+  address: string;
+  publicKey: string;
+  signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
+}
+```
+
+### FungibleToken
+
+```typescript
+interface FungibleToken {
+  sc_identifier: string;
+  name: string;
+  ticker: string;
+  description: string | null;
+  owner_address: string;
+  can_mint: boolean;
+  can_burn: boolean;
+  can_vote: boolean;
+  created_at: string;
+  initial_supply: number;
+  circulating_supply: number;
+  decimal_places: number;
+  image_url: string | null;
+  is_paused: boolean;
+  banned_addresses: string[];
+  nsfw: boolean;
 }
 ```
 
