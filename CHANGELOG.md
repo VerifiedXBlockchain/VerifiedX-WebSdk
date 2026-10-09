@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.6.0 (2026-10-08)
+
+No public API removals or renames. One behavioral change is called out
+because code may rely on the old return value.
+
+### Behavioral fixes (read these)
+
+- **A Bitcoin broadcast with no definite answer throws
+  `BtcBroadcastUnknownError`.** `sendBtc` and `broadcastTransaction` used to
+  report a network error, timeout or error status the same way as a refusal
+  (`null` / `success: false`), which reads as "not sent" even when the
+  transaction reached the network; sending again could then pay twice. Once
+  the request has gone out, those cases now throw `BtcBroadcastUnknownError`
+  carrying `txid` and `signedTxHex`. Re-broadcast that same transaction
+  rather than building a new one. A refusal from the node (codes -22, -25,
+  -26) and a request turned away before reaching a node (4xx other than 400)
+  are unchanged. Failures before the broadcast are unchanged.
+- **`broadcastTransaction` is safe to repeat.** A transaction the network
+  already has (`-27`, already in the mempool) is reported as accepted with its
+  txid. The returned txid is computed from the signed transaction. The request
+  times out after 30 seconds (unknown outcome).
+
+### Added
+
+- `BtcBroadcastUnknownError`, exported from the package root and the `btc`
+  namespace.
+- `BtcClient.checkBroadcast(signedTxHex)` (and
+  `TransactionService.checkBroadcast`): `found`, `absent` (not seen, inputs
+  unspent), `conflicted` (an input spent by another transaction, so it can
+  never confirm) or `unresolved`.
+
 ## 3.5.0 (2026-10-08)
 
 No public API removals or renames. Two behavioral changes are called out
