@@ -8,6 +8,7 @@ export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
 export { VfxApiError } from './client/base-api-client';
 export { VbtcWithdrawalIncompleteError, VbtcWithdrawalUnrecordedError } from './client/vfx-client';
 export { TransactionDispatchError } from './services/raw-transaction-service';
+export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
 
 // Export VFX enums

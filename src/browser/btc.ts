@@ -7,6 +7,7 @@ export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER };
 
 // Re-export types
 export * from '../btc/types';
+export { BtcBroadcastUnknownError } from '../btc/errors';
 
 // For browser compatibility, use fallback networks
 // (bitcoinjs-lib networks may not work in all browser environments)
