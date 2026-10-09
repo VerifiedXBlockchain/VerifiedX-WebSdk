@@ -322,7 +322,8 @@ getTransactions(address: string, limit?: number, before?: number | null): Promis
 getFeeRates(): Promise<IFeeRates | null>
 createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
 broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
-sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null>
+sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
+checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>
 
 // Utility methods
 getRawTransaction(txId: string): Promise<Buffer>
@@ -445,6 +446,35 @@ for it. When the broadcast outcome itself is unknown the error carries
 `signedBtcTxHex`: look up `btcTransactionHash`, re-broadcast that same
 transaction if it is absent, then call `recordWithdrawalCompletion`.
 
+Bitcoin sends follow the same rule. `sendBtc` and `broadcastTransaction` throw
+`BtcBroadcastUnknownError` when the broadcast request went out but no definite
+answer came back (network error, timeout, error status other than a refusal
+from the node). The error carries `txid` and `signedTxHex`. Do not build a new
+transaction for that payment while it may be on the network: a new one can
+spend other coins and pay twice. Resolve it with `checkBroadcast`:
+
+- `found`: it is in the mempool or a block; the payment went out.
+- `absent`: not seen and its inputs are unspent. Re-broadcast the same
+  `signedTxHex` with `broadcastTransaction`; repeating the same transaction is
+  always safe, and a transaction the network already has reports as accepted.
+- `conflicted`: an input was spent by another transaction, so this one can
+  never confirm.
+- `unresolved`: an input is spent but the API does not say by what; check again.
+
+```typescript
+import { btc, BtcBroadcastUnknownError } from 'vfx-web-sdk';
+
+try {
+  const txid = await btcClient.sendBtc(wif, toAddress, 0.001);
+  if (txid === null) console.error('Not sent; safe to try again');
+} catch (error) {
+  if (error instanceof BtcBroadcastUnknownError) {
+    const status = await btcClient.checkBroadcast(error.signedTxHex);
+    if (status.state === 'absent') await btcClient.broadcastTransaction(error.signedTxHex);
+  }
+}
+```
+
 ## Development
 
 ### Building from Source
@@ -540,7 +570,7 @@ async function bitcoinExample() {
     const result = await client.sendBtc(
       keypair.wif,
       'recipient-address',
-      5000 // satoshis
+      0.00005 // BTC
     );
     console.log('Transaction ID:', result);
   }
