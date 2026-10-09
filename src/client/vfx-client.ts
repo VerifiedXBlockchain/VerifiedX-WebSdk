@@ -12,7 +12,7 @@ import {
   TxType,
 } from '../constants';
 import KeypairService from '../services/keypair-service';
-import { RawTransactionService } from '../services/raw-transaction-service';
+import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
 import {
   TokenTxData,
   tokenBanAddressData,
@@ -1579,7 +1579,18 @@ export class VfxClient {
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
     const signature = await signer.sign(hash);
-    return sendFn({ hash, signature, public_key: signer.publicKey });
+    // Same contract as RawTransactionService.process(): a failure once the
+    // send request has gone out (a lost response, a timeout, or a 5xx that
+    // Spyglass also returns when its own call to the node times out) leaves it
+    // unknown whether the transaction was accepted. A plain error here would
+    // read as "not sent" and invite a resend, so it carries the hash instead.
+    // An explicit `success: false` body is a definite refusal and is left to
+    // assertSent.
+    try {
+      return await sendFn({ hash, signature, public_key: signer.publicKey });
+    } catch (error) {
+      throw new TransactionDispatchError(hash, error);
+    }
   }
 
   private async pollUntilDone<T>(opts: {
