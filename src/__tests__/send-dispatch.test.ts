@@ -4,7 +4,13 @@
  * request has gone out throws TransactionDispatchError carrying the hash,
  * because the node may have accepted it.
  */
-import { TransactionDispatchError, VbtcWithdrawalUnrecordedError, VfxClient } from '../index';
+import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
+import {
+  TransactionDispatchError,
+  VbtcWithdrawalIncompleteError,
+  VbtcWithdrawalUnrecordedError,
+  VfxClient,
+} from '../index';
 import KeypairService from '../services/keypair-service';
 import { Network } from '../constants';
 import { FetchHandler, installFetch, jsonResponse, textResponse } from './helpers/mock-fetch';
@@ -228,6 +234,112 @@ describe('completeWithdrawal record step', () => {
     expect(error).toMatchObject({ btcTransactionHash: 'BTC_TXID_123', withdrawalRequestHash: 'WR_HASH' });
     expect((error as VbtcWithdrawalUnrecordedError).cause).toBeInstanceOf(TransactionDispatchError);
     expect((error as VbtcWithdrawalUnrecordedError).cause).toMatchObject({ hash: 'COMP_HASH' });
+  });
+});
+
+describe('completeWithdrawal BTC broadcast', () => {
+  const signedTx = new BitcoinTransaction();
+  signedTx.addInput(Buffer.alloc(32, 1), 0);
+  signedTx.addOutput(Buffer.from(`0014${'00'.repeat(20)}`, 'hex'), 1000);
+  const signedHex = signedTx.toHex();
+  const txid = signedTx.getId();
+
+  function install(broadcast: FetchHandler) {
+    return installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_HASH', Fee: 0 }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: true,
+        SessionId: 'S',
+        StartMessage: 'START',
+        StartTimestamp: 1,
+        ShareDistributionMessage: 'SHARE',
+        ShareDistributionTimestamp: 2,
+      }),
+      '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_1' }),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_1/': () => ({
+        success: true,
+        status: 'complete',
+        signed_btc_tx_hex: signedHex,
+      }),
+      '/btc/broadcast/': broadcast,
+    });
+  }
+
+  const withdraw = () =>
+    new VfxClient('testnet')
+      .requestWithdrawal({
+        scIdentifier: 'sc-1',
+        requestorAddress: address,
+        btcAddress: 'bc1qBTC',
+        amount: 0.001,
+        feeRate: 10,
+        privateKey,
+        pollIntervalMs: 1,
+      })
+      .catch((e) => e);
+
+  test.each([
+    ['a lost response', lostResponse],
+    ['an error status', gatewayError],
+  ])('%s is treated as possibly broadcast, never as resumable', async (_label, handler) => {
+    const { calls } = install(handler);
+    const error = await withdraw();
+
+    expect(error).toBeInstanceOf(VbtcWithdrawalUnrecordedError);
+    expect(error).not.toBeInstanceOf(VbtcWithdrawalIncompleteError);
+    expect(error).toMatchObject({
+      withdrawalRequestHash: 'WR_HASH',
+      btcTransactionHash: txid,
+      signedBtcTxHex: signedHex,
+    });
+    expect((error as Error).message).toMatch(/Do NOT call completeWithdrawal/);
+    expect((error as Error).message).toMatch(/re-broadcast signedBtcTxHex/);
+    expect(calls.filter((c) => c.url.includes('/btc/broadcast/'))).toHaveLength(1);
+    // Nothing is recorded on the VFX side for a broadcast that may not exist.
+    expect(calls.some((c) => c.url.includes('/withdraw/complete/tx/'))).toBe(false);
+  });
+
+  test('an unparseable signed transaction still carries the hex, with no txid', async () => {
+    installFetch({
+      '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+        success: true,
+        SessionId: 'S',
+        StartMessage: 'START',
+        StartTimestamp: 1,
+        ShareDistributionMessage: 'SHARE',
+        ShareDistributionTimestamp: 2,
+      }),
+      '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_1' }),
+      '/btc/vbtc-v2/withdraw/complete/status/JOB_1/': () => ({
+        success: true,
+        status: 'complete',
+        signed_btc_tx_hex: 'DEADBEEF',
+      }),
+      '/btc/broadcast/': lostResponse,
+    });
+    const error = await new VfxClient('testnet')
+      .completeWithdrawal({
+        scIdentifier: 'sc-1',
+        requestorAddress: address,
+        withdrawalRequestHash: 'WR_HASH',
+        btcAddress: 'bc1qBTC',
+        amount: 0.001,
+        feeRate: 10,
+        privateKey,
+        pollIntervalMs: 1,
+      })
+      .catch((e) => e);
+    expect(error).toMatchObject({
+      name: 'VbtcWithdrawalUnrecordedError',
+      btcTransactionHash: null,
+      signedBtcTxHex: 'DEADBEEF',
+    });
+  });
+
+  test('a refusal in a 200 body stays resumable', async () => {
+    install(() => ({ success: false, message: 'min relay fee not met' }));
+    expect(await withdraw()).toBeInstanceOf(VbtcWithdrawalIncompleteError);
   });
 });
 

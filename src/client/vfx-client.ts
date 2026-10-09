@@ -1,3 +1,4 @@
+import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
 import BtcClient from '../btc';
 import {
   DOMAIN_DELETE_COST,
@@ -62,7 +63,12 @@ import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
 import { TransactionApiClient } from './transaction-api.client';
-import { PreparedTransactionResponse, SentTransactionResponse, VbtcV2ApiClient } from './vbtc-v2-api-client';
+import {
+  BroadcastResponse,
+  PreparedTransactionResponse,
+  SentTransactionResponse,
+  VbtcV2ApiClient,
+} from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
 
@@ -135,21 +141,47 @@ export class VbtcWithdrawalIncompleteError extends Error {
 export class VbtcWithdrawalUnrecordedError extends Error {
   readonly withdrawalRequestHash: string;
   readonly btcTransactionHash: string | null;
+  /**
+   * Set only when the broadcast request itself failed, so it is unknown
+   * whether the Bitcoin transaction reached the network. Re-broadcasting this
+   * exact transaction is safe (it can only ever confirm once); if the network
+   * still refuses it and `btcTransactionHash` is not found, nothing was spent
+   * and completeWithdrawal may run again.
+   */
+  readonly signedBtcTxHex: string | null;
   readonly cause: unknown;
 
-  constructor(withdrawalRequestHash: string, btcTransactionHash: string | null, cause: unknown) {
+  constructor(
+    withdrawalRequestHash: string,
+    btcTransactionHash: string | null,
+    cause: unknown,
+    options: { signedBtcTxHex?: string } = {},
+  ) {
     const detail = cause instanceof Error ? cause.message : String(cause);
-    const resume = btcTransactionHash
-      ? `Resume with recordWithdrawalCompletion({ withdrawalRequestHash, btcTransactionHash: '${btcTransactionHash}' }).`
-      : 'The broadcast was accepted but returned no txid; recover it from the Bitcoin network before recording completion.';
-    super(
-      `Withdrawal request ${withdrawalRequestHash} broadcast its Bitcoin transaction ` +
+    const signedBtcTxHex = options.signedBtcTxHex ?? null;
+    let message: string;
+    if (signedBtcTxHex) {
+      message =
+        `Withdrawal request ${withdrawalRequestHash} signed its Bitcoin transaction` +
+        `${btcTransactionHash ? ` ${btcTransactionHash}` : ''} but the broadcast outcome is unknown: ${detail}. ` +
+        `Do NOT call completeWithdrawal while it may be on the network — it would re-sign and may broadcast a second payout. ` +
+        `Look the transaction up; if it is absent, re-broadcast signedBtcTxHex (the same transaction, so it cannot pay twice), ` +
+        `then record it with recordWithdrawalCompletion. Only if the network refuses that transaction and it never appears ` +
+        `is it safe to run completeWithdrawal again.`;
+    } else {
+      const resume = btcTransactionHash
+        ? `Resume with recordWithdrawalCompletion({ withdrawalRequestHash, btcTransactionHash: '${btcTransactionHash}' }).`
+        : 'The broadcast was accepted but returned no txid; recover it from the Bitcoin network before recording completion.';
+      message =
+        `Withdrawal request ${withdrawalRequestHash} broadcast its Bitcoin transaction ` +
         `but the on-chain completion was not recorded: ${detail}. ` +
-        `Do NOT call completeWithdrawal — it would re-sign and may broadcast a second payout. ${resume}`,
-    );
+        `Do NOT call completeWithdrawal — it would re-sign and may broadcast a second payout. ${resume}`;
+    }
+    super(message);
     this.name = 'VbtcWithdrawalUnrecordedError';
     this.withdrawalRequestHash = withdrawalRequestHash;
     this.btcTransactionHash = btcTransactionHash;
+    this.signedBtcTxHex = signedBtcTxHex;
     this.cause = cause;
     Object.setPrototypeOf(this, VbtcWithdrawalUnrecordedError.prototype);
   }
@@ -963,8 +995,21 @@ export class VfxClient {
     // The two failure modes here are opposites and must not be collapsed:
     // a rejected broadcast leaves the coins untouched and is safe to re-drive,
     // while an accepted broadcast that returns no txid means the coins are
-    // already gone and re-signing would risk a second payout.
-    const broadcast = await this.vbtcV2ApiClient.broadcastBtc(frostFinal.signed_btc_tx_hex);
+    // already gone and re-signing would risk a second payout. A request that
+    // fails outright (lost response, timeout, or the 5xx Spyglass returns for
+    // both a refusal and a provider timeout) is the third case: the
+    // transaction may be on the network, so it is treated as possibly
+    // broadcast and the signed transaction travels with the error. Re-sending
+    // that exact transaction can never pay twice; re-signing can.
+    const signedBtcTxHex = frostFinal.signed_btc_tx_hex;
+    let broadcast: BroadcastResponse;
+    try {
+      broadcast = await this.vbtcV2ApiClient.broadcastBtc(signedBtcTxHex);
+    } catch (error) {
+      throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, btcTxidFromHex(signedBtcTxHex), error, {
+        signedBtcTxHex,
+      });
+    }
     if (!broadcast?.success) {
       throw new Error(`completeWithdrawal broadcast rejected: ${JSON.stringify(broadcast)}`);
     }
@@ -1641,4 +1686,13 @@ export class VfxClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */
+function btcTxidFromHex(hex: string): string | null {
+  try {
+    return BitcoinTransaction.fromHex(hex).getId();
+  } catch {
+    return null;
+  }
 }
