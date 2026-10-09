@@ -16,6 +16,9 @@ export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER } from './constant
 // Export utility functions
 export { publicKeyToAddress, wifToPrivateKey, seedToPrivateKey, hashSeed, regtestUtils } from './utils';
 
+// Export errors
+export { BtcBroadcastUnknownError } from './errors';
+
 // Export service classes
 export { KeypairService, TransactionService, AccountService, BtcClient };
 export type { BtcClientOptions } from './client';

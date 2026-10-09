@@ -7,6 +7,7 @@ import type {
   ITransaction,
   ICreateTxResponse,
   IBroadcastTxResponse,
+  IBroadcastCheck,
   IFeeRates,
 } from './types';
 
@@ -106,6 +107,11 @@ export default class BtcClient {
     return this.transactionService.createTransaction(senderWif, recipientAddress, amount, feeRate);
   }
 
+  /**
+   * Broadcast a signed transaction. Safe to repeat with the same hex.
+   * `success: false` means the network did not take it; an unknown outcome
+   * throws BtcBroadcastUnknownError.
+   */
   async broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse> {
     if (this.dryRun) {
       return {
@@ -117,6 +123,15 @@ export default class BtcClient {
     return this.transactionService.broadcastTransaction(transactionHex);
   }
 
+  /**
+   * Build, sign and broadcast a payment of `amount` BTC (not satoshis).
+   *
+   * Returns the txid, or null when nothing was sent (the transaction could
+   * not be built, or the network refused it). Throws BtcBroadcastUnknownError
+   * when the broadcast request went out but no definite answer came back:
+   * the payment may be on the network. Do not call sendBtc again for it;
+   * resolve it with checkBroadcast and broadcastTransaction(error.signedTxHex).
+   */
   async sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate = 0): Promise<string | null> {
     const createResult = await this.createTransaction(senderWif, recipientAddress, amount, feeRate);
 
@@ -133,6 +148,17 @@ export default class BtcClient {
     }
 
     return broadcastResult.result;
+  }
+
+  /**
+   * Where a signed transaction stands on the network: `found`, `conflicted`
+   * (an input is spent by another transaction, so it can never confirm),
+   * `absent` (not seen, inputs unspent: re-broadcast the same hex) or
+   * `unresolved` (an input is spent by an unreported transaction). Throws
+   * when the API cannot answer.
+   */
+  async checkBroadcast(signedTxHex: string): Promise<IBroadcastCheck> {
+    return this.transactionService.checkBroadcast(signedTxHex);
   }
 
   // Utility functions

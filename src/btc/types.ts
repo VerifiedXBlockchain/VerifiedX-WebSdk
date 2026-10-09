@@ -74,6 +74,13 @@ export interface IBroadcastTxResponse {
   error: string | null;
 }
 
+/** Where a signed transaction stands on the network (see BtcClient.checkBroadcast). */
+export type IBroadcastCheck =
+  | { state: 'found'; txid: string; confirmed: boolean }
+  | { state: 'conflicted'; txid: string; conflictingTxid: string }
+  | { state: 'absent'; txid: string }
+  | { state: 'unresolved'; txid: string };
+
 export interface IFeeRates {
   fastestFee: number;
   halfHourFee: number;
@@ -122,6 +129,7 @@ export interface ITransactionService {
     feeRate?: number,
   ): Promise<ICreateTxResponse>;
   broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>;
+  checkBroadcast(signedTxHex: string): Promise<IBroadcastCheck>;
 }
 
 export interface IAccountService {
@@ -157,6 +165,7 @@ export interface IBtcClient {
     ) => Promise<ICreateTxResponse>;
     broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
     sendBtc: (senderWif: string, recipientAddress: string, amount: number, feeRate?: number) => Promise<string | null>;
+    checkBroadcast: (signedTxHex: string) => Promise<IBroadcastCheck>;
 
     // Utility functions
     getRawTransaction: (txId: string) => Promise<Buffer>;
@@ -176,6 +185,7 @@ export type {
   ITransactionStatus as TransactionStatus,
   ICreateTxResponse as CreateTxResponse,
   IBroadcastTxResponse as BroadcastTxResponse,
+  IBroadcastCheck as BroadcastCheck,
   IFeeRates as FeeRates,
   IUTXO as UTXO,
   IKeypairService as KeypairService,
