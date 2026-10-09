@@ -224,6 +224,10 @@ refuses it from a reserve account or to a shielded address.
 
 **Returns:** `Promise<{ transactionHash: string; inputs: Array<{ scIdentifier: string; amount: number }> }>`
 
+**Throws:** `TransactionDispatchError` (carrying the hash) when the send request
+went out but no usable response came back; see
+[Unknown outcome](#unknown-outcome-transactiondispatcherror).
+
 `allocateVbtcInputs(balances, total)` and `vbtcMultiTransferData(...)` are
 exported for callers that fetch balances or choose contracts themselves.
 
@@ -626,6 +630,48 @@ try {
 }
 ```
 
+### Unknown outcome (`TransactionDispatchError`)
+
+A send that fails before the transaction reaches the node returns `null` or
+throws a plain error, and is safe to retry. A send whose request went out but
+whose response was lost, timed out or came back with an error status throws
+`TransactionDispatchError`: the node may have accepted it. `error.hash` is the
+transaction hash; look it up before sending again.
+
+This applies to `sendCoin`, every domain, token and reserve method,
+`transferVbtc`, `transferVbtcMulti`, `createVbtcToken`, `requestWithdrawal`
+(the request transaction), `recordWithdrawalCompletion` and
+`cancelWithdrawal`. An explicit refusal in a successful response stays a plain
+error.
+
+```typescript
+import { TransactionDispatchError } from 'vfx-web-sdk';
+
+try {
+  await client.transferVbtc({ scIdentifier, fromAddress, toAddress, amount, signer });
+} catch (error) {
+  if (error instanceof TransactionDispatchError) {
+    // Do not resend until error.hash is confirmed absent.
+  }
+}
+```
+
+### vBTC withdrawal recovery
+
+- `VbtcWithdrawalIncompleteError`: the request is on chain and no Bitcoin was
+  sent. Resume with `completeWithdrawal({ withdrawalRequestHash })`.
+- `VbtcWithdrawalUnrecordedError`: the Bitcoin transaction was, or may have
+  been, broadcast. Never call `completeWithdrawal` for it; that re-signs and
+  can pay twice. With `btcTransactionHash` set and no `signedBtcTxHex`, record
+  it with `recordWithdrawalCompletion`. With `signedBtcTxHex` set, the
+  broadcast request failed without an answer: look up `btcTransactionHash`,
+  re-broadcast `signedBtcTxHex` if it is absent (the same transaction cannot
+  pay twice), then record. Only if the network refuses that transaction and it
+  never appears is `completeWithdrawal` safe again.
+- When `recordWithdrawalCompletion` itself has an unknown outcome inside
+  `completeWithdrawal`, the `VbtcWithdrawalUnrecordedError` carries the
+  `TransactionDispatchError` as its `cause`.
+
 ## Constants
 
 ### Networks
@@ -661,7 +707,7 @@ enum TxType {
 ### Error Handling
 - Always wrap async calls in try-catch
 - Provide meaningful error messages to users
-- Retry failed requests with exponential backoff
+- Retry failed reads with exponential backoff; never retry a send that threw `TransactionDispatchError` without checking its hash first
 
 ## Examples
 
