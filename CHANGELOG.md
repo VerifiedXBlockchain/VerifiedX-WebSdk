@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.5.0 (2026-10-08)
+
+No public API removals or renames. Two behavioral changes are called out
+because code may rely on the old errors.
+
+### Behavioral fixes (read these)
+
+- **vBTC V2 sends throw `TransactionDispatchError` when the outcome is
+  unknown.** `transferVbtc`, `createVbtcToken`, `requestWithdrawal` (the
+  request transaction), `recordWithdrawalCompletion`, `cancelWithdrawal` and
+  the single-contract path of `transferVbtcMulti` now match `sendCoin`: once
+  the signed send request has gone out, a lost response, timeout or error
+  status throws `TransactionDispatchError` carrying the prepared hash, instead
+  of a plain error that read as "not sent". Check the chain for the hash
+  before resending. Failures before the send, and an explicit
+  `success: false` response, are unchanged.
+- **A withdrawal whose Bitcoin broadcast request fails is no longer reported
+  as resumable.** A lost response, timeout or error status from the
+  broadcast used to surface from `requestWithdrawal` as
+  `VbtcWithdrawalIncompleteError`, whose advice (resume with
+  `completeWithdrawal`) re-signs the withdrawal even if the first transaction
+  went out. It now throws `VbtcWithdrawalUnrecordedError` with the txid and
+  the signed transaction: look the txid up, re-broadcast the same
+  transaction if it is absent, then call `recordWithdrawalCompletion`. A
+  refusal in a successful response stays resumable.
+
+### Added
+
+- `VbtcWithdrawalUnrecordedError.signedBtcTxHex`: the signed Bitcoin
+  transaction when the broadcast outcome is unknown, otherwise `null`.
+
 ## 3.4.1 (2026-10-05)
 
 ### Changed

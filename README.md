@@ -412,14 +412,38 @@ import type {
 
 ## Error Handling
 
+Every method that sends a VFX-chain transaction separates "not sent" from
+"unknown". A failure before the transaction reaches the node is a plain error
+(or `null` for `sendCoin`, domains, tokens and reserve operations). A failure
+after the send request went out (a lost response, a timeout, or an error
+status) throws `TransactionDispatchError`, whose `hash` is the transaction that
+may have been accepted. That covers `sendCoin`, the domain, token and reserve
+methods, `transferVbtc`, `transferVbtcMulti`, `createVbtcToken`,
+`requestWithdrawal`, `recordWithdrawalCompletion` and `cancelWithdrawal`.
+Look the hash up before sending again; a blind retry can send twice.
+
 ```typescript
+import { TransactionDispatchError } from 'vfx-web-sdk';
+
 try {
-  const result = await vfxClient.sendCoin(keypair, toAddress, amount);
-  console.log('Transaction successful:', result);
+  const hash = await vfxClient.sendCoin(keypair, toAddress, amount);
+  if (hash === null) console.error('Not sent; safe to try again');
 } catch (error) {
-  console.error('Transaction failed:', error.message);
+  if (error instanceof TransactionDispatchError) {
+    // Outcome unknown: check error.hash on chain before resending.
+  } else {
+    console.error('Transaction failed:', error.message);
+  }
 }
 ```
+
+vBTC withdrawals add two recovery errors. `VbtcWithdrawalIncompleteError` means
+the request is on chain and nothing was paid out; resume with
+`completeWithdrawal`. `VbtcWithdrawalUnrecordedError` means the Bitcoin
+transaction was, or may have been, broadcast; never call `completeWithdrawal`
+for it. When the broadcast outcome itself is unknown the error carries
+`signedBtcTxHex`: look up `btcTransactionHash`, re-broadcast that same
+transaction if it is absent, then call `recordWithdrawalCompletion`.
 
 ## Development
 
@@ -549,7 +573,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 3.4.1
+- **Version**: 3.5.0
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
 - **Documentation**: See inline TypeScript definitions for detailed API documentation
