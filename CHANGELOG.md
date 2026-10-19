@@ -23,6 +23,11 @@
   minter's balance would pass the largest amount the node holds. It now
   always reads the token from Spyglass, even when `ticker` and `name` are
   given.
+- **`.vfx` names follow Core's ADNR grammar** (`AdnrNameGrammarHeight`):
+  `isValidVfxDomain`, and so `buyVfxDomain`, accept lowercase a-z, 0-9 and
+  `-` (anywhere in the name), 1 to 65 characters before `.vfx`. Hyphenated
+  names, refused before, are now accepted; a name over 65 characters is
+  refused before any request.
 - **A refused transaction logs the node's reason** (`Invalid Transaction: <reason>`).
   The `null` return of the existing send methods is unchanged.
 

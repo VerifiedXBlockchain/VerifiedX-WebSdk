@@ -27,6 +27,8 @@ export enum Network {
 }
 
 export const DOMAIN_PURCHASE_COST = 5.0;
+/** Longest .vfx name before the suffix (Core's Globals.ADNRLimit). */
+export const ADNR_NAME_MAX_LENGTH = 65;
 export const DOMAIN_TRANSFER_COST = 5.0;
 export const DOMAIN_DELETE_COST = 5.0;
 

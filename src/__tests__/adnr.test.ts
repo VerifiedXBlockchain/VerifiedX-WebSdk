@@ -2,6 +2,8 @@ import { VfxClient } from '../index';
 import KeypairService from '../services/keypair-service';
 import { Network, TxType } from '../constants';
 import { CapturedCall, installFetch, jsonResponse, textResponse } from './helpers/mock-fetch';
+import { isValidVfxDomain } from '../utils';
+import { isValidVfxDomain as isValidVfxDomainBrowser } from '../browser/utils';
 
 const keypairService = new KeypairService(Network.Testnet);
 const privateKey = '47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5';
@@ -45,6 +47,60 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.resetAllMocks();
+});
+
+// Core's AdnrNameGrammarHeight grammar: lowercase a-z, 0-9 and '-', 1 to
+// ADNRLimit (65) characters, no suffix in the name AdnrCreate() carries.
+describe('isValidVfxDomain', () => {
+  const longest = 'a'.repeat(65);
+
+  test.each([['a.vfx'], ['abc123.vfx'], ['my-name.vfx'], ['-.vfx'], ['-a-.vfx'], ['a--b.vfx'], [`${longest}.vfx`], ['  Mixed.VFX ']])(
+    'accepts %s',
+    (domain) => {
+      expect(isValidVfxDomain(domain)).toBe(true);
+      expect(isValidVfxDomainBrowser(domain)).toBe(true);
+    },
+  );
+
+  test.each([
+    ['.vfx'],
+    [`${longest}a.vfx`],
+    ['a_b.vfx'],
+    ['a.b.vfx'],
+    ['a.vfx.vfx'],
+    ['a b.vfx'],
+    ['é.vfx'],
+    ['abc'],
+    ['abc.btc'],
+    ['ab\nc.vfx'],
+  ])('refuses %s', (domain) => {
+    expect(isValidVfxDomain(domain)).toBe(false);
+    expect(isValidVfxDomainBrowser(domain)).toBe(false);
+  });
+});
+
+describe('buyVfxDomain', () => {
+  function installBuyPipeline() {
+    return installPipeline({
+      [`/addresses/${keypair.address}`]: () => addressRecord(keypair.address, null),
+      '/adnr/': () => jsonResponse({ detail: 'not found' }, 404),
+    });
+  }
+
+  test('submits a hyphenated name of up to 65 characters without the suffix', async () => {
+    const name = `my-${'a'.repeat(62)}`;
+    const { calls } = installBuyPipeline();
+    expect(await client.buyVfxDomain(keypair, name)).toBe('TX_HASH_ABC');
+    const tx = sentTransaction(calls);
+    expect(tx.TransactionType).toBe(TxType.Adnr);
+    expect(tx.Data).toEqual({ Function: 'AdnrCreate()', Name: name });
+  });
+
+  test.each([['a'.repeat(66)], ['a_b'], ['a.b']])('refuses %s before any request', async (name) => {
+    const { calls } = installBuyPipeline();
+    await expect(client.buyVfxDomain(keypair, name)).rejects.toThrow(/Invalid vfx domain/);
+    expect(calls).toEqual([]);
+  });
 });
 
 describe('transferVfxDomain', () => {

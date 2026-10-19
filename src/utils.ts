@@ -1,5 +1,5 @@
 import CryptoJS from 'crypto-js';
-import { Network } from './constants';
+import { ADNR_NAME_MAX_LENGTH, Network } from './constants';
 import { VfxAddress } from './types';
 
 export function generateRandomInteger(min: number, max: number): number {
@@ -254,9 +254,13 @@ export function isValidAddress(address: string, network: Network): boolean {
   return true;
 }
 
+// Core's AdnrNameGrammarHeight grammar (LedgerIntegrityRules.AdnrNameError)
+// for the name before ".vfx": lowercase a-z, 0-9 and '-' anywhere in it, 1 to
+// ADNR_NAME_MAX_LENGTH characters.
+const VFX_DOMAIN_REGEX = new RegExp(`^[a-z0-9-]{1,${ADNR_NAME_MAX_LENGTH}}\\.vfx$`);
+
 export function isValidVfxDomain(domain: string): boolean {
-  const domainRegex = /^[a-z0-9]+\.vfx$/;
-  return domainRegex.test(domain.trim().toLowerCase());
+  return VFX_DOMAIN_REGEX.test(domain.trim().toLowerCase());
 }
 
 export function isValidBtcDomain(domain: string): boolean {
