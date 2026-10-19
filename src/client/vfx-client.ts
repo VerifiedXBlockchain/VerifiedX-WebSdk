@@ -14,6 +14,7 @@ import {
 } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
+import { assertRecipientOnNetwork } from '../services/recipient';
 import {
   TokenTxData,
   tokenBanAddressData,
@@ -593,6 +594,7 @@ export class VfxClient {
   }): Promise<VbtcTransferResult> => {
     this.assertNotDryRun('transferVbtc');
     const signer = this.signerFor(params, 'transferVbtc');
+    assertRecipientOnNetwork(params.toAddress, this.network, 'transferVbtc toAddress');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,

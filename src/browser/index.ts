@@ -39,6 +39,7 @@ export type {
 export type { Signer, KeypairOrSigner } from '../signer';
 export { vfxSignatureFromDer } from '../signer';
 export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from '../services/vbtc-multi';
+export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from '../services/vbtc-multi';
 export {
   TOKEN_BASE_ADDRESS,

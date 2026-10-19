@@ -2,6 +2,7 @@ import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
 import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
 import KeypairService from './keypair-service';
+import { assertRecipientOnNetwork } from './recipient';
 
 export interface IRawTransactionServiceOptions {
   network: Network;
@@ -52,6 +53,9 @@ export class RawTransactionService {
     // signer wired to the wrong network, fails at construction rather than
     // after the fee and nonce round-trips.
     this.signer = resolveSigner(signerInput, new KeypairService(this.network));
+    // The node refuses another network's address at admission, at every
+    // height, with nothing more than "Invalid Transaction".
+    assertRecipientOnNetwork(options.toAddress, this.network);
     this.toAddress = options.toAddress;
     this.txType = options.txType ?? 0;
     this.amount = options.amount ?? 0;

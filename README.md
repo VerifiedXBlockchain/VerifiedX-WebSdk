@@ -438,6 +438,13 @@ try {
 }
 ```
 
+A recipient on the other network (a testnet `x…` address given to a mainnet
+client, or the reverse, or a Bitcoin-style address) throws before anything is
+built or sent: the network refuses it, because nothing sent there could ever be
+spent. Reserve (`xRBX`), shielded (`zfx_`) and `*_Base` recipients are not
+affected. `isOtherNetworksAddress(address, network)` runs the same check, so a
+wallet can flag the address as it is typed.
+
 vBTC withdrawals add two recovery errors. `VbtcWithdrawalIncompleteError` means
 the request is on chain and nothing was paid out; resume with
 `completeWithdrawal`. `VbtcWithdrawalUnrecordedError` means the Bitcoin
