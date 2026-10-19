@@ -14,7 +14,7 @@ import {
 } from '../constants';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
-import { assertRecipientOnNetwork } from '../services/recipient';
+import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
   TokenTxData,
   tokenBanAddressData,
@@ -336,10 +336,11 @@ export class VfxClient {
     options: ReserveSendOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: toAddress,
+      toAddress: recipient,
       amount: amount,
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
@@ -455,12 +456,13 @@ export class VfxClient {
   public transferVfxDomain = async (keypair: KeypairOrSigner, toAddress: string): Promise<string | null> => {
     const signer = this.resolve(keypair);
     assertNotReserveSender(signer, 'transferVfxDomain');
-    if (!toAddress || toAddress === signer.address) {
+    const recipientAddress = toAddress ? await this.resolveRecipient(toAddress, 'transferVfxDomain') : toAddress;
+    if (!recipientAddress || recipientAddress === signer.address) {
       throw new Error('transferVfxDomain requires a recipient other than the sender');
     }
 
     const domain = await this.ownedVfxDomain(signer.address, 'transferVfxDomain');
-    const recipient = await this.addressApiClient.getAddressDetails(toAddress, { strict: true });
+    const recipient = await this.addressApiClient.getAddressDetails(recipientAddress, { strict: true });
     if (recipient?.adnr) {
       throw new Error(`Recipient already has a domain: ${recipient.adnr}`);
     }
@@ -468,7 +470,7 @@ export class VfxClient {
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress,
+      toAddress: recipientAddress,
       amount: DOMAIN_TRANSFER_COST,
       txType: TxType.Adnr,
       data: { Function: 'AdnrTransfer()', Name: domain },
@@ -510,11 +512,12 @@ export class VfxClient {
     if (!params.btcFromAddress || !params.btcToAddress || !params.vfxToAddress) {
       throw new Error('transferBtcDomain requires btcFromAddress, btcToAddress and vfxToAddress');
     }
+    const vfxToAddress = await this.resolveRecipient(params.vfxToAddress, 'transferBtcDomain');
 
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: params.vfxToAddress,
+      toAddress: vfxToAddress,
       amount: DOMAIN_TRANSFER_COST,
       txType: TxType.Adnr,
       data: {
@@ -594,11 +597,12 @@ export class VfxClient {
   }): Promise<VbtcTransferResult> => {
     this.assertNotDryRun('transferVbtc');
     const signer = this.signerFor(params, 'transferVbtc');
-    assertRecipientOnNetwork(params.toAddress, this.network, 'transferVbtc toAddress');
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtc');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferVbtc toAddress');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
-      to_address: params.toAddress,
+      to_address: toAddress,
       amount: params.amount,
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
@@ -631,6 +635,7 @@ export class VfxClient {
     if (!(params.totalAmount > 0)) {
       throw new Error('transferVbtcMulti requires a positive totalAmount');
     }
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtcMulti');
 
     let inputs = params.inputs;
     if (!inputs) {
@@ -659,7 +664,7 @@ export class VfxClient {
       const sent = await this.transferVbtc({
         scIdentifier: single.scIdentifier,
         fromAddress: signer.address,
-        toAddress: params.toAddress,
+        toAddress,
         amount: single.amount,
         privateKey: params.privateKey,
         signer: params.signer,
@@ -669,14 +674,14 @@ export class VfxClient {
 
     const data = vbtcMultiTransferData({
       fromAddress: signer.address,
-      toAddress: params.toAddress,
+      toAddress,
       totalAmount: params.totalAmount,
       inputs,
     });
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: params.toAddress,
+      toAddress,
       amount: 0,
       txType: TxType.VbtcV2Transfer,
       data,
@@ -1233,15 +1238,16 @@ export class VfxClient {
     } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferToken');
     const identity = await this.tokenIdentity(params);
     const data = tokenTransferData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
-      toAddress: params.toAddress,
+      toAddress,
       amount: params.amount,
       ...identity,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+    return this.sendTokenTx(resolved, toAddress, data, params.unlockHours);
   };
 
   /** Burns from the signer's own balance; the token must be burnable. */
@@ -1305,12 +1311,13 @@ export class VfxClient {
     params: { scIdentifier: string; toAddress: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferTokenOwnership');
     const data = tokenOwnerChangeData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
-      toAddress: params.toAddress,
+      toAddress,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+    return this.sendTokenTx(resolved, toAddress, data, params.unlockHours);
   };
 
   /**
@@ -1598,6 +1605,22 @@ export class VfxClient {
 
   private resolve(input: KeypairOrSigner | ResolvedSigner | { privateKey: string }): ResolvedSigner {
     return resolveSigner(input, this.keypairService);
+  }
+
+  /**
+   * The address a `.vfx`/`.rbx` recipient names; any other recipient as given.
+   * The network refuses a transaction addressed to a name, since it would
+   * credit the name string itself, so the name is resolved before building.
+   * The lookup is strict: an outage fails the call rather than reading as
+   * "no such name".
+   */
+  private async resolveRecipient(toAddress: string, label: string): Promise<string> {
+    if (!isNameRecipient(toAddress)) return toAddress;
+    const address = await this.addressApiClient.lookupDomain(toAddress.trim().toLowerCase(), { strict: true });
+    if (!address) {
+      throw new Error(`${label}: no account holds the name ${toAddress}`);
+    }
+    return address;
   }
 
   /**

@@ -2,7 +2,7 @@ import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
 import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
 import KeypairService from './keypair-service';
-import { assertRecipientOnNetwork } from './recipient';
+import { assertRecipientOnNetwork, isNameRecipient } from './recipient';
 
 export interface IRawTransactionServiceOptions {
   network: Network;
@@ -54,7 +54,13 @@ export class RawTransactionService {
     // after the fee and nonce round-trips.
     this.signer = resolveSigner(signerInput, new KeypairService(this.network));
     // The node refuses another network's address at admission, at every
-    // height, with nothing more than "Invalid Transaction".
+    // height, and a name from PathAuditRulesHeight, with nothing more than
+    // "Invalid Transaction". VfxClient resolves names before it gets here.
+    if (isNameRecipient(options.toAddress)) {
+      throw new Error(
+        `toAddress ${options.toAddress} is a name; send to the address it resolves to (VfxClient.lookupDomain)`,
+      );
+    }
     assertRecipientOnNetwork(options.toAddress, this.network);
     this.toAddress = options.toAddress;
     this.txType = options.txType ?? 0;

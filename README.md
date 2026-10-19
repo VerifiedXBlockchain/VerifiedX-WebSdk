@@ -161,6 +161,8 @@ addressFromPrivate(privateKey: string): string
 
 ```typescript
 // Send VFX. Resolves to the transaction hash, or null if it never reached the node.
+// A `.vfx`/`.rbx` toAddress is resolved to the address it names first (the network
+// refuses a transaction addressed to a name); every send that takes a recipient does this.
 sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<string | null>
 
 // Domains (5 VFX each). Transfer and delete read the owned name from Spyglass.
