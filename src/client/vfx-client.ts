@@ -28,10 +28,12 @@ import {
 } from '../services/watched-withdrawal';
 import {
   TokenTxData,
+  assertPositiveAmount,
   tokenBanAddressData,
   tokenBurnData,
   tokenDeployPayload,
   tokenMintData,
+  tokenMintRefusal,
   tokenOwnerChangeData,
   tokenPauseData,
   tokenTransferData,
@@ -1410,18 +1412,29 @@ export class VfxClient {
     return transactionHash ? { transactionHash, scIdentifier } : null;
   };
 
-  /** Owner only; the token must be mintable. Tokens are credited to the signer. */
+  /**
+   * Owner only; the token must be mintable. Tokens are credited to the signer.
+   * Throws before building when the network would refuse the mint: a paused
+   * token, more decimal places than the token's, or a supply or balance past
+   * the largest amount, judged against the token as Spyglass last indexed it.
+   */
   public mintToken = async (
     signer: KeypairOrSigner,
     params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
-    const identity = await this.tokenIdentity(params);
+    assertPositiveAmount(params.amount);
+    const { token, holders } = await this.tokenApiClient.getToken(params.scIdentifier);
+    const refusal = tokenMintRefusal(token, params.amount, holders[resolved.address] ?? 0);
+    if (refusal) {
+      throw new Error(refusal);
+    }
     const data = tokenMintData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
       amount: params.amount,
-      ...identity,
+      ticker: params.ticker ?? token.ticker,
+      name: params.name ?? token.name,
     });
     return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };

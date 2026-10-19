@@ -17,6 +17,12 @@
   unpaid. Results gain `paid` and `watched`. For other vaults these are always
   `true` and `null`, and nothing else changes. When reads were still failing
   at the deadline, a pending result also carries `lastError`.
+- **`mintToken` checks the token before building** and throws when a 9.0
+  node would refuse the mint (`TokenMintRulesHeight`): the token is paused,
+  the amount has more decimal places than the token's, or the supply or the
+  minter's balance would pass the largest amount the node holds. It now
+  always reads the token from Spyglass, even when `ticker` and `name` are
+  given.
 - **A refused transaction logs the node's reason** (`Invalid Transaction: <reason>`).
   The `null` return of the existing send methods is unchanged.
 
