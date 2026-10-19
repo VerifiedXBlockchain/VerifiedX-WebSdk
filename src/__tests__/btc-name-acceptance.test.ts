@@ -61,6 +61,8 @@ describe('acceptance message and code', () => {
     ['two message parts', `${NOW}:alice.btc|DER.PUB`],
     ['non-numeric timestamp', `soon:${NEW_OWNER}:alice.btc|DER.PUB`],
     ['zero timestamp', `0:${NEW_OWNER}:alice.btc|DER.PUB`],
+    ['a name without .btc', `${NOW}:${NEW_OWNER}:alice|DER.PUB`],
+    ['a bare .btc', `${NOW}:${NEW_OWNER}:.btc|DER.PUB`],
   ])('parse refuses a code with %s', (_, code) => {
     expect(parseBtcNameAcceptanceCode(code)).toBeNull();
   });
@@ -155,6 +157,19 @@ describe('transferBtcDomain with an acceptance', () => {
     installPipeline();
     const client = new VfxClient('testnet', { dryRun: true });
     await expect(client.transferBtcDomain(keypair, { ...base, btcToMessage: 'm' })).rejects.toThrow(/together/);
+  });
+
+  test('refuses an acceptance whose name lacks .btc, which Core refuses', async () => {
+    const { calls } = installPipeline();
+    const client = new VfxClient('testnet', { dryRun: true });
+    await expect(
+      client.transferBtcDomain(keypair, {
+        ...base,
+        btcToMessage: `${Math.floor(Date.now() / 1000)}:${NEW_OWNER}:alice`,
+        btcToSignature: 'DER.PUB',
+      }),
+    ).rejects.toThrow(/not <timestamp>:<VFX address>:<name>\.btc/);
+    expect(calls).toHaveLength(0);
   });
 
   test('refuses an acceptance for another owner, or one over 24 hours old, before building', async () => {

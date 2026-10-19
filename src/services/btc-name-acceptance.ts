@@ -57,13 +57,18 @@ export function parseBtcNameAcceptanceCode(code: string | null | undefined): Btc
   return parsed ? { ...parsed, signature } : null;
 }
 
-/** The parts of an acceptance message, or null when it is not `<timestamp>:<owner>:<name>`. */
+/**
+ * The parts of an acceptance message, or null when it is not
+ * `<timestamp>:<owner>:<name>.btc`. The suffix is required: Core compares the
+ * signed name with the stored one, which carries `.btc`, so a message without
+ * it is refused.
+ */
 export function parseBtcNameAcceptanceMessage(message: string): Omit<BtcNameAcceptance, 'signature'> | null {
   const parts = message.split(':');
   if (parts.length !== 3 || !/^\d+$/.test(parts[0])) return null;
   const timestamp = Number(parts[0]);
   const [, owner, name] = parts;
-  if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || !owner || !name) return null;
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0 || !owner || !/^.+\.btc$/i.test(name)) return null;
   return { message, timestamp, owner, name };
 }
 
