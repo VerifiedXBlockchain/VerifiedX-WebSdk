@@ -24,6 +24,14 @@ function installPipeline(extra: Record<string, FetchHandler> = {}): { calls: Cap
     '/addresses/adnr/someone.vfx/': () => ({ address: NAMED, domain: 'someone.vfx' }),
     '/addresses/adnr/ghost.vfx/': () => jsonResponse({ detail: 'not found' }, 404),
     '/addresses/adnr/': () => jsonResponse({ detail: 'down' }, 503),
+    [`/addresses/${NAMED}`]: () => ({
+      address: NAMED,
+      balance: 1,
+      balance_total: 1,
+      balance_locked: 0,
+      adnr: 'someone.vfx',
+      activated: false,
+    }),
     '/raw/timestamp/': () => textResponse('1700000000'),
     '/raw/nonce/': () => textResponse('7'),
     '/raw/fee/': () => ({ Result: 'Success', Fee: 0.00025 }),
@@ -103,6 +111,33 @@ describe('a name recipient is resolved before building', () => {
     ).rejects.toThrow(/prepare/);
     const prepare = calls.find((call) => call.url.includes('/btc/vbtc-v2/transfer/prepare/'));
     expect(prepare?.body?.to_address).toBe(NAMED);
+  });
+
+  test('refuses when the resolved address no longer holds the name (a stale lookup)', async () => {
+    const { calls } = installPipeline({
+      [`/addresses/${NAMED}`]: () => ({
+        address: NAMED,
+        balance: 1,
+        balance_total: 1,
+        balance_locked: 0,
+        adnr: 'newname.vfx',
+        activated: false,
+      }),
+    });
+    const client = new VfxClient('testnet', { dryRun: true });
+    await expect(client.sendCoin(keypair, 'someone.vfx', 1)).rejects.toThrow(
+      /resolved to .* whose own record names newname\.vfx; the name may have just moved/,
+    );
+    expect(calls.some((call) => call.url.includes('/raw/'))).toBe(false);
+  });
+
+  test('the cross-check reads the resolved address itself', async () => {
+    const { calls } = installPipeline();
+    const client = new VfxClient('testnet', { dryRun: true });
+    await client.sendCoin(keypair, 'someone.vfx', 1);
+    expect(
+      calls.some((call) => call.url.endsWith(`/addresses/${NAMED}`) || call.url.includes(`/addresses/${NAMED}/`)),
+    ).toBe(true);
   });
 
   test('an unregistered name fails without building', async () => {

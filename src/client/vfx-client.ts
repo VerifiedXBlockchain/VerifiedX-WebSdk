@@ -1880,9 +1880,19 @@ export class VfxClient {
    */
   private async resolveRecipient(toAddress: string, label: string): Promise<string> {
     if (!isNameRecipient(toAddress)) return toAddress;
-    const address = await this.addressApiClient.lookupDomain(toAddress.trim().toLowerCase(), { strict: true });
+    const name = toAddress.trim().toLowerCase();
+    const address = await this.addressApiClient.lookupDomain(name, { strict: true });
     if (!address) {
       throw new Error(`${label}: no account holds the name ${toAddress}`);
+    }
+    // The name may have moved since whatever answered the lookup last read
+    // it: send only when the address's own record names it too.
+    const holder = await this.addressApiClient.getAddressDetails(address, { strict: true });
+    if (holder?.adnr?.toLowerCase() !== name) {
+      throw new Error(
+        `${label}: ${toAddress} resolved to ${address}, whose own record names ${holder?.adnr ?? 'no domain'}; ` +
+          `the name may have just moved, try again shortly`,
+      );
     }
     return address;
   }
