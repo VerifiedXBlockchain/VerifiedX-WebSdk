@@ -390,6 +390,8 @@ describe('vBTC V2 — requestWithdrawal', () => {
     expect(result).toEqual({
       btcTransactionHash: 'BTC_TXID_123',
       completionTransactionHash: 'COMP_TX_HASH',
+      paid: true,
+      watched: null,
       withdrawalRequestHash: 'WR_HASH',
     });
 
@@ -728,6 +730,8 @@ describe('vBTC V2 — a post-broadcast failure must never advise re-signing', ()
     expect(result).toEqual({
       btcTransactionHash: 'BTC_TXID',
       completionTransactionHash: 'COMPLETION_HASH',
+      paid: true,
+      watched: null,
       withdrawalRequestHash: 'WR_HASH',
     });
     // No ceremony endpoints were touched — that is the whole point.

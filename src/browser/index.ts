@@ -8,7 +8,7 @@ export { VfxApiError } from '../client/base-api-client';
 export {
   VbtcWithdrawalIncompleteError,
   VbtcWithdrawalUnrecordedError,
-  VbtcWithdrawalPendingError,
+  VbtcNodeUnreachableError,
   VbtcWithdrawalClosedError,
 } from '../client/vfx-client';
 export { parseWatchedWithdrawal, VBTC_WATCHED_MAX_FEE_RATE } from '../services/watched-withdrawal';
@@ -19,7 +19,7 @@ export {
   BTC_NAME_ACCEPTANCE_MAX_AGE_SECONDS,
 } from '../services/btc-name-acceptance';
 export type { BtcNameAcceptance } from '../services/btc-name-acceptance';
-export { TransactionDispatchError } from '../services/raw-transaction-service';
+export { TransactionDispatchError, TransactionRefusedError } from '../services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from '../btc/errors';
 
 // Re-export common interfaces and types from main package

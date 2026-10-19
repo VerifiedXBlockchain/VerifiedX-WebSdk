@@ -5,7 +5,13 @@
  * refuses a Type 28 completion, so the SDK polls for payment and offers fee
  * bump and release (Type 44) instead.
  */
-import { VbtcWithdrawalClosedError, VbtcWithdrawalPendingError, VfxClient, parseWatchedWithdrawal } from '../index';
+import {
+  TransactionRefusedError,
+  VbtcNodeUnreachableError,
+  VbtcWithdrawalClosedError,
+  VfxClient,
+  parseWatchedWithdrawal,
+} from '../index';
 import { CapturedCall, FetchHandler, installFetch, jsonResponse, textResponse } from './helpers/mock-fetch';
 
 const PREPARE = '/btc/vbtc-v2/withdraw/complete/prepare/';
@@ -207,6 +213,16 @@ describe('getWithdrawalPin', () => {
     ).toBeNull();
   });
 
+  test('an Unreachable answer throws instead of reading as not watched', async () => {
+    installFetch({
+      [PREPARE]: () =>
+        jsonResponse({ success: false, message: 'timed out', raw: { Success: false, Unreachable: true } }, 500),
+    });
+    await expect(
+      client.getWithdrawalPin({ scIdentifier: 'sc-1', withdrawalRequestHash: 'WR_HASH', requestorAddress }),
+    ).rejects.toBeInstanceOf(VbtcNodeUnreachableError);
+  });
+
   test('a 500 that is not JSON still throws', async () => {
     installFetch({ [PREPARE]: () => textResponse('Bad Gateway', 500) });
     await expect(
@@ -216,24 +232,72 @@ describe('getWithdrawalPin', () => {
 });
 
 describe('completeWithdrawal on a watched vault', () => {
-  test('polls until Bitcoin pays it, with no ceremony and no Type 28', async () => {
-    const { calls } = installFetch({ [PREPARE]: sequence(notMinedYet, pinned, pinned, paid) });
+  test('waits for the request to be recorded, then resolves paid when Bitcoin has paid it', async () => {
+    const { calls } = installFetch({ [PREPARE]: sequence(notMinedYet, notMinedYet, paid) });
     const phases: string[] = [];
     const result = await client.completeWithdrawal({
       ...completeParams(),
       onProgress: (event) => phases.push(event.phase),
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       withdrawalRequestHash: 'WR_HASH',
       btcTransactionHash: 'PIN_TX',
       completionTransactionHash: 'VFX_DONE',
+      paid: true,
     });
+    expect(result.watched?.state).toBe('Settled');
     expect(touchedFrostOrType28(calls)).toBe(false);
-    expect(phases.filter((phase) => phase === 'watched_polling')).toHaveLength(4);
+    expect(phases.filter((phase) => phase === 'watched_polling')).toHaveLength(3);
+  });
+
+  test('a withdrawal being paid resolves paid: false with its state, without throwing', async () => {
+    const { calls } = installFetch({ [PREPARE]: sequence(notMinedYet, pinned) });
+    const result = await client.completeWithdrawal(completeParams());
+    expect(result).toMatchObject({
+      withdrawalRequestHash: 'WR_HASH',
+      btcTransactionHash: '',
+      completionTransactionHash: '',
+      paid: false,
+    });
+    expect(result.watched).toMatchObject({ state: 'Pinned', pinnedBtcTransactionHash: 'PIN_TX', canRaiseFee: true });
+    expect(touchedFrostOrType28(calls)).toBe(false);
+  });
+
+  test('a request still not mined at timeoutMs resolves paid: false rather than throwing', async () => {
+    installFetch({ [PREPARE]: notMinedYet });
+    const result = await client.completeWithdrawal({ ...completeParams(), pollIntervalMs: 5, timeoutMs: 30 });
+    expect(result.paid).toBe(false);
+    expect(result.watched?.notMinedYet).toBe(true);
+  });
+
+  test('rides out a failed request and an Unreachable answer until the deadline', async () => {
+    const unreachable = (): Response =>
+      jsonResponse(
+        {
+          success: false,
+          message: 'Read timed out',
+          raw: { Success: false, Message: 'Read timed out', Unreachable: true },
+        },
+        500,
+      );
+    const lost = (): Response => {
+      throw new TypeError('fetch failed');
+    };
+    installFetch({
+      [PREPARE]: sequence(notMinedYet, lost, unreachable, () => textResponse('Bad Gateway', 502), pinned),
+    });
+    const result = await client.completeWithdrawal(completeParams());
+    expect(result.paid).toBe(false);
+    expect(result.watched?.state).toBe('Pinned');
+  });
+
+  test('stops on a real answer that the vault is not watched', async () => {
+    installFetch({ [PREPARE]: sequence(notMinedYet, frostPreparation) });
+    await expect(client.completeWithdrawal(completeParams())).rejects.toThrow(/now answers that it is not/);
   });
 
   test('a withdrawal closed unpaid throws VbtcWithdrawalClosedError', async () => {
-    const { calls } = installFetch({ [PREPARE]: sequence(pinned, released) });
+    const { calls } = installFetch({ [PREPARE]: sequence(notMinedYet, released) });
     await expect(client.completeWithdrawal(completeParams())).rejects.toMatchObject({
       name: 'VbtcWithdrawalClosedError',
       withdrawalRequestHash: 'WR_HASH',
@@ -241,22 +305,23 @@ describe('completeWithdrawal on a watched vault', () => {
     expect(touchedFrostOrType28(calls)).toBe(false);
   });
 
-  test('not paid within timeoutMs throws VbtcWithdrawalPendingError with the last state', async () => {
-    installFetch({ [PREPARE]: pinned });
-    const error = await client.completeWithdrawal({ ...completeParams(), pollIntervalMs: 5, timeoutMs: 30 }).then(
-      () => null,
-      (e) => e,
-    );
-    expect(error).toBeInstanceOf(VbtcWithdrawalPendingError);
-    expect(error.withdrawal.state).toBe('Pinned');
-    expect(error.message).toMatch(/Nothing needs to be done/);
-  });
-
-  test('requestWithdrawal passes the watched outcome through instead of calling it incomplete', async () => {
+  test('requestWithdrawal resolves the pending result for a watched vault', async () => {
     installFetch({
       '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH', Fee: 1 }),
       '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
-      [PREPARE]: sequence(pinned, released),
+      [PREPARE]: sequence(notMinedYet, pinned),
+    });
+    const { withdrawalRequestHash, ...params } = completeParams();
+    expect(withdrawalRequestHash).toBe('WR_HASH');
+    const result = await client.requestWithdrawal(params);
+    expect(result).toMatchObject({ withdrawalRequestHash: 'WR_HASH', paid: false });
+  });
+
+  test('requestWithdrawal passes a closed withdrawal through instead of calling it incomplete', async () => {
+    installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ_PREP_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      [PREPARE]: released,
     });
     const { withdrawalRequestHash, ...params } = completeParams();
     expect(withdrawalRequestHash).toBe('WR_HASH');
@@ -265,14 +330,17 @@ describe('completeWithdrawal on a watched vault', () => {
 });
 
 describe('bumpWithdrawalFee and releaseWithdrawal', () => {
-  function installRaw(): { calls: CapturedCall[] } {
+  function installRaw(overrides: Record<string, FetchHandler> = {}): { calls: CapturedCall[] } {
     return installFetch({
+      [PREPARE]: pinned,
       '/raw/timestamp/': () => textResponse('1700000000'),
       '/raw/nonce/': () => textResponse('7'),
       '/raw/fee/': () => ({ Result: 'Success', Fee: 0.00025 }),
       '/raw/hash/': () => ({ Result: 'Success', Hash: 'BUMP_HASH' }),
       '/raw/validate-signature/': () => textResponse('true'),
       '/raw/verify/': () => ({ Result: 'Success' }),
+      '/raw/send/': () => ({ Result: 'Success' }),
+      ...overrides,
     });
   }
 
@@ -283,16 +351,17 @@ describe('bumpWithdrawalFee and releaseWithdrawal', () => {
     return body?.transaction;
   }
 
+  const bump = (feeRate: number) => ({ scIdentifier: 'sc-1', withdrawalRequestHash: 'WR_HASH', feeRate, privateKey });
+
   test.each([
     ['bumpWithdrawalFee', 'VBTCWithdrawalFeeBump()'],
     ['releaseWithdrawal', 'VBTCWithdrawalRelease()'],
-  ] as const)('%s sends a Type 44 to the requester itself', async (method, fn) => {
+  ] as const)('%s reads the withdrawal, then sends a Type 44 to the requester itself', async (method, fn) => {
     const { calls } = installRaw();
-    const dry = new VfxClient('testnet', { dryRun: true });
-    const hash = await dry[method]({ scIdentifier: 'sc-1', withdrawalRequestHash: 'WR_HASH', feeRate: 9, privateKey });
-    expect(hash).toBe('BUMP_HASH');
-    const tx = hashedTx(calls);
-    expect(tx).toMatchObject({
+    expect(await client[method](bump(9))).toBe('BUMP_HASH');
+    const prepare = calls.find((call) => call.url.includes(PREPARE));
+    expect(prepare?.body).toMatchObject({ owner_address: requestorAddress, withdrawal_request_hash: 'WR_HASH' });
+    expect(hashedTx(calls)).toMatchObject({
       TransactionType: 44,
       FromAddress: requestorAddress,
       ToAddress: requestorAddress,
@@ -303,9 +372,40 @@ describe('bumpWithdrawalFee and releaseWithdrawal', () => {
 
   test.each([0, -1, 2.5, 5001])('refuses a fee rate of %p before any request', async (feeRate) => {
     const { calls } = installRaw();
-    await expect(
-      client.bumpWithdrawalFee({ scIdentifier: 'sc-1', withdrawalRequestHash: 'WR_HASH', feeRate, privateKey }),
-    ).rejects.toThrow(/feeRate must be a whole number of sat\/vB from 1 to 5000/);
+    await expect(client.bumpWithdrawalFee(bump(feeRate))).rejects.toThrow(
+      /feeRate must be a whole number of sat\/vB from 1 to 5000/,
+    );
     expect(calls).toHaveLength(0);
+  });
+
+  test('refuses a rate not above the pinned rate before building', async () => {
+    const { calls } = installRaw();
+    await expect(client.bumpWithdrawalFee(bump(4))).rejects.toThrow(/at least 5 sat\/vB/);
+    expect(calls.some((call) => call.url.includes('/raw/'))).toBe(false);
+  });
+
+  test('refuses when the withdrawal cannot be raised or released now', async () => {
+    const { calls } = installRaw({ [PREPARE]: released });
+    await expect(client.bumpWithdrawalFee(bump(9))).rejects.toThrow(/cannot be raised now \(Released\)/);
+    await expect(client.releaseWithdrawal(bump(9))).rejects.toThrow(/cannot be released now/);
+    expect(calls.some((call) => call.url.includes('/raw/'))).toBe(false);
+  });
+
+  test('refuses on a vault the chain does not watch', async () => {
+    installRaw({ [PREPARE]: frostPreparation });
+    await expect(client.bumpWithdrawalFee(bump(9))).rejects.toThrow(/not one the chain watches/);
+  });
+
+  test("a refusal by the node throws TransactionRefusedError with the node's reason", async () => {
+    const { calls } = installRaw({
+      '/raw/verify/': () => ({ Result: 'Fail', Message: 'A release must beat the pinned fee by its relay cost.' }),
+    });
+    const error = await client.releaseWithdrawal(bump(9)).then(
+      () => null,
+      (e) => e,
+    );
+    expect(error).toBeInstanceOf(TransactionRefusedError);
+    expect(error.reason).toBe('A release must beat the pinned fee by its relay cost.');
+    expect(calls.some((call) => call.url.includes('/raw/send/'))).toBe(false);
   });
 });

@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased (9.0 integration)
+
+### Behavioral changes (read these)
+
+- **Recipients are checked before building.** A recipient address of the other
+  network (or a Bitcoin-style address) throws before any request, since a 9.0
+  node refuses it. A `.vfx`/`.rbx` recipient is resolved to its address first,
+  and the send is refused when that address's own record names another domain.
+- **Withdrawals from a vault the chain watches** run no signing ceremony and
+  send no completion transaction. `completeWithdrawal` / `requestWithdrawal`
+  resolve with `paid: false` and the withdrawal's state while Bitcoin is paying
+  it, `paid: true` once paid, or throw `VbtcWithdrawalClosedError` if it closed
+  unpaid. Results gain `paid` and `watched`. For other vaults these are always
+  `true` and `null`, and nothing else changes.
+- **A refused transaction logs the node's reason** (`Invalid Transaction: <reason>`).
+  The `null` return of the existing send methods is unchanged.
+
+### Added
+
+- `isOtherNetworksAddress`, `assertRecipientOnNetwork`.
+- `getWithdrawalPin`, `bumpWithdrawalFee`, `releaseWithdrawal`,
+  `parseWatchedWithdrawal`, `VbtcWithdrawalClosedError`,
+  `VbtcNodeUnreachableError`, `TransactionRefusedError` (bump and release
+  throw it with the node's `reason`; `RawTransactionService` takes
+  `throwOnRefusal`).
+- `transferBtcDomain` accepts `btcToMessage`/`btcToSignature`;
+  `signBtcNameTransferAcceptance`, `btcNameAcceptanceMessage`,
+  `buildBtcNameAcceptanceCode`, `parseBtcNameAcceptanceCode`.
+
 ## 3.6.0 (2026-10-08)
 
 No public API removals or renames. One behavioral change is called out

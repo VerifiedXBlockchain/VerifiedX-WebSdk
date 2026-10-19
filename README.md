@@ -163,6 +163,8 @@ addressFromPrivate(privateKey: string): string
 // Send VFX. Resolves to the transaction hash, or null if it never reached the node.
 // A `.vfx`/`.rbx` toAddress is resolved to the address it names first (the network
 // refuses a transaction addressed to a name); every send that takes a recipient does this.
+// The send is refused if that address's own record does not name the domain (it may
+// have just moved).
 sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<string | null>
 
 // Domains (5 VFX each). Transfer and delete read the owned name from Spyglass.
@@ -467,20 +469,30 @@ requester sends the request and nothing else. The chain fixes ("pins") the
 Bitcoin transaction, and the vault's signers sign and send it. There is no
 signing ceremony, and the network refuses a completion transaction.
 `completeWithdrawal` (and `requestWithdrawal` after the request) detects such
-a vault and waits for Bitcoin to pay it, which can take longer than
-`timeoutMs`:
+a vault, sends nothing, and waits only until the node has recorded the request
+(riding out failed or unreachable reads until `timeoutMs`). Being paid takes
+Bitcoin confirmations, so the usual answer is a pending result, not an error:
 
-- Paid: resolves with the paying `btcTransactionHash`.
-- `VbtcWithdrawalPendingError`: not paid yet. Nothing needs to be done.
-  `error.withdrawal` is the last state; follow it with `getWithdrawalPin`, or
-  call `completeWithdrawal` again, which only waits.
+- `paid: true`: Bitcoin has paid it; `btcTransactionHash` is the paying
+  transaction.
+- `paid: false`: the chain has it and is paying it. Nothing needs to be done.
+  `btcTransactionHash` is empty and `watched` holds its state; follow it with
+  `getWithdrawalPin`, or call `completeWithdrawal` again.
 - `VbtcWithdrawalClosedError`: closed unpaid (released or expired). The vBTC
   went back to the requester.
+
+Every result has `paid` and `watched`. For a vault the chain does not watch,
+`paid` is always true and `watched` is null, so existing code is unaffected.
+`getWithdrawalPin` throws `VbtcNodeUnreachableError` when Spyglass could not
+reach the node, rather than answering "not watched".
 
 While the withdrawal is pinned and not confirming, its requester can raise the
 fee with `bumpWithdrawalFee` or give it up with `releaseWithdrawal`. Each is a
 single transaction, with a `feeRate` above the pinned rate
-(`withdrawal.minimumNextFeeRate`) and at most 5000 sat/vB.
+(`withdrawal.minimumNextFeeRate`) and at most 5000 sat/vB. Both read the
+withdrawal first and refuse when it cannot be raised or released, or the rate
+is too low. A refusal by the node throws `TransactionRefusedError` with the
+node's `reason`.
 
 ```typescript
 const pin = await vfxClient.getWithdrawalPin({ scIdentifier, withdrawalRequestHash, requestorAddress });

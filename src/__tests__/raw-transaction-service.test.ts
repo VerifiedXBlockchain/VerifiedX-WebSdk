@@ -94,13 +94,25 @@ describe('RawTransactionService.process', () => {
     );
   });
 
-  test('returns null and logs when transaction verification fails', async () => {
+  test("returns null and logs the node's reason when transaction verification fails", async () => {
     installPipeline({ '/raw/verify/': () => ({ Result: 'Failure', Message: 'bad tx' }) });
     expect(await buildService().process()).toBeNull();
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('process()'),
-      expect.objectContaining({ message: 'Invalid Transaction' }),
+      expect.objectContaining({ message: 'Invalid Transaction: bad tx' }),
     );
+  });
+
+  test('throwOnRefusal surfaces the refusal as TransactionRefusedError instead of null', async () => {
+    installPipeline({ '/raw/verify/': () => ({ Result: 'Failure', Message: 'bad tx' }) });
+    const service = new RawTransactionService({
+      network: Network.Testnet,
+      keypair,
+      toAddress: 'xRecipient00000000000000000000000',
+      amount: 1.5,
+      throwOnRefusal: true,
+    });
+    await expect(service.process()).rejects.toMatchObject({ name: 'TransactionRefusedError', reason: 'bad tx' });
   });
 
   test('returns null and logs when send fails', async () => {

@@ -95,6 +95,17 @@ export function parseWatchedWithdrawal(response: unknown): VbtcWatchedWithdrawal
   };
 }
 
+/**
+ * Whether a completion-route answer says Spyglass could not reach the node (a
+ * timeout, a refused connection): no answer at all, so neither "watched" nor
+ * "not watched". Spyglass marks it `Unreachable` in the body it nests under
+ * `raw` with HTTP 500.
+ */
+export function isUnreachableAnswer(response: unknown): boolean {
+  const body = asObject(response);
+  return body?.Unreachable === true || asObject(body?.raw)?.Unreachable === true;
+}
+
 /** Throws unless `feeRate` is a whole sat/vB rate the node could accept. */
 export function assertWatchedFeeRate(feeRate: number, label: string): void {
   if (!Number.isInteger(feeRate) || feeRate <= 0 || feeRate > VBTC_WATCHED_MAX_FEE_RATE) {

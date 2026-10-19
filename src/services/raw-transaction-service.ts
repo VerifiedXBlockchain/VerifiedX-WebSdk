@@ -24,6 +24,11 @@ export interface IRawTransactionServiceOptions {
    */
   unlockTime?: number | null;
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
+  /**
+   * Throw TransactionRefusedError, carrying the node's reason, when the node
+   * refuses the transaction at verification, instead of resolving to null.
+   */
+  throwOnRefusal?: boolean;
 }
 
 export class RawTransactionService {
@@ -36,6 +41,7 @@ export class RawTransactionService {
   private fromAddress: string;
   private unlockTime: number | null;
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
+  private throwOnRefusal: boolean;
 
   private hash: string | null = null;
   private nonce: number | null = null;
@@ -69,6 +75,7 @@ export class RawTransactionService {
     this.fromAddress = this.signer.address;
     this.unlockTime = options.unlockTime ?? null;
     this.apiOptions = options.apiOptions ?? {};
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
   }
 
   private updateTransactionData(): Record<string, unknown> {
@@ -116,10 +123,13 @@ export class RawTransactionService {
 
       txData = this.updateTransactionData();
 
-      const txIsValid = await client.verifyTransaction(txData);
+      const verdict = await client.verifyTransactionResult(txData);
 
-      if (!txIsValid) {
-        throw new Error('Invalid Transaction');
+      if (!verdict.valid) {
+        if (this.throwOnRefusal) {
+          throw new TransactionRefusedError(this.hash ?? '', verdict.message);
+        }
+        throw new Error(verdict.message ? `Invalid Transaction: ${verdict.message}` : 'Invalid Transaction');
       }
 
       if (dryRun) {
@@ -144,12 +154,29 @@ export class RawTransactionService {
 
       return this.hash;
     } catch (error) {
-      if (error instanceof TransactionDispatchError) {
+      if (error instanceof TransactionDispatchError || error instanceof TransactionRefusedError) {
         throw error;
       }
       console.error(`Error in process():`, error);
       return null;
     }
+  }
+}
+
+/**
+ * Thrown, for callers that ask for it, when the node refused the transaction
+ * at verification. Nothing was sent; `reason` is the node's message.
+ */
+export class TransactionRefusedError extends Error {
+  readonly hash: string;
+  readonly reason: string | null;
+
+  constructor(hash: string, reason: string | null) {
+    super(`The node refused transaction ${hash}: ${reason ?? 'no reason given'}. Nothing was sent.`);
+    this.name = 'TransactionRefusedError';
+    this.hash = hash;
+    this.reason = reason;
+    Object.setPrototypeOf(this, TransactionRefusedError.prototype);
   }
 }
 

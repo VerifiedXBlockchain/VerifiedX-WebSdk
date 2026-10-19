@@ -143,9 +143,20 @@ export interface VbtcMultiTransferResult {
 }
 
 export interface VbtcWithdrawalResult {
+  /** The Bitcoin transaction that paid it; empty while `paid` is false. */
   btcTransactionHash: string;
+  /** The VFX completion transaction; empty while `paid` is false. */
   completionTransactionHash: string;
   withdrawalRequestHash: string;
+  /**
+   * Bitcoin has paid it. Always true for a vault the chain does not watch.
+   * False for a watched vault's withdrawal the chain has taken but Bitcoin has
+   * not paid yet: nothing needs to be done; follow it with getWithdrawalPin
+   * or call completeWithdrawal again.
+   */
+  paid: boolean;
+  /** The withdrawal's state when its vault is one the chain watches, else null. */
+  watched: VbtcWatchedWithdrawal | null;
 }
 
 /** One Bitcoin transaction the chain has fixed for a watched withdrawal. */
