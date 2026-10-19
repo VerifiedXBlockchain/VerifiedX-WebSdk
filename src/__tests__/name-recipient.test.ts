@@ -113,7 +113,7 @@ describe('a name recipient is resolved before building', () => {
     expect(prepare?.body?.to_address).toBe(NAMED);
   });
 
-  test('refuses when the resolved address no longer holds the name (a stale lookup)', async () => {
+  test("refuses when the lookup disagrees with the resolved address's own record", async () => {
     const { calls } = installPipeline({
       [`/addresses/${NAMED}`]: () => ({
         address: NAMED,
@@ -126,7 +126,7 @@ describe('a name recipient is resolved before building', () => {
     });
     const client = new VfxClient('testnet', { dryRun: true });
     await expect(client.sendCoin(keypair, 'someone.vfx', 1)).rejects.toThrow(
-      /resolved to .* whose own record names newname\.vfx; the name may have just moved/,
+      /resolved to .* whose own record names newname\.vfx; the two disagree/,
     );
     expect(calls.some((call) => call.url.includes('/raw/'))).toBe(false);
   });

@@ -1940,13 +1940,14 @@ export class VfxClient {
     if (!address) {
       throw new Error(`${label}: no account holds the name ${toAddress}`);
     }
-    // The name may have moved since whatever answered the lookup last read
-    // it: send only when the address's own record names it too.
+    // Send only when the address's own record agrees that it holds the name.
+    // Both reads come from the same Spyglass index, so this does not detect an
+    // index that lags the chain; it refuses a lookup that disagrees with it.
     const holder = await this.addressApiClient.getAddressDetails(address, { strict: true });
     if (holder?.adnr?.toLowerCase() !== name) {
       throw new Error(
         `${label}: ${toAddress} resolved to ${address}, whose own record names ${holder?.adnr ?? 'no domain'}; ` +
-          `the name may have just moved, try again shortly`,
+          `the two disagree, so nothing was sent`,
       );
     }
     return address;
