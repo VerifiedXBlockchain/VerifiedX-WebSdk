@@ -16,6 +16,11 @@ import KeypairService from '../services/keypair-service';
 import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
+  btcNameAcceptanceMessage,
+  btcNameAcceptanceProblem,
+  buildBtcNameAcceptanceCode,
+} from '../services/btc-name-acceptance';
+import {
   assertWatchedFeeRate,
   parseWatchedWithdrawal,
   watchedWithdrawalFeeBumpData,
@@ -556,17 +561,39 @@ export class VfxClient {
    * from then on. Costs 5 VFX. The signer must be the VFX account that
    * currently manages the domain for `btcFromAddress`; the node checks that
    * pairing and that `btcToAddress` has no domain.
+   *
+   * From the network's BtcNameSignerOwnsAddressHeight the receiving Bitcoin
+   * address must accept the name: pass the `btcToMessage` and `btcToSignature`
+   * the receiver made with signBtcNameTransferAcceptance (or parsed from their
+   * acceptance code with parseBtcNameAcceptanceCode). The acceptance must name
+   * `vfxToAddress` and be under 24 hours old. Before that height they are
+   * optional and the node ignores them.
    */
   public transferBtcDomain = async (
     keypair: KeypairOrSigner,
-    params: { btcFromAddress: string; btcToAddress: string; vfxToAddress: string },
+    params: {
+      btcFromAddress: string;
+      btcToAddress: string;
+      vfxToAddress: string;
+      btcToMessage?: string;
+      btcToSignature?: string;
+    },
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     assertNotReserveSender(signer, 'transferBtcDomain');
     if (!params.btcFromAddress || !params.btcToAddress || !params.vfxToAddress) {
       throw new Error('transferBtcDomain requires btcFromAddress, btcToAddress and vfxToAddress');
     }
+    if (!params.btcToMessage !== !params.btcToSignature) {
+      throw new Error('transferBtcDomain takes btcToMessage and btcToSignature together, or neither');
+    }
     const vfxToAddress = await this.resolveRecipient(params.vfxToAddress, 'transferBtcDomain');
+    if (params.btcToMessage) {
+      const problem = btcNameAcceptanceProblem(params.btcToMessage, { owner: vfxToAddress });
+      if (problem) {
+        throw new Error(`transferBtcDomain: ${problem}`);
+      }
+    }
 
     const txBuilder = new RawTransactionService({
       network: this.network,
@@ -578,10 +605,34 @@ export class VfxClient {
         Function: 'BTCAdnrTransfer()',
         BTCToAddress: params.btcToAddress,
         BTCFromAddress: params.btcFromAddress,
+        ...(params.btcToMessage ? { BTCToMessage: params.btcToMessage, BTCToSignature: params.btcToSignature } : {}),
       },
       apiOptions: this.apiOptions,
     });
     return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * The receiving side of a .btc name transfer: the key of the Bitcoin
+   * address the name moves to signs that it accepts `name` for `newOwner`
+   * (the VFX address that will manage it). Hand `code` to the sender, who
+   * passes its message and signature to transferBtcDomain. Good for 24 hours.
+   */
+  public signBtcNameTransferAcceptance = (params: {
+    /** Hex private key of the receiving Bitcoin address. */
+    btcPrivateKey: string;
+    name: string;
+    newOwner: string;
+    /** Unix seconds to sign at; defaults to now. */
+    timestamp?: number;
+  }): { message: string; signature: string; code: string } => {
+    if (!params.btcPrivateKey || !params.name || !params.newOwner) {
+      throw new Error('signBtcNameTransferAcceptance requires btcPrivateKey, name and newOwner');
+    }
+    const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
+    const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
+    const signature = new BtcClient(this.network).getSignature(message, params.btcPrivateKey);
+    return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 
   /** Release the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX. */

@@ -169,7 +169,14 @@ sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<
 buyVfxDomain(keypair: Keypair | Signer, domain: string): Promise<string | null>
 transferVfxDomain(keypair, toAddress)
 deleteVfxDomain(keypair)
-transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress })
+transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress, btcToMessage?, btcToSignature? })
+
+// Cross-wallet .btc transfer acceptance (required once the network sets
+// BtcNameSignerOwnsAddressHeight). The receiver signs with the key of btcToAddress
+// and hands the code to the sender; the acceptance names vfxToAddress and lasts 24 hours.
+const { code } = signBtcNameTransferAcceptance({ btcPrivateKey, name: 'alice.btc', newOwner: vfxToAddress })
+const accepted = parseBtcNameAcceptanceCode(code) // { message, signature, timestamp, owner, name } or null
+transferBtcDomain(keypair, { ...addresses, btcToMessage: accepted.message, btcToSignature: accepted.signature })
 deleteBtcDomain(keypair, { btcFromAddress })
 
 // Address for an external signer's public key (the SDK never sees the private key)
