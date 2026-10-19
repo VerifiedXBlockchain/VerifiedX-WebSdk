@@ -291,6 +291,50 @@ describe('completeWithdrawal on a watched vault', () => {
     expect(result.watched?.state).toBe('Pinned');
   });
 
+  test('a pending result after reads ran out carries the last error', async () => {
+    const lost = (): Response => {
+      throw new TypeError('fetch failed');
+    };
+    installFetch({ [PREPARE]: sequence(notMinedYet, lost) });
+    const result = await client.completeWithdrawal({ ...completeParams(), pollIntervalMs: 5, timeoutMs: 40 });
+    expect(result.paid).toBe(false);
+    expect(result.lastError).toBe('fetch failed');
+    expect(result.watched?.notMinedYet).toBe(true);
+  });
+
+  test('the first read is retried through a failed request and an Unreachable answer', async () => {
+    const lost = (): Response => {
+      throw new TypeError('fetch failed');
+    };
+    const unreachable = (): Response =>
+      jsonResponse({ success: false, message: 'timed out', raw: { Success: false, Unreachable: true } }, 500);
+    const { calls } = installFetch({ [PREPARE]: sequence(lost, unreachable, pinned) });
+    const result = await client.completeWithdrawal(completeParams());
+    expect(result).toMatchObject({ paid: false, watched: { state: 'Pinned' } });
+    expect(result.lastError).toBeUndefined();
+    expect(calls.filter((call) => call.url.includes(PREPARE))).toHaveLength(3);
+    expect(touchedFrostOrType28(calls)).toBe(false);
+  });
+
+  test('a first read still Unreachable at the deadline throws, taking it as neither watched nor FROST', async () => {
+    const { calls } = installFetch({
+      [PREPARE]: () =>
+        jsonResponse({ success: false, message: 'timed out', raw: { Success: false, Unreachable: true } }, 500),
+    });
+    await expect(
+      client.completeWithdrawal({ ...completeParams(), pollIntervalMs: 5, timeoutMs: 30 }),
+    ).rejects.toBeInstanceOf(VbtcNodeUnreachableError);
+    expect(touchedFrostOrType28(calls)).toBe(false);
+  });
+
+  test('a first read refused with a 4xx is not retried', async () => {
+    const { calls } = installFetch({
+      [PREPARE]: () => jsonResponse({ success: false, message: 'owner_address required' }, 400),
+    });
+    await expect(client.completeWithdrawal(completeParams())).rejects.toThrow(/status: 400/);
+    expect(calls).toHaveLength(1);
+  });
+
   test('stops on a real answer that the vault is not watched', async () => {
     installFetch({ [PREPARE]: sequence(notMinedYet, frostPreparation) });
     await expect(client.completeWithdrawal(completeParams())).rejects.toThrow(/now answers that it is not/);

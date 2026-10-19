@@ -157,6 +157,11 @@ export interface VbtcWithdrawalResult {
   paid: boolean;
   /** The withdrawal's state when its vault is one the chain watches, else null. */
   watched: VbtcWatchedWithdrawal | null;
+  /**
+   * Set on a pending watched result when reads were still failing at the
+   * deadline: why the last one failed. `watched` is then the last state read.
+   */
+  lastError?: string;
 }
 
 /** One Bitcoin transaction the chain has fixed for a watched withdrawal. */

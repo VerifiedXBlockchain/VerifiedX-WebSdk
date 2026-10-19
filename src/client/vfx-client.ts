@@ -71,6 +71,7 @@ import {
   isValidVfxDomain,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
+import { VfxApiError } from './base-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
@@ -996,11 +997,25 @@ export class VfxClient {
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
 
-    const answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
-      sc_identifier: params.scIdentifier,
-      withdrawal_request_hash: withdrawalRequestHash,
-      owner_address: params.requestorAddress,
-    });
+    // The first read decides between a watched vault and FROST, so a read
+    // that got no answer (a dropped request, a 5xx, Spyglass unable to reach
+    // the node) is asked again until the deadline rather than taken as either.
+    const deadline = Date.now() + timeoutMs;
+    let answer: Record<string, unknown> | undefined;
+    for (;;) {
+      try {
+        answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
+          sc_identifier: params.scIdentifier,
+          withdrawal_request_hash: withdrawalRequestHash,
+          owner_address: params.requestorAddress,
+        });
+        if (!isUnreachableAnswer(answer)) break;
+        if (Date.now() + pollIntervalMs > deadline) throw new VbtcNodeUnreachableError(JSON.stringify(answer));
+      } catch (error) {
+        if (!isTransientReadError(error) || Date.now() + pollIntervalMs > deadline) throw error;
+      }
+      await sleep(pollIntervalMs);
+    }
     const watched = parseWatchedWithdrawal(answer);
     if (watched) {
       return this.watchedWithdrawalResult({
@@ -1010,7 +1025,7 @@ export class VfxClient {
         first: watched,
         onProgress,
         pollIntervalMs,
-        timeoutMs,
+        deadline,
       });
     }
     const frostPrep = answer as unknown as WithdrawCompletePrepareResponse;
@@ -1860,9 +1875,9 @@ export class VfxClient {
     first: VbtcWatchedWithdrawal;
     onProgress: (event: VbtcProgressEvent) => void;
     pollIntervalMs: number;
-    timeoutMs: number;
+    deadline: number;
   }): Promise<VbtcWithdrawalResult> {
-    const deadline = Date.now() + opts.timeoutMs;
+    const deadline = opts.deadline;
     let withdrawal = opts.first;
     let lastError: unknown = null;
     for (;;) {
@@ -1900,6 +1915,7 @@ export class VfxClient {
         try {
           next = await this.getWithdrawalPin(opts);
         } catch (error) {
+          if (!isTransientReadError(error)) throw error;
           lastError = error;
           if (Date.now() + opts.pollIntervalMs > deadline) {
             return {
@@ -1908,6 +1924,7 @@ export class VfxClient {
               completionTransactionHash: '',
               paid: false,
               watched: withdrawal,
+              lastError: error instanceof Error ? error.message : String(error),
             };
           }
         }
@@ -2041,6 +2058,17 @@ export class VfxClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A read that got no answer: a dropped or timed-out request, a 5xx, or
+ * Spyglass saying it could not reach the node. Worth asking again; a 4xx or a
+ * malformed answer is not.
+ */
+function isTransientReadError(error: unknown): boolean {
+  if (error instanceof VbtcNodeUnreachableError) return true;
+  if (error instanceof VfxApiError) return error.status === undefined || error.status >= 500;
+  return error instanceof TypeError || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
 }
 
 /** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */

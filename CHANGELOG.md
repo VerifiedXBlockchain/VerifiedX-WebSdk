@@ -7,13 +7,16 @@
 - **Recipients are checked before building.** A recipient address of the other
   network (or a Bitcoin-style address) throws before any request, since a 9.0
   node refuses it. A `.vfx`/`.rbx` recipient is resolved to its address first,
-  and the send is refused when that address's own record names another domain.
+  and the send is refused when that address's own record names another domain
+  (a lookup that disagrees with the record). Both are read from the same
+  Spyglass index, so this does not catch an index that lags the chain.
 - **Withdrawals from a vault the chain watches** run no signing ceremony and
   send no completion transaction. `completeWithdrawal` / `requestWithdrawal`
   resolve with `paid: false` and the withdrawal's state while Bitcoin is paying
   it, `paid: true` once paid, or throw `VbtcWithdrawalClosedError` if it closed
   unpaid. Results gain `paid` and `watched`. For other vaults these are always
-  `true` and `null`, and nothing else changes.
+  `true` and `null`, and nothing else changes. When reads were still failing
+  at the deadline, a pending result also carries `lastError`.
 - **A refused transaction logs the node's reason** (`Invalid Transaction: <reason>`).
   The `null` return of the existing send methods is unchanged.
 
@@ -27,7 +30,8 @@
   `throwOnRefusal`).
 - `transferBtcDomain` accepts `btcToMessage`/`btcToSignature`;
   `signBtcNameTransferAcceptance`, `btcNameAcceptanceMessage`,
-  `buildBtcNameAcceptanceCode`, `parseBtcNameAcceptanceCode`.
+  `buildBtcNameAcceptanceCode`, `parseBtcNameAcceptanceCode` (which refuses a
+  name without `.btc`, as Core does).
 
 ## 3.6.0 (2026-10-08)
 
