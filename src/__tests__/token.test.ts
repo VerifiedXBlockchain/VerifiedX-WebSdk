@@ -26,6 +26,8 @@ const keypair = {
 const OWNER = 'xOwner000000000000000000000000000';
 const RECIPIENT = 'xRecipient00000000000000000000000';
 const SC = 'abc123:1700000000';
+// System.Decimal.MaxValue as the nearest number, which is just above it.
+const DECIMAL_MAX = 7.922816251426434e28;
 
 const fakeToken = {
   sc_identifier: SC,
@@ -177,7 +179,6 @@ describe('token Data builders', () => {
 
 describe('tokenMintRefusal', () => {
   const token = { ...fakeToken, decimal_places: 8, circulating_supply: 100, is_paused: false };
-  const MAX = 79228162514264337593543950335;
 
   test('passes a mint within the decimals and the largest amount', () => {
     expect(tokenMintRefusal(token, 1, 0)).toBeNull();
@@ -199,9 +200,9 @@ describe('tokenMintRefusal', () => {
   });
 
   test('refuses a supply or holder balance pushed past System.Decimal.MaxValue', () => {
-    expect(tokenMintRefusal({ ...token, circulating_supply: MAX }, 1, 0)).toMatch(/supply/);
-    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, 1, MAX)).toMatch(/balance/);
-    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, MAX, 0)).toMatch(/supply/);
+    expect(tokenMintRefusal({ ...token, circulating_supply: DECIMAL_MAX }, 1, 0)).toMatch(/supply/);
+    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, 1, DECIMAL_MAX)).toMatch(/balance/);
+    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, DECIMAL_MAX, 0)).toMatch(/supply/);
     // The bound is exact, not float: reaching MaxValue passes, one past it does not
     const supply = 7.9228162514264e28;
     expect(tokenMintRefusal({ ...token, circulating_supply: supply }, 337593543950335, 0)).toBeNull();
@@ -334,7 +335,7 @@ describe('VfxClient token transactions', () => {
   test.each([
     ['a paused contract', { is_paused: true }, 5, /paused/],
     ['more decimals than the token has', { decimal_places: 2 }, 1.005, /at most 2 decimal places/],
-    ['a supply overflow', { circulating_supply: 79228162514264337593543950335 }, 1, /supply past the largest amount/],
+    ['a supply overflow', { circulating_supply: DECIMAL_MAX }, 1, /supply past the largest amount/],
   ])('mintToken refuses %s before building (Core TokenMintRulesHeight)', async (_label, tokenFields, amount, message) => {
     const { calls } = installTokenPipeline({
       [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({ token: { ...fakeToken, ...tokenFields }, holders: {} }),
@@ -349,7 +350,7 @@ describe('VfxClient token transactions', () => {
     installTokenPipeline({
       [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({
         token: { ...fakeToken, circulating_supply: 0 },
-        holders: { [OWNER]: 0, [keypair.address]: 79228162514264337593543950335 },
+        holders: { [OWNER]: 0, [keypair.address]: DECIMAL_MAX },
       }),
     });
     await expect(client.mintToken(keypair, { scIdentifier: SC, amount: 1 })).rejects.toThrow(/balance past/);
