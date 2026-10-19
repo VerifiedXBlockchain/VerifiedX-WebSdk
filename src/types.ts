@@ -148,6 +148,51 @@ export interface VbtcWithdrawalResult {
   withdrawalRequestHash: string;
 }
 
+/** One Bitcoin transaction the chain has fixed for a watched withdrawal. */
+export interface VbtcWatchedWithdrawalTransaction {
+  txid: string;
+  kind: 'Payment' | 'Release';
+  feeRate: number | null;
+  feeSats: number | null;
+  superseded: boolean;
+  dead: boolean;
+  confirmed: boolean;
+}
+
+/**
+ * Where a withdrawal from a vault the chain watches (Core 9.0 Bitcoin
+ * attestation) stands. Nobody completes such a withdrawal by hand: the chain
+ * pins its Bitcoin transaction and the vault's signers send it.
+ */
+export interface VbtcWatchedWithdrawal {
+  /** `Completed`, `Awaiting_BTC_Confirmation`, `Awaiting_BTC_Transaction`, `Closed` or `Unknown`. */
+  status: string;
+  /** Bitcoin has paid it. */
+  paid: boolean;
+  /** The node has not mined the request yet (or the hash is wrong); ask again shortly. */
+  notMinedYet: boolean;
+  /** Nothing more will happen to it: paid, released or otherwise closed. */
+  closed: boolean;
+  message: string | null;
+  /** The chain's state: `Waiting`, `Pinned`, `Settled`, `Released`, or another closed state. */
+  state: string | null;
+  summary: string | null;
+  /** The fee rate (sat/vB) the newest live Bitcoin transaction pays. */
+  feeRate: number | null;
+  /** The lowest rate a fee raise or release may name: the node refuses one not above `feeRate`. */
+  minimumNextFeeRate: number;
+  canRaiseFee: boolean;
+  canRelease: boolean;
+  releasing: boolean;
+  canCancel: boolean;
+  /** The pinned Bitcoin transaction while it is not yet paid. */
+  pinnedBtcTransactionHash: string | null;
+  /** The Bitcoin transaction that paid it. */
+  btcTransactionHash: string | null;
+  completionTransactionHash: string | null;
+  transactions: VbtcWatchedWithdrawalTransaction[];
+}
+
 export interface VbtcCancelResult {
   transactionHash: string;
 }
@@ -163,7 +208,8 @@ export type VbtcProgressPhase =
   | 'frost_polling'
   | 'frost_complete'
   | 'btc_broadcast'
-  | 'completion_recorded';
+  | 'completion_recorded'
+  | 'watched_polling';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;

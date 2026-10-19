@@ -16,6 +16,11 @@ import KeypairService from '../services/keypair-service';
 import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
+  assertWatchedFeeRate,
+  parseWatchedWithdrawal,
+  watchedWithdrawalFeeBumpData,
+} from '../services/watched-withdrawal';
+import {
   TokenTxData,
   tokenBanAddressData,
   tokenBurnData,
@@ -46,6 +51,7 @@ import {
   VbtcTransfer,
   VbtcTransferResult,
   VbtcV2Token,
+  VbtcWatchedWithdrawal,
   VbtcWithdrawalRequest,
   VbtcWithdrawalResult,
   VfxAddress,
@@ -69,6 +75,7 @@ import {
   PreparedTransactionResponse,
   SentTransactionResponse,
   VbtcV2ApiClient,
+  WithdrawCompletePrepareResponse,
 } from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
@@ -185,6 +192,53 @@ export class VbtcWithdrawalUnrecordedError extends Error {
     this.signedBtcTxHex = signedBtcTxHex;
     this.cause = cause;
     Object.setPrototypeOf(this, VbtcWithdrawalUnrecordedError.prototype);
+  }
+}
+
+/**
+ * Thrown by completeWithdrawal (and requestWithdrawal) when the vault is one
+ * the chain watches and the withdrawal is not paid within `timeoutMs`. Nothing
+ * is wrong and nothing needs to be done: the chain pins its Bitcoin
+ * transaction and the vault's signers send it, which takes Bitcoin
+ * confirmations. Follow it with getWithdrawalPin, or call completeWithdrawal
+ * again to keep waiting (on a watched vault it only polls). `withdrawal` is
+ * the last state read.
+ */
+export class VbtcWithdrawalPendingError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly withdrawal: VbtcWatchedWithdrawal;
+
+  constructor(withdrawalRequestHash: string, withdrawal: VbtcWatchedWithdrawal, timeoutMs: number) {
+    super(
+      `Withdrawal request ${withdrawalRequestHash} is in the chain's hands (${withdrawal.status}) and not paid yet ` +
+        `after ${timeoutMs}ms. Nothing needs to be done: the vault's signers send its Bitcoin transaction. ` +
+        `Follow it with getWithdrawalPin, or call completeWithdrawal again to keep waiting.`,
+    );
+    this.name = 'VbtcWithdrawalPendingError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.withdrawal = withdrawal;
+    Object.setPrototypeOf(this, VbtcWithdrawalPendingError.prototype);
+  }
+}
+
+/**
+ * Thrown when a withdrawal from a watched vault closed without being paid: its
+ * requester released it, or it expired or could not be paid. The vBTC was
+ * returned to the requester (less the release's Bitcoin fee, for a release).
+ */
+export class VbtcWithdrawalClosedError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly withdrawal: VbtcWatchedWithdrawal;
+
+  constructor(withdrawalRequestHash: string, withdrawal: VbtcWatchedWithdrawal) {
+    super(
+      `Withdrawal request ${withdrawalRequestHash} was closed without being paid (${withdrawal.state}): ` +
+        `${withdrawal.summary ?? withdrawal.message ?? 'no detail'}`,
+    );
+    this.name = 'VbtcWithdrawalClosedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.withdrawal = withdrawal;
+    Object.setPrototypeOf(this, VbtcWithdrawalClosedError.prototype);
   }
 }
 
@@ -855,6 +909,9 @@ export class VfxClient {
       // "incomplete" would tell the caller to resume via completeWithdrawal,
       // which is the one thing that can pay the destination twice.
       if (error instanceof VbtcWithdrawalUnrecordedError) throw error;
+      // A watched vault's withdrawal is already in the chain's hands; these
+      // say where it stands, and wrapping them would hide that.
+      if (error instanceof VbtcWithdrawalPendingError || error instanceof VbtcWithdrawalClosedError) throw error;
       throw new VbtcWithdrawalIncompleteError(withdrawalRequestHash, error);
     }
   };
@@ -866,6 +923,12 @@ export class VfxClient {
    * Safe to call for a request whose first completion attempt died at any
    * point before the BTC broadcast — FROST sessions are per-call and the
    * node rejects double-completion of a completed request.
+   *
+   * On a vault the chain watches (Core 9.0 Bitcoin attestation) there is no
+   * ceremony and no completion transaction: the chain pays the withdrawal.
+   * This then polls until Bitcoin has paid it and returns the paying txid,
+   * throws VbtcWithdrawalClosedError if it closed unpaid, or
+   * VbtcWithdrawalPendingError when `timeoutMs` passes first.
    */
   public completeWithdrawal = async (params: {
     scIdentifier: string;
@@ -892,11 +955,24 @@ export class VfxClient {
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
 
-    const frostPrep = await this.vbtcV2ApiClient.prepareWithdrawComplete({
+    const answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
       sc_identifier: params.scIdentifier,
       withdrawal_request_hash: withdrawalRequestHash,
       owner_address: params.requestorAddress,
     });
+    const watched = parseWatchedWithdrawal(answer);
+    if (watched) {
+      return this.awaitWatchedWithdrawal({
+        scIdentifier: params.scIdentifier,
+        requestorAddress: params.requestorAddress,
+        withdrawalRequestHash,
+        first: watched,
+        onProgress,
+        pollIntervalMs,
+        timeoutMs,
+      });
+    }
+    const frostPrep = answer as unknown as WithdrawCompletePrepareResponse;
     if (!frostPrep?.success) {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
@@ -1056,6 +1132,64 @@ export class VfxClient {
     } catch (error) {
       throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
     }
+  };
+
+  /**
+   * Where a withdrawal from a vault the chain watches stands: its pinned
+   * Bitcoin transaction and fee rate, whether it is paid, and whether its fee
+   * can be raised (bumpWithdrawalFee) or it can be released
+   * (releaseWithdrawal). Null when the vault is not watched; its withdrawal is
+   * completed with completeWithdrawal as before.
+   */
+  public getWithdrawalPin = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+  }): Promise<VbtcWatchedWithdrawal | null> => {
+    const answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
+      sc_identifier: params.scIdentifier,
+      withdrawal_request_hash: params.withdrawalRequestHash,
+      owner_address: params.requestorAddress,
+    });
+    return parseWatchedWithdrawal(answer);
+  };
+
+  /**
+   * Raise the Bitcoin fee of a pinned withdrawal on a watched vault that is not
+   * confirming. One Type 44 transaction from the requester to itself; the
+   * chain then pins a replacement that spends the same coins, and the higher
+   * fee comes out of the withdrawal's amount. `feeRate` (sat/vB) must be above
+   * the rate the pinned transaction pays (`minimumNextFeeRate` from
+   * getWithdrawalPin); the node refuses anything else. Resolves to the
+   * transaction hash, or null if it never reached the node.
+   */
+  public bumpWithdrawalFee = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    feeRate: number;
+    /** Local key of the requester. Pass either this or `signer`. */
+    privateKey?: string;
+    signer?: Signer;
+  }): Promise<string | null> => {
+    return this.sendWatchedFeeBump(params, false, 'bumpWithdrawalFee');
+  };
+
+  /**
+   * Give up a pinned withdrawal on a watched vault: the chain pins a Bitcoin
+   * transaction that returns its coins to the vault, and once Bitcoin confirms
+   * it the vBTC is returned to the requester, less that transaction's fee. If
+   * one of its payments confirms first it is paid instead. `feeRate` follows
+   * the same rule as bumpWithdrawalFee, and the node also refuses a release
+   * whose fee does not beat the pinned transaction's by its relay cost.
+   */
+  public releaseWithdrawal = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    feeRate: number;
+    privateKey?: string;
+    signer?: Signer;
+  }): Promise<string | null> => {
+    return this.sendWatchedFeeBump(params, true, 'releaseWithdrawal');
   };
 
   /**
@@ -1600,6 +1734,85 @@ export class VfxClient {
   private assertSent(response: SentTransactionResponse | undefined, label: string): void {
     if (!response?.success || !response.Hash) {
       throw new Error(`${label} failed: ${JSON.stringify(response)}`);
+    }
+  }
+
+  private async sendWatchedFeeBump(
+    params: {
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      feeRate: number;
+      privateKey?: string;
+      signer?: Signer;
+    },
+    release: boolean,
+    label: string,
+  ): Promise<string | null> {
+    const signer = this.signerFor(params, label);
+    if (!params.scIdentifier || !params.withdrawalRequestHash) {
+      throw new Error(`${label} requires scIdentifier and withdrawalRequestHash`);
+    }
+    assertWatchedFeeRate(params.feeRate, label);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.VbtcV2CoinPin,
+      data: watchedWithdrawalFeeBumpData({
+        scIdentifier: params.scIdentifier,
+        withdrawalRequestHash: params.withdrawalRequestHash,
+        feeRate: params.feeRate,
+        release,
+      }),
+      apiOptions: this.apiOptions,
+    });
+    return txBuilder.process(this.dryRun);
+  }
+
+  /**
+   * Wait for the chain to pay a watched vault's withdrawal. Polls the node's
+   * completion answer, which on such a vault reports the state and records
+   * nothing; a request the node has not mined yet is asked again.
+   */
+  private async awaitWatchedWithdrawal(opts: {
+    scIdentifier: string;
+    requestorAddress: string;
+    withdrawalRequestHash: string;
+    first: VbtcWatchedWithdrawal;
+    onProgress: (event: VbtcProgressEvent) => void;
+    pollIntervalMs: number;
+    timeoutMs: number;
+  }): Promise<VbtcWithdrawalResult> {
+    const deadline = Date.now() + opts.timeoutMs;
+    let withdrawal = opts.first;
+    for (;;) {
+      opts.onProgress({
+        phase: 'watched_polling',
+        message: withdrawal.summary ?? withdrawal.message ?? withdrawal.status,
+        data: withdrawal,
+      });
+      if (withdrawal.paid && withdrawal.btcTransactionHash) {
+        return {
+          withdrawalRequestHash: opts.withdrawalRequestHash,
+          btcTransactionHash: withdrawal.btcTransactionHash,
+          completionTransactionHash: withdrawal.completionTransactionHash ?? '',
+        };
+      }
+      if (withdrawal.closed && !withdrawal.paid) {
+        throw new VbtcWithdrawalClosedError(opts.withdrawalRequestHash, withdrawal);
+      }
+      if (Date.now() + opts.pollIntervalMs > deadline) {
+        throw new VbtcWithdrawalPendingError(opts.withdrawalRequestHash, withdrawal, opts.timeoutMs);
+      }
+      await sleep(opts.pollIntervalMs);
+      const next = await this.getWithdrawalPin(opts);
+      if (!next) {
+        throw new Error(
+          `completeWithdrawal: withdrawal request ${opts.withdrawalRequestHash} was on a watched vault but the node no longer answers as one`,
+        );
+      }
+      withdrawal = next;
     }
   }
 

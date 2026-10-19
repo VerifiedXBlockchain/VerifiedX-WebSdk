@@ -455,6 +455,35 @@ for it. When the broadcast outcome itself is unknown the error carries
 `signedBtcTxHex`: look up `btcTransactionHash`, re-broadcast that same
 transaction if it is absent, then call `recordWithdrawalCompletion`.
 
+On a vault the chain watches (VerifiedX 9.0 Bitcoin attestation), the
+requester sends the request and nothing else. The chain fixes ("pins") the
+Bitcoin transaction, and the vault's signers sign and send it. There is no
+signing ceremony, and the network refuses a completion transaction.
+`completeWithdrawal` (and `requestWithdrawal` after the request) detects such
+a vault and waits for Bitcoin to pay it, which can take longer than
+`timeoutMs`:
+
+- Paid: resolves with the paying `btcTransactionHash`.
+- `VbtcWithdrawalPendingError`: not paid yet. Nothing needs to be done.
+  `error.withdrawal` is the last state; follow it with `getWithdrawalPin`, or
+  call `completeWithdrawal` again, which only waits.
+- `VbtcWithdrawalClosedError`: closed unpaid (released or expired). The vBTC
+  went back to the requester.
+
+While the withdrawal is pinned and not confirming, its requester can raise the
+fee with `bumpWithdrawalFee` or give it up with `releaseWithdrawal`. Each is a
+single transaction, with a `feeRate` above the pinned rate
+(`withdrawal.minimumNextFeeRate`) and at most 5000 sat/vB.
+
+```typescript
+const pin = await vfxClient.getWithdrawalPin({ scIdentifier, withdrawalRequestHash, requestorAddress });
+if (pin === null) {
+  // Not a watched vault: completeWithdrawal runs the signing ceremony as before.
+} else if (pin.canRaiseFee) {
+  await vfxClient.bumpWithdrawalFee({ scIdentifier, withdrawalRequestHash, feeRate: pin.minimumNextFeeRate + 4, privateKey });
+}
+```
+
 Bitcoin sends follow the same rule. `sendBtc` and `broadcastTransaction` throw
 `BtcBroadcastUnknownError` when the broadcast request went out but no definite
 answer came back (network error, timeout, error status other than a refusal

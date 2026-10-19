@@ -6,7 +6,13 @@ export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
 
 // Export API error type + media client
 export { VfxApiError } from './client/base-api-client';
-export { VbtcWithdrawalIncompleteError, VbtcWithdrawalUnrecordedError } from './client/vfx-client';
+export {
+  VbtcWithdrawalIncompleteError,
+  VbtcWithdrawalUnrecordedError,
+  VbtcWithdrawalPendingError,
+  VbtcWithdrawalClosedError,
+} from './client/vfx-client';
+export { parseWatchedWithdrawal, VBTC_WATCHED_MAX_FEE_RATE } from './services/watched-withdrawal';
 export { TransactionDispatchError } from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
@@ -27,6 +33,8 @@ export type {
   VbtcTransferResult,
   VbtcMultiTransferResult,
   VbtcWithdrawalResult,
+  VbtcWatchedWithdrawal,
+  VbtcWatchedWithdrawalTransaction,
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,

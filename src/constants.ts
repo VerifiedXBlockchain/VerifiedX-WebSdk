@@ -17,6 +17,8 @@ export enum TxType {
   VbtcV2WithdrawalRequest = 27,
   VbtcV2WithdrawalComplete = 28,
   VbtcV2WithdrawalCancel = 29,
+  /** Raises the Bitcoin fee of, or releases, a pinned withdrawal on a watched vault. */
+  VbtcV2CoinPin = 44,
 }
 
 export enum Network {
