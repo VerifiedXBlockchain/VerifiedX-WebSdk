@@ -58,6 +58,12 @@ export interface VbtcV2Token {
   total_sent: number;
   tx_count: number;
   is_pending_withdrawal: boolean;
+  /**
+   * The chain watches this vault (Core 9.0 Bitcoin attestation): its
+   * withdrawals are paid by its signers, with no FROST completion. Absent
+   * from Spyglass deployments older than 9.0.
+   */
+  is_watched?: boolean;
   addresses: Record<string, number>;
   /**
    * `addresses` minus each address's open withdrawal requests — what can
@@ -207,6 +213,58 @@ export interface VbtcWatchedWithdrawal {
   btcTransactionHash: string | null;
   completionTransactionHash: string | null;
   transactions: VbtcWatchedWithdrawalTransaction[];
+}
+
+/** Where one share of a (multi-vault) withdrawal stands. */
+export type VbtcWithdrawalShareOutcome =
+  /** Bitcoin paid it. */
+  | 'paid'
+  /** Its requester gave it up; the vBTC came back less that transaction's fee. */
+  | 'released'
+  /** Cancelled while Waiting; the vBTC came back. */
+  | 'cancelled'
+  /** Closed unpaid another way (expired, void); the vBTC came back. */
+  | 'closed'
+  /** Pinned: the vault's signers are paying it. Its fee can be raised, or it can be released. */
+  | 'being_paid'
+  /** The vault's free coins do not cover it yet; it pins when they do. It can be cancelled. */
+  | 'waiting'
+  /** The node has not mined the request yet. */
+  | 'not_mined'
+  /** A vault the chain does not watch: complete this share with completeWithdrawal (FROST). */
+  | 'legacy';
+
+export interface VbtcWithdrawalShare {
+  scIdentifier: string;
+  amount: number;
+  outcome: VbtcWithdrawalShareOutcome;
+  /** The share's state from the node; null for a vault the chain does not watch. */
+  watched: VbtcWatchedWithdrawal | null;
+  /** The Bitcoin transaction the chain pinned to pay (or release) it, while open. */
+  pinnedBtcTransactionHash: string | null;
+  /** The Bitcoin transaction that paid it. */
+  btcTransactionHash: string | null;
+}
+
+export interface VbtcMultiWithdrawalResult {
+  /** The request's hash; every share is filed under it. */
+  withdrawalRequestHash: string;
+  /** One per vault, as signed. */
+  inputs: Array<{ scIdentifier: string; amount: number }>;
+  totalAmount: number;
+  btcAddress: string;
+  feeRate: number;
+  /** The VFX fee the request paid. */
+  fee: number;
+}
+
+export interface VbtcWithdrawalSharesResult {
+  withdrawalRequestHash: string;
+  shares: VbtcWithdrawalShare[];
+  /** Every share is final: paid, released, cancelled, closed, or legacy (needs FROST completion). */
+  settled: boolean;
+  /** Set when reads were still failing at the deadline: why the last one failed. */
+  lastError?: string;
 }
 
 export interface VbtcCancelResult {

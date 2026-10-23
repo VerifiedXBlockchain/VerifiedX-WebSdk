@@ -13,7 +13,11 @@ import {
   TxType,
 } from '../constants';
 import KeypairService from '../services/keypair-service';
-import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
+import {
+  PreSignCheckError,
+  RawTransactionService,
+  TransactionDispatchError,
+} from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
   btcNameAcceptanceMessage,
@@ -43,6 +47,16 @@ import {
 import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
+  VBTC_MULTI_WITHDRAWAL_DEFAULT_MAX_FEE,
+  VBTC_MULTI_WITHDRAWAL_FUNCTION,
+  VBTC_MULTI_WITHDRAWAL_MAX_INPUTS,
+  assertBtcAddressOnNetwork,
+  isFinalShareOutcome,
+  shareOutcome,
+  vbtcMultiWithdrawalData,
+  withdrawalFeeFloorError,
+} from '../services/vbtc-multi-withdrawal';
+import {
   CreateVbtcResult,
   DeployTokenParams,
   DeployTokenResult,
@@ -55,6 +69,9 @@ import {
   Transaction,
   VbtcCancelResult,
   VbtcMultiTransferResult,
+  VbtcMultiWithdrawalResult,
+  VbtcWithdrawalShare,
+  VbtcWithdrawalSharesResult,
   VbtcProgressEvent,
   VbtcTransfer,
   VbtcTransferResult,
@@ -1325,6 +1342,216 @@ export class VfxClient {
     };
   };
 
+  /**
+   * Withdraw `totalAmount` vBTC to one Bitcoin address from several vaults at
+   * once: one Type 27 transaction, one signature. The chain opens one share
+   * per vault under the request's hash and each share is paid by its own
+   * Bitcoin transaction, so `feeRate` is paid once per share, out of that
+   * share. Follow the shares with getWithdrawalShares / followWithdrawalShares;
+   * raise a share's fee or release it with bumpWithdrawalFee /
+   * releaseWithdrawal, or cancel a Waiting share with cancelWithdrawal, each
+   * naming the share's vault and the request's hash.
+   *
+   * The vaults and amounts are `inputs` when given; otherwise they are chosen
+   * from the requester's spendable balances on Spyglass (largest first, at
+   * most 10 vaults), limited to `vaults` when given. When one vault covers
+   * the total, the ordinary single-vault request is sent instead, as the node
+   * does. Before signing, the SDK checks the Bitcoin address is on this
+   * network, every share clears the fee floor, and the transaction it is
+   * about to sign is the requester's own Type 27 carrying exactly these
+   * shares and a VFX fee no higher than `maxFee`. This sends only the
+   * request; it does not wait for payment.
+   */
+  public requestWithdrawalMulti = async (params: {
+    btcAddress: string;
+    totalAmount: number;
+    /** Bitcoin fee rate (sat/vB), charged once per share. */
+    feeRate: number;
+    /** Local key of the requester. Pass either this or `signer`. */
+    privateKey?: string;
+    signer?: Signer;
+    /** The exact vaults and amounts; skips the balance lookup. Must sum to `totalAmount`. */
+    inputs?: VbtcAllocationInput[];
+    /** Allocate only from these vaults (for example the ones the chain watches). */
+    vaults?: string[];
+    /** Refuse to sign when the VFX fee is above this. Default 0.01. */
+    maxFee?: number;
+  }): Promise<VbtcMultiWithdrawalResult> => {
+    const label = 'requestWithdrawalMulti';
+    this.assertNotDryRun(label);
+    const signer = this.signerFor(params, label);
+    assertNotReserveSender(signer, label);
+    if (!(params.totalAmount > 0)) {
+      throw new Error(`${label} requires a positive totalAmount`);
+    }
+    if (!Number.isInteger(params.feeRate) || params.feeRate <= 0) {
+      throw new Error(`${label}: feeRate must be a whole number of sat/vB greater than zero`);
+    }
+    assertBtcAddressOnNetwork(params.btcAddress, this.network, label);
+    const maxFee = params.maxFee ?? VBTC_MULTI_WITHDRAWAL_DEFAULT_MAX_FEE;
+
+    let inputs = params.inputs;
+    if (!inputs) {
+      const tokens = await this.vbtcV2ApiClient.getTokensForAddress(signer.address);
+      const allowed = params.vaults ? new Set(params.vaults) : null;
+      const balances: Record<string, number> = {};
+      for (const token of tokens) {
+        if (allowed && !allowed.has(token.sc_identifier)) continue;
+        balances[token.sc_identifier] =
+          token.available_balances?.[signer.address] ?? token.addresses?.[signer.address] ?? 0;
+      }
+      const allocation = allocateVbtcInputs(balances, params.totalAmount, VBTC_MULTI_WITHDRAWAL_MAX_INPUTS);
+      if (allocation.failure === 'insufficientBalance') {
+        throw new Error(
+          `${label}: insufficient vBTC: ${allocation.available} available across ${
+            Object.keys(balances).length
+          } vaults, ${params.totalAmount} requested`,
+        );
+      }
+      if (allocation.failure === 'tooManyInputs') {
+        throw new Error(
+          `${label}: withdrawing ${params.totalAmount} would need more than ${VBTC_MULTI_WITHDRAWAL_MAX_INPUTS} vaults; withdraw less`,
+        );
+      }
+      inputs = allocation.inputs;
+    }
+    if (inputs.length === 0) {
+      throw new Error(`${label}: no vault to withdraw from`);
+    }
+
+    if (inputs.length === 1) {
+      return this.requestSingleShare(signer, params, inputs[0], maxFee, label);
+    }
+
+    // Throws for anything the node would refuse (cap, duplicates, decimals,
+    // fee floor, total drift) before anything is built.
+    const data = vbtcMultiWithdrawalData({
+      requestorAddress: signer.address,
+      btcAddress: params.btcAddress,
+      totalAmount: params.totalAmount,
+      feeRate: params.feeRate,
+      inputs,
+    });
+    const expectedInputs = JSON.stringify(data.Inputs);
+    let fee = 0;
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.VbtcV2WithdrawalRequest,
+      data,
+      apiOptions: this.apiOptions,
+      throwOnRefusal: true,
+      beforeSign: (tx) => {
+        const txData = tx.Data as Record<string, unknown>;
+        const problems: string[] = [];
+        if (tx.FromAddress !== signer.address || tx.ToAddress !== signer.address)
+          problems.push('not to and from the requester');
+        if (tx.TransactionType !== TxType.VbtcV2WithdrawalRequest) problems.push(`type ${tx.TransactionType}`);
+        if (tx.Amount !== 0) problems.push(`amount ${tx.Amount}`);
+        if (txData?.Function !== VBTC_MULTI_WITHDRAWAL_FUNCTION) problems.push('not a multi-vault request');
+        if (txData?.BTCAddress !== params.btcAddress) problems.push(`destination ${String(txData?.BTCAddress)}`);
+        if (JSON.stringify(txData?.Inputs) !== expectedInputs) problems.push('shares differ from the allocation');
+        const txFee = typeof tx.Fee === 'number' ? tx.Fee : NaN;
+        if (!(txFee > 0) || txFee > maxFee) problems.push(`fee ${tx.Fee} VFX (limit ${maxFee})`);
+        if (problems.length > 0) {
+          throw new PreSignCheckError(`${label}: refused to sign: ${problems.join('; ')}`);
+        }
+        fee = txFee;
+      },
+    });
+    const withdrawalRequestHash = await txBuilder.process(false);
+    if (!withdrawalRequestHash) {
+      throw new Error(`${label}: the request was not sent (it failed before reaching the node)`);
+    }
+    return {
+      withdrawalRequestHash,
+      inputs,
+      totalAmount: data.TotalAmount as number,
+      btcAddress: params.btcAddress,
+      feeRate: params.feeRate,
+      fee,
+    };
+  };
+
+  /**
+   * Where each share of a withdrawal request stands, read from the node (the
+   * completion route answers per vault). `shares` are the vaults and amounts
+   * the request opened, as requestWithdrawalMulti returned them (`inputs`);
+   * a single-vault request has one. Throws when Spyglass cannot reach the node.
+   */
+  public getWithdrawalShares = async (params: {
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+    shares: VbtcAllocationInput[];
+  }): Promise<VbtcWithdrawalShare[]> => {
+    if (!params.withdrawalRequestHash || params.shares.length === 0) {
+      throw new Error('getWithdrawalShares requires withdrawalRequestHash and at least one share');
+    }
+    return Promise.all(
+      params.shares.map(async (share) => {
+        const watched = await this.getWithdrawalPin({
+          scIdentifier: share.scIdentifier,
+          withdrawalRequestHash: params.withdrawalRequestHash,
+          requestorAddress: params.requestorAddress,
+        });
+        return {
+          scIdentifier: share.scIdentifier,
+          amount: share.amount,
+          outcome: shareOutcome(watched),
+          watched,
+          pinnedBtcTransactionHash: watched?.pinnedBtcTransactionHash ?? null,
+          btcTransactionHash: watched?.btcTransactionHash ?? null,
+        };
+      }),
+    );
+  };
+
+  /**
+   * Read the shares until every one is final (paid, released, cancelled,
+   * closed, or on a vault the chain does not watch) or `timeoutMs` passes,
+   * reporting each read through `onProgress`. Reads that get no answer are
+   * asked again until the deadline. Paying takes Bitcoin confirmations, so a
+   * short timeout usually returns `settled: false` with the shares as they
+   * stand; call it again later.
+   */
+  public followWithdrawalShares = async (params: {
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+    shares: VbtcAllocationInput[];
+    onProgress?: (shares: VbtcWithdrawalShare[]) => void;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }): Promise<VbtcWithdrawalSharesResult> => {
+    const pollIntervalMs = params.pollIntervalMs ?? 15_000;
+    const deadline = Date.now() + (params.timeoutMs ?? 10 * 60 * 1000);
+    let shares: VbtcWithdrawalShare[] | null = null;
+    let lastError: string | undefined;
+    for (;;) {
+      try {
+        shares = await this.getWithdrawalShares(params);
+        lastError = undefined;
+        params.onProgress?.(shares);
+        if (shares.every((share) => isFinalShareOutcome(share.outcome))) {
+          return { withdrawalRequestHash: params.withdrawalRequestHash, shares, settled: true };
+        }
+      } catch (error) {
+        if (!isTransientReadError(error)) throw error;
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      if (Date.now() + pollIntervalMs > deadline) {
+        return {
+          withdrawalRequestHash: params.withdrawalRequestHash,
+          shares: shares ?? [],
+          settled: false,
+          ...(lastError ? { lastError } : {}),
+        };
+      }
+      await sleep(pollIntervalMs);
+    }
+  };
+
   public cancelWithdrawal = async (params: {
     scIdentifier: string;
     ownerAddress: string;
@@ -1813,6 +2040,44 @@ export class VfxClient {
     if (!response?.success || !response.Hash) {
       throw new Error(`${label} failed: ${JSON.stringify(response)}`);
     }
+  }
+
+  /**
+   * The single-vault shape of requestWithdrawalMulti, for an allocation one
+   * vault covers: the ordinary request through Spyglass, as the node's own
+   * builder does. Sends only the request.
+   */
+  private async requestSingleShare(
+    signer: ResolvedSigner,
+    params: { btcAddress: string; feeRate: number; privateKey?: string; signer?: Signer },
+    input: VbtcAllocationInput,
+    maxFee: number,
+    label: string,
+  ): Promise<VbtcMultiWithdrawalResult> {
+    const floor = withdrawalFeeFloorError(input.amount, params.feeRate, `Withdrawal from vault ${input.scIdentifier}`);
+    if (floor) throw new Error(`${label}: ${floor}`);
+    const prepared = await this.vbtcV2ApiClient.prepareWithdrawRequest({
+      sc_identifier: input.scIdentifier,
+      requestor_address: signer.address,
+      btc_address: params.btcAddress,
+      amount: input.amount,
+      fee_rate: params.feeRate,
+    });
+    this.assertPrepared(prepared, `${label}:prepare`);
+    const fee = typeof prepared.Fee === 'number' ? prepared.Fee : NaN;
+    if (!(fee > 0) || fee > maxFee) {
+      throw new PreSignCheckError(`${label}: refused to sign: fee ${prepared.Fee} VFX (limit ${maxFee})`);
+    }
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawRequest(body));
+    this.assertSent(sent, `${label}:send`);
+    return {
+      withdrawalRequestHash: sent.Hash,
+      inputs: [input],
+      totalAmount: input.amount,
+      btcAddress: params.btcAddress,
+      feeRate: params.feeRate,
+      fee,
+    };
   }
 
   private async sendWatchedFeeBump(
