@@ -3,7 +3,7 @@ import { ECPairFactory, ECPairInterface } from 'ecpair';
 
 import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
-import { BTC_TO_SATOSHI_MULTIPLIER } from './constants';
+import { BTC_TO_SATOSHI_MULTIPLIER, defaultApiBaseUrl } from './constants';
 import { BtcBroadcastUnknownError } from './errors';
 import type { IBroadcastCheck as BroadcastCheck } from './types';
 
@@ -45,9 +45,9 @@ export default class TransactionService {
 
   constructor(isTestnet: boolean, apiBaseUrl?: string) {
     this.network = isTestnet ? TESTNET : MAINNET;
-    // Overridable so a mempool.space outage or testnet generation change
-    // (testnet3 -> testnet4 -> ...) doesn't require an SDK release.
-    this.apiBaseUrl = apiBaseUrl ?? (isTestnet ? 'https://mempool.space/testnet4/api' : 'https://mempool.space/api');
+    // Overridable so an API outage or a testnet chain change doesn't
+    // require an SDK release.
+    this.apiBaseUrl = apiBaseUrl ?? defaultApiBaseUrl(isTestnet);
   }
 
   private _buildCreateResponse(success: boolean, result: string | null, error: string | null = null): CreateTxResponse {
