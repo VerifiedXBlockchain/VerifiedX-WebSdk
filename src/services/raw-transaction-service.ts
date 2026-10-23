@@ -29,6 +29,12 @@ export interface IRawTransactionServiceOptions {
    * refuses the transaction at verification, instead of resolving to null.
    */
   throwOnRefusal?: boolean;
+  /**
+   * Called with the transaction as it will be signed (fee and hash filled in),
+   * before the key signs it. Throw PreSignCheckError to refuse it; nothing is
+   * signed or sent, and process() rethrows that error.
+   */
+  beforeSign?: (tx: Record<string, unknown>) => void;
 }
 
 export class RawTransactionService {
@@ -42,6 +48,7 @@ export class RawTransactionService {
   private unlockTime: number | null;
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
   private throwOnRefusal: boolean;
+  private beforeSign: ((tx: Record<string, unknown>) => void) | null;
 
   private hash: string | null = null;
   private nonce: number | null = null;
@@ -76,6 +83,7 @@ export class RawTransactionService {
     this.unlockTime = options.unlockTime ?? null;
     this.apiOptions = options.apiOptions ?? {};
     this.throwOnRefusal = options.throwOnRefusal ?? false;
+    this.beforeSign = options.beforeSign ?? null;
   }
 
   private updateTransactionData(): Record<string, unknown> {
@@ -108,6 +116,7 @@ export class RawTransactionService {
       txData = this.updateTransactionData();
 
       this.hash = await client.getHash(txData);
+      this.beforeSign?.(this.updateTransactionData());
 
       this.signature = await this.signer.sign(this.hash);
 
@@ -154,12 +163,25 @@ export class RawTransactionService {
 
       return this.hash;
     } catch (error) {
-      if (error instanceof TransactionDispatchError || error instanceof TransactionRefusedError) {
+      if (
+        error instanceof TransactionDispatchError ||
+        error instanceof TransactionRefusedError ||
+        error instanceof PreSignCheckError
+      ) {
         throw error;
       }
       console.error(`Error in process():`, error);
       return null;
     }
+  }
+}
+
+/** Thrown by a `beforeSign` check that refuses the transaction. Nothing was signed or sent. */
+export class PreSignCheckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreSignCheckError';
+    Object.setPrototypeOf(this, PreSignCheckError.prototype);
   }
 }
 
