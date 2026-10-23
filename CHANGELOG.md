@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.7.0 (2026-10-22)
+
+No public API removals or renames. One behavioral change is called out
+because code may rely on the old default.
+
+### Behavioral changes (read these)
+
+- **Testnet Bitcoin calls go to the VerifiedX signet.** The VerifiedX
+  testnet moved from Bitcoin testnet4 to a private Bitcoin signet. A
+  `BtcClient('testnet')` with no `apiBaseUrl` now uses
+  `https://signet.verifiedx.io/api` (Esplora, same API shape) instead of
+  `https://mempool.space/testnet4/api`. Addresses and keys are unchanged.
+  Mainnet still uses `https://mempool.space/api`, and an explicit
+  `apiBaseUrl` still takes precedence. The signet has no public faucet; ask
+  the VerifiedX team for test BTC.
+
 ## 3.6.0 (2026-10-08)
 
 No public API removals or renames. One behavioral change is called out

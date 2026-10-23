@@ -604,7 +604,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 3.6.0
+- **Version**: 3.7.0
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
 - **Documentation**: See inline TypeScript definitions for detailed API documentation
