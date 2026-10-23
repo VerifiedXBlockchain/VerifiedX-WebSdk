@@ -33,8 +33,9 @@ accept an options object:
 // Point at a self-hosted node / replacement testnet without an SDK release:
 const vfx = new VfxClient('testnet', { baseUrl: 'https://my-node.example.com/api', timeoutMs: 15000 });
 
-// Same for the Bitcoin side (mempool.space-compatible API):
-const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://mempool.space/testnet4/api' });
+// Same for the Bitcoin side (mempool.space-compatible API). Testnet defaults to
+// the VerifiedX signet, https://signet.verifiedx.io/api:
+const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://my-mempool.example.com/api' });
 
 // Distinguish "not found" from an API outage where it matters:
 const available = await vfx.domainAvailable('name.vfx', { strict: true }); // throws VfxApiError on outage
@@ -603,7 +604,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 3.6.0
+- **Version**: 3.7.0
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
 - **Documentation**: See inline TypeScript definitions for detailed API documentation

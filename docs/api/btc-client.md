@@ -1,6 +1,6 @@
 # BtcClient API Reference
 
-The `BtcClient` provides comprehensive Bitcoin functionality including wallet management, transactions, and mempool interactions through the Mempool.space API.
+The `BtcClient` provides comprehensive Bitcoin functionality including wallet management, transactions, and mempool interactions through an Esplora (mempool.space-compatible) API: Mempool.space on mainnet, and the VerifiedX signet (`https://signet.verifiedx.io/api`) on testnet.
 
 ## Constructor
 

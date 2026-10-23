@@ -14,8 +14,10 @@ import type {
 export interface BtcClientOptions {
   dryRun?: boolean;
   /**
-   * Override the mempool.space-style API origin (including /api), e.g.
-   * 'https://mempool.space/testnet4/api' or a self-hosted mempool instance.
+   * Override the mempool.space-style (Esplora) API origin, including /api,
+   * e.g. a self-hosted mempool instance. Defaults: mainnet
+   * 'https://mempool.space/api', testnet (the VerifiedX signet)
+   * 'https://signet.verifiedx.io/api'.
    */
   apiBaseUrl?: string;
 }

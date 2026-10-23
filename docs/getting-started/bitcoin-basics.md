@@ -1,6 +1,6 @@
 # Bitcoin Basics: Getting Started with Bitcoin Integration
 
-This guide covers how to use the VerifiedX Web SDK for Bitcoin operations. The SDK provides a comprehensive Bitcoin client that supports wallet management, transactions, and mempool interactions through the Mempool.space API.
+This guide covers how to use the VerifiedX Web SDK for Bitcoin operations. The SDK provides a comprehensive Bitcoin client that supports wallet management, transactions, and mempool interactions through an Esplora (mempool.space-compatible) API: Mempool.space on mainnet, and the VerifiedX signet (`https://signet.verifiedx.io/api`) on testnet.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This guide covers how to use the VerifiedX Web SDK for Bitcoin operations. The S
 The SDK supports both Bitcoin networks:
 
 - **Mainnet**: The production Bitcoin network with real BTC
-- **Testnet**: The test network with test BTC (recommended for development)
+- **Testnet**: The VerifiedX Bitcoin signet, a private test network with test BTC (recommended for development). Explorer: https://signet.verifiedx.io/
 
 ## Step 1: Initialize the Bitcoin Client
 
@@ -437,7 +437,7 @@ Now that you understand Bitcoin basics:
 ## Common Issues
 
 ### Insufficient Balance
-Make sure your wallet has enough Bitcoin. On testnet, use a Bitcoin testnet faucet.
+Make sure your wallet has enough Bitcoin. On testnet, ask the VerifiedX team for test BTC; the signet has no public faucet.
 
 ### Transaction Fee Too Low
 Increase the fee rate if transactions are stuck in mempool.

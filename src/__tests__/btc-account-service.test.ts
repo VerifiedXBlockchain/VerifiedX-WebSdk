@@ -35,10 +35,22 @@ describe('addressInfo', () => {
     expect(info.balance).toBeCloseTo(0.0011);
   });
 
-  test('uses the testnet4 mempool path on testnet', async () => {
+  test('uses the VerifiedX signet API on testnet', async () => {
     const { calls } = installFetch({ '/api/address/': () => ({ chain_stats: chainStats }) });
     await service.addressInfo('tb1qtest');
-    expect(calls[0].url).toContain('/testnet4/');
+    expect(calls[0].url).toBe('https://signet.verifiedx.io/api/address/tb1qtest');
+  });
+
+  test('uses mempool.space on mainnet', async () => {
+    const { calls } = installFetch({ '/api/address/': () => ({ chain_stats: chainStats }) });
+    await new AccountService(false).addressInfo('bc1qtest');
+    expect(calls[0].url).toBe('https://mempool.space/api/address/bc1qtest');
+  });
+
+  test('an explicit apiBaseUrl wins over the default', async () => {
+    const { calls } = installFetch({ '/api/address/': () => ({ chain_stats: chainStats }) });
+    await new AccountService(true, 'https://example.test/api').addressInfo('tb1qtest');
+    expect(calls[0].url).toBe('https://example.test/api/address/tb1qtest');
   });
 });
 
