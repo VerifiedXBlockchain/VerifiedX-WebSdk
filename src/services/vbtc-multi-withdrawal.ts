@@ -19,8 +19,14 @@ export const VBTC_MULTI_WITHDRAWAL_FUNCTION = 'VBTCWithdrawalRequestMultiV2()';
 export const VBTC_MULTI_WITHDRAWAL_MAX_INPUTS = 10;
 /** Core's `VBTCService.MinWithdrawalTxVBytes`: the smallest withdrawal transaction. */
 export const VBTC_MIN_WITHDRAWAL_TX_VBYTES = 154;
-/** Core's `VBTCService.TaprootDustSats`: the smallest payout Bitcoin relays. */
-export const VBTC_TAPROOT_DUST_SATS = 330;
+/**
+ * The smallest payout a withdrawal share may leave after its fee: Core's
+ * `BtcCanonicalWithdrawal.DustSats`. A watched vault's request is refused at
+ * send below it (`BtcWithdrawals.Refusal`), although Core's builder checks only
+ * its 330-sat `TaprootDustSats`. The SDK checks every share against 546, so a
+ * request it signs is not refused for any vault.
+ */
+export const VBTC_WITHDRAWAL_DUST_SATS = 546;
 /**
  * The most VFX a multi-vault request may cost before the SDK refuses to sign
  * it. The node's fee for one is about 0.00002 VFX; a much larger fee means the
@@ -35,18 +41,19 @@ function toSats(amount: number): number {
 }
 
 /**
- * Core's `GetWithdrawalFeeFloorError`: each share pays its Bitcoin fee out of
- * its amount, so it must cover the smallest withdrawal transaction at the fee
- * rate and still leave a payout Bitcoin relays. Null when it does.
+ * Each share pays its Bitcoin fee out of its amount, so it must cover the
+ * smallest withdrawal transaction at the fee rate and still leave a payout of
+ * at least `VBTC_WITHDRAWAL_DUST_SATS`: the rule Core applies to a watched
+ * vault's request when it is sent. Null when it does.
  */
 export function withdrawalFeeFloorError(amount: number, feeRate: number, context: string): string | null {
   if (!(feeRate > 0) || !(amount > 0)) return null;
   const minFeeSats = feeRate * VBTC_MIN_WITHDRAWAL_TX_VBYTES;
-  if (toSats(amount) - minFeeSats >= VBTC_TAPROOT_DUST_SATS) return null;
-  const minAmount = (minFeeSats + VBTC_TAPROOT_DUST_SATS) / SATS_PER_VBTC;
+  if (toSats(amount) - minFeeSats >= VBTC_WITHDRAWAL_DUST_SATS) return null;
+  const minAmount = (minFeeSats + VBTC_WITHDRAWAL_DUST_SATS) / SATS_PER_VBTC;
   return (
     `${context}: ${amount} BTC cannot pay a Bitcoin withdrawal at ${feeRate} sat/vB. The smallest withdrawal ` +
-    `transaction costs ${minFeeSats} sats in fees and the payout must be at least ${VBTC_TAPROOT_DUST_SATS} sats, ` +
+    `transaction costs ${minFeeSats} sats in fees and the payout must be at least ${VBTC_WITHDRAWAL_DUST_SATS} sats, ` +
     `so the minimum at this fee rate is ${minAmount} BTC.`
   );
 }

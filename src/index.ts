@@ -76,6 +76,7 @@ export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from
 export {
   VBTC_MULTI_WITHDRAWAL_FUNCTION,
   VBTC_MULTI_WITHDRAWAL_MAX_INPUTS,
+  VBTC_WITHDRAWAL_DUST_SATS,
   assertBtcAddressOnNetwork,
   vbtcMultiWithdrawalData,
   withdrawalFeeFloorError,
