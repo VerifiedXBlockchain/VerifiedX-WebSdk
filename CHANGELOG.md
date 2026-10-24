@@ -1,6 +1,14 @@
 # Changelog
 
-## 4.0.1 (unreleased)
+## 9.0.1 (unreleased): VerifiedX Core 9.0.1
+
+The SDK's version now follows the Core release it supports: from here its
+major.minor matches Core's, and patch releases are the SDK's own. Each entry
+names the Core version it needs. This release follows 4.0.0 directly; there is
+no 4.0.1 or 5.x to 8.x. Upgrade from `^4.0.0` by hand, since a caret range
+will not pick up 9.0.1.
+
+Needs VerifiedX Core 9.0.1 or later on the network it talks to.
 
 ### Fixed
 
