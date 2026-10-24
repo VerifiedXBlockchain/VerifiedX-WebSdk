@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (9.0 integration)
+## 4.0.0 (2026-10-23): VerifiedX Core 9.0
 
 ### Behavioral changes (read these)
 
