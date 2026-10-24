@@ -513,6 +513,22 @@ describe('vBTC V2 — requestWithdrawal', () => {
       }),
     ).rejects.toThrow(/frost polling failed/);
   });
+
+  test('refuses a payout under 546 sats after the fee before any request', async () => {
+    const { calls } = installFetch({});
+    // 3 sat/vB: 462 sats of fee, so 792 sats leaves 330: Core's builder accepts it, a watched vault refuses it.
+    await expect(
+      client.requestWithdrawal({
+        scIdentifier: 'sc-1',
+        requestorAddress,
+        btcAddress: 'bc1q',
+        amount: 0.00000792,
+        feeRate: 3,
+        privateKey,
+      }),
+    ).rejects.toThrow(/requestWithdrawal: Withdrawal from vault sc-1: .*minimum at this fee rate is 0.00001008 BTC/);
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe('vBTC V2 — withdrawal completion failure stays resumable', () => {

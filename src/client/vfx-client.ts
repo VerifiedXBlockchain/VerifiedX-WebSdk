@@ -951,6 +951,12 @@ export class VfxClient {
     this.assertNotDryRun('requestWithdrawal');
     const signer = this.signerFor(params, 'requestWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
+    const floor = withdrawalFeeFloorError(
+      params.amount,
+      params.feeRate,
+      `Withdrawal from vault ${params.scIdentifier}`,
+    );
+    if (floor) throw new Error(`requestWithdrawal: ${floor}`);
 
     // Step 1: Request (Type 27)
     const requestPrep = await this.vbtcV2ApiClient.prepareWithdrawRequest({

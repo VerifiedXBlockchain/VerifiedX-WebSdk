@@ -23,10 +23,12 @@ const BTC = 'tb1qqurswpc8qurswpc8qurswpc8qurswpc800zzll';
 const PREPARE = '/btc/vbtc-v2/withdraw/complete/prepare/';
 
 describe('withdrawalFeeFloorError', () => {
-  test("matches Core's rule: fee of a 154 vB transaction plus a 330 sat payout", () => {
-    // 3 sat/vB: 462 sats of fee + 330 dust = 792 sats minimum.
-    expect(withdrawalFeeFloorError(0.00000792, 3, 'x')).toBeNull();
-    expect(withdrawalFeeFloorError(0.00000791, 3, 'x')).toMatch(/minimum at this fee rate is 0.00000792 BTC/);
+  test("matches Core's watched-vault rule: fee of a 154 vB transaction plus a 546 sat payout", () => {
+    // 3 sat/vB: 462 sats of fee + 546 dust = 1008 sats minimum.
+    expect(withdrawalFeeFloorError(0.00001008, 3, 'x')).toBeNull();
+    expect(withdrawalFeeFloorError(0.00001007, 3, 'x')).toMatch(/minimum at this fee rate is 0.00001008 BTC/);
+    // A payout between Core's builder floor (330) and 546 passes the builder but a watched vault refuses it at send.
+    expect(withdrawalFeeFloorError(0.00000792, 3, 'x')).toMatch(/payout must be at least 546 sats/);
     expect(withdrawalFeeFloorError(0.000004, 3, 'share')).toMatch(/^share: 0.000004 BTC cannot pay/);
   });
 });
@@ -276,7 +278,7 @@ describe('VfxClient.requestWithdrawalMulti', () => {
       }),
     ).rejects.toThrow(/insufficient vBTC: 0.000035 available across 2 vaults/);
 
-    // 0.000035 over web1 + m1 at 50 sat/vB: each share must be at least 0.0000803.
+    // 0.000035 over web1 + m1 at 50 sat/vB: each share must be at least 0.00008246.
     await expect(
       client.requestWithdrawalMulti({
         btcAddress: BTC,

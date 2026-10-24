@@ -1,6 +1,27 @@
 # Changelog
 
-## 9.0.1 (unreleased): VerifiedX Core 9.0.1
+## 9.0.2 (unreleased)
+
+Needs VerifiedX Core 9.0.1 or later.
+
+### Fixed
+
+- **A withdrawal share must leave at least 546 sats after its fee**, not 330.
+  Core's builder checks 330 (`TaprootDustSats`), but a watched vault's request
+  is refused when it is sent if any share's payout, after 154 vB at the fee
+  rate, is under `BtcCanonicalWithdrawal.DustSats` (546). A share between the
+  two passed the SDK's check, was signed, and was then refused. Every share of
+  `requestWithdrawalMulti` and `vbtcMultiWithdrawalData` is now checked
+  against 546, the same as SwitchBlade. At 3 sat/vB the minimum share is
+  0.00001008 BTC.
+- **`requestWithdrawal` checks the same floor before any request.** It had no
+  check of its own and relied on the node's 330-sat builder check.
+
+### Added
+
+- `VBTC_WITHDRAWAL_DUST_SATS` (546).
+
+## 9.0.1 (2026-10-24): VerifiedX Core 9.0.1
 
 The SDK's version now follows the Core release it supports: from here its
 major.minor matches Core's, and patch releases are the SDK's own. Each entry
