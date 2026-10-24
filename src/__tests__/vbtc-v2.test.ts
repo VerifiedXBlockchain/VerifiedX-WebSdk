@@ -634,7 +634,10 @@ describe('vBTC V2 — a post-broadcast failure must never advise re-signing', ()
     feeRate: 10,
     privateKey,
     pollIntervalMs: 1,
-    timeoutMs: 50,
+    // Every poll answers at once, so nothing here waits for the deadline. 50 ms
+    // let a loaded parallel run (npm publish's prepublishOnly) hit it before the
+    // mocked broadcast, failing with VbtcWithdrawalIncompleteError instead.
+    timeoutMs: 10000,
   });
 
   // Everything up to and including a successful BTC broadcast.
