@@ -11,6 +11,7 @@ import {
   RESERVE_MIN_UNLOCK_HOURS,
   TOKEN_BASE_ADDRESS,
   TxType,
+  btcNameSignedMessagesActive,
 } from '../constants';
 import KeypairService from '../services/keypair-service';
 import {
@@ -467,6 +468,13 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
+  /**
+   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey`,
+   * managed by the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
+   * Core's BtcNameSignerOwnsAddressHeight (read against the latest block on
+   * Spyglass) over `<unix seconds>:<signer address>:<name>.btc`, below it over
+   * the bare timestamp. Throws when the latest block height cannot be read.
+   */
   public buyBtcDomain = async (
     keypair: KeypairOrSigner,
     domain: string,
@@ -477,7 +485,8 @@ export class VfxClient {
     if (!isValidBtcDomain(domain)) {
       throw new Error(`Invalid btc domain: ${domain}`);
     }
-    this.assertNotReserve(this.resolve(keypair), 'buyBtcDomain');
+    const signer = this.resolve(keypair);
+    this.assertNotReserve(signer, 'buyBtcDomain');
 
     // strict: an API outage must fail the purchase, not read as available.
     const available = await this.addressApiClient.domainAvailable(domain, { strict: true });
@@ -486,7 +495,22 @@ export class VfxClient {
       throw new Error(`Domain already exists: ${domain}`);
     }
 
-    const message = `${Math.floor(Date.now() / 1000)}`;
+    // Core switches the message at BtcNameSignerOwnsAddressHeight, and each side
+    // refuses the other's, so an unknown height must fail rather than guess.
+    let latestBlockHeight: number;
+    try {
+      latestBlockHeight = await this.blockApiClient.getLatestHeight();
+    } catch (e) {
+      throw new Error(
+        `buyBtcDomain: could not read the latest block height, which decides the BTC signature message: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+    const timestamp = Math.floor(Date.now() / 1000);
+    const message = btcNameSignedMessagesActive(this.network, latestBlockHeight)
+      ? btcNameAcceptanceMessage(timestamp, signer.address, domain)
+      : `${timestamp}`;
     const btcClient = new BtcClient(this.network);
 
     const signature = btcClient.getSignature(message, btcPrivateKey);
