@@ -43,6 +43,21 @@
   `signBtcNameTransferAcceptance`, `btcNameAcceptanceMessage`,
   `buildBtcNameAcceptanceCode`, `parseBtcNameAcceptanceCode` (which refuses a
   name without `.btc`, as Core does).
+- Multi-vault withdrawals: `requestWithdrawalMulti` (one signed Type 27 that
+  withdraws a total to one Bitcoin address from up to 10 vaults; explicit
+  `inputs`, or allocated from Spyglass balances, optionally limited to
+  `vaults`; one vault covering it sends the single-vault request),
+  `getWithdrawalShares` and `followWithdrawalShares` (each share's state from
+  the node: paid, released, cancelled, closed, being paid, waiting, not mined,
+  or legacy), `vbtcMultiWithdrawalData`, `withdrawalFeeFloorError`,
+  `assertBtcAddressOnNetwork`, `VBTC_MULTI_WITHDRAWAL_FUNCTION`,
+  `VBTC_MULTI_WITHDRAWAL_MAX_INPUTS`, and `is_watched` on `VbtcV2Token`. A
+  share's fee is raised, or the share released or cancelled, with
+  `bumpWithdrawalFee` / `releaseWithdrawal` / `cancelWithdrawal` naming its
+  vault and the request's hash.
+- `RawTransactionService` takes `beforeSign` (throw `PreSignCheckError` to
+  refuse the transaction before the key signs it); `allocateVbtcInputs`
+  takes an optional `maxInputs`.
 
 ## 3.6.0 (2026-10-08)
 

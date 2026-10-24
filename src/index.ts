@@ -20,7 +20,11 @@ export {
   BTC_NAME_ACCEPTANCE_MAX_AGE_SECONDS,
 } from './services/btc-name-acceptance';
 export type { BtcNameAcceptance } from './services/btc-name-acceptance';
-export { TransactionDispatchError, TransactionRefusedError } from './services/raw-transaction-service';
+export {
+  PreSignCheckError,
+  TransactionDispatchError,
+  TransactionRefusedError,
+} from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
 
@@ -39,6 +43,10 @@ export type {
   CreateVbtcResult,
   VbtcTransferResult,
   VbtcMultiTransferResult,
+  VbtcMultiWithdrawalResult,
+  VbtcWithdrawalShare,
+  VbtcWithdrawalShareOutcome,
+  VbtcWithdrawalSharesResult,
   VbtcWithdrawalResult,
   VbtcWatchedWithdrawal,
   VbtcWatchedWithdrawalTransaction,
@@ -59,6 +67,13 @@ export type {
 export type { Signer, KeypairOrSigner } from './signer';
 export { vfxSignatureFromDer } from './signer';
 export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from './services/vbtc-multi';
+export {
+  VBTC_MULTI_WITHDRAWAL_FUNCTION,
+  VBTC_MULTI_WITHDRAWAL_MAX_INPUTS,
+  assertBtcAddressOnNetwork,
+  vbtcMultiWithdrawalData,
+  withdrawalFeeFloorError,
+} from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
 export {
