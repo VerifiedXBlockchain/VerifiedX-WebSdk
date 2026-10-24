@@ -1,5 +1,33 @@
 # Changelog
 
+## 9.0.1 (unreleased): VerifiedX Core 9.0.1
+
+The SDK's version now follows the Core release it supports: from here its
+major.minor matches Core's, and patch releases are the SDK's own. Each entry
+names the Core version it needs. This release follows 4.0.0 directly; there is
+no 4.0.1 or 5.x to 8.x. Upgrade from `^4.0.0` by hand, since a caret range
+will not pick up 9.0.1.
+
+Needs VerifiedX Core 9.0.1 or later on the network it talks to.
+
+### Fixed
+
+- **`buyBtcDomain` signs the bound BTC name message from Core 9.0.1's
+  `BtcNameSignerOwnsAddressHeight`** (testnet block 7,400, mainnet block
+  7,575,250). From that height the Bitcoin key signs
+  `<unix seconds>:<sender VFX address>:<name>.btc`; below it, the bare
+  timestamp as before. Core refuses the bare timestamp from the height, so
+  4.0.0 could not register a .btc name there. The height is checked against
+  the latest block on Spyglass, and `buyBtcDomain` now throws when it cannot
+  read it rather than guess the message.
+
+### Added
+
+- `BTC_NAME_SIGNED_MESSAGE_HEIGHT_TESTNET`, `BTC_NAME_SIGNED_MESSAGE_HEIGHT_MAINNET`,
+  `btcNameSignedMessageHeight(network)`,
+  `btcNameSignedMessagesActive(network, latestBlockHeight)` (true when the
+  next block is at or past the height, as the GUI checks it).
+
 ## 4.0.0 (2026-10-23): VerifiedX Core 9.0
 
 ### Behavioral changes (read these)

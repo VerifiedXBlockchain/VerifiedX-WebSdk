@@ -18,6 +18,12 @@ export {
   parseBtcNameAcceptanceCode,
   BTC_NAME_ACCEPTANCE_MAX_AGE_SECONDS,
 } from '../services/btc-name-acceptance';
+export {
+  BTC_NAME_SIGNED_MESSAGE_HEIGHT_MAINNET,
+  BTC_NAME_SIGNED_MESSAGE_HEIGHT_TESTNET,
+  btcNameSignedMessageHeight,
+  btcNameSignedMessagesActive,
+} from '../constants';
 export type { BtcNameAcceptance } from '../services/btc-name-acceptance';
 export {
   PreSignCheckError,

@@ -32,6 +32,24 @@ export const ADNR_NAME_MAX_LENGTH = 65;
 export const DOMAIN_TRANSFER_COST = 5.0;
 export const DOMAIN_DELETE_COST = 5.0;
 
+/**
+ * Core's BtcNameSignerOwnsAddressHeight (9.0.1), per network. From this block
+ * a .btc name create is signed by the Bitcoin address's own key over
+ * `<unix seconds>:<VFX owner>:<name>.btc`; below it Core accepts only a bare
+ * timestamp. Same values as the GUI's BTC_NAME_SIGNED_MESSAGE_HEIGHT_*.
+ */
+export const BTC_NAME_SIGNED_MESSAGE_HEIGHT_TESTNET = 7400;
+export const BTC_NAME_SIGNED_MESSAGE_HEIGHT_MAINNET = 7_575_250;
+
+export function btcNameSignedMessageHeight(network: Network): number {
+  return network === Network.Testnet ? BTC_NAME_SIGNED_MESSAGE_HEIGHT_TESTNET : BTC_NAME_SIGNED_MESSAGE_HEIGHT_MAINNET;
+}
+
+/** Whether the block after `latestBlockHeight` requires the signed BTC name message. */
+export function btcNameSignedMessagesActive(network: Network, latestBlockHeight: number): boolean {
+  return latestBlockHeight + 1 >= btcNameSignedMessageHeight(network);
+}
+
 export const VFX_API_BASE_URL_TESTNET = 'https://data-testnet.verifiedx.io/api';
 export const VFX_API_BASE_URL_MAINNET = 'https://data.verifiedx.io/api';
 
