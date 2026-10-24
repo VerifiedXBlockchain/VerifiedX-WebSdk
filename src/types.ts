@@ -58,6 +58,12 @@ export interface VbtcV2Token {
   total_sent: number;
   tx_count: number;
   is_pending_withdrawal: boolean;
+  /**
+   * The chain watches this vault (Core 9.0 Bitcoin attestation): its
+   * withdrawals are paid by its signers, with no FROST completion. Absent
+   * from Spyglass deployments older than 9.0.
+   */
+  is_watched?: boolean;
   addresses: Record<string, number>;
   /**
    * `addresses` minus each address's open withdrawal requests — what can
@@ -143,9 +149,122 @@ export interface VbtcMultiTransferResult {
 }
 
 export interface VbtcWithdrawalResult {
+  /** The Bitcoin transaction that paid it; empty while `paid` is false. */
   btcTransactionHash: string;
+  /** The VFX completion transaction; empty while `paid` is false. */
   completionTransactionHash: string;
   withdrawalRequestHash: string;
+  /**
+   * Bitcoin has paid it. Always true for a vault the chain does not watch.
+   * False for a watched vault's withdrawal the chain has taken but Bitcoin has
+   * not paid yet: nothing needs to be done; follow it with getWithdrawalPin
+   * or call completeWithdrawal again.
+   */
+  paid: boolean;
+  /** The withdrawal's state when its vault is one the chain watches, else null. */
+  watched: VbtcWatchedWithdrawal | null;
+  /**
+   * Set on a pending watched result when reads were still failing at the
+   * deadline: why the last one failed. `watched` is then the last state read.
+   */
+  lastError?: string;
+}
+
+/** One Bitcoin transaction the chain has fixed for a watched withdrawal. */
+export interface VbtcWatchedWithdrawalTransaction {
+  txid: string;
+  kind: 'Payment' | 'Release';
+  feeRate: number | null;
+  feeSats: number | null;
+  superseded: boolean;
+  dead: boolean;
+  confirmed: boolean;
+}
+
+/**
+ * Where a withdrawal from a vault the chain watches (Core 9.0 Bitcoin
+ * attestation) stands. Nobody completes such a withdrawal by hand: the chain
+ * pins its Bitcoin transaction and the vault's signers send it.
+ */
+export interface VbtcWatchedWithdrawal {
+  /** `Completed`, `Awaiting_BTC_Confirmation`, `Awaiting_BTC_Transaction`, `Closed` or `Unknown`. */
+  status: string;
+  /** Bitcoin has paid it. */
+  paid: boolean;
+  /** The node has not mined the request yet (or the hash is wrong); ask again shortly. */
+  notMinedYet: boolean;
+  /** Nothing more will happen to it: paid, released or otherwise closed. */
+  closed: boolean;
+  message: string | null;
+  /** The chain's state: `Waiting`, `Pinned`, `Settled`, `Released`, or another closed state. */
+  state: string | null;
+  summary: string | null;
+  /** The fee rate (sat/vB) the newest live Bitcoin transaction pays. */
+  feeRate: number | null;
+  /** The lowest rate a fee raise or release may name: the node refuses one not above `feeRate`. */
+  minimumNextFeeRate: number;
+  canRaiseFee: boolean;
+  canRelease: boolean;
+  releasing: boolean;
+  canCancel: boolean;
+  /** The pinned Bitcoin transaction while it is not yet paid. */
+  pinnedBtcTransactionHash: string | null;
+  /** The Bitcoin transaction that paid it. */
+  btcTransactionHash: string | null;
+  completionTransactionHash: string | null;
+  transactions: VbtcWatchedWithdrawalTransaction[];
+}
+
+/** Where one share of a (multi-vault) withdrawal stands. */
+export type VbtcWithdrawalShareOutcome =
+  /** Bitcoin paid it. */
+  | 'paid'
+  /** Its requester gave it up; the vBTC came back less that transaction's fee. */
+  | 'released'
+  /** Cancelled while Waiting; the vBTC came back. */
+  | 'cancelled'
+  /** Closed unpaid another way (expired, void); the vBTC came back. */
+  | 'closed'
+  /** Pinned: the vault's signers are paying it. Its fee can be raised, or it can be released. */
+  | 'being_paid'
+  /** The vault's free coins do not cover it yet; it pins when they do. It can be cancelled. */
+  | 'waiting'
+  /** The node has not mined the request yet. */
+  | 'not_mined'
+  /** A vault the chain does not watch: complete this share with completeWithdrawal (FROST). */
+  | 'legacy';
+
+export interface VbtcWithdrawalShare {
+  scIdentifier: string;
+  amount: number;
+  outcome: VbtcWithdrawalShareOutcome;
+  /** The share's state from the node; null for a vault the chain does not watch. */
+  watched: VbtcWatchedWithdrawal | null;
+  /** The Bitcoin transaction the chain pinned to pay (or release) it, while open. */
+  pinnedBtcTransactionHash: string | null;
+  /** The Bitcoin transaction that paid it. */
+  btcTransactionHash: string | null;
+}
+
+export interface VbtcMultiWithdrawalResult {
+  /** The request's hash; every share is filed under it. */
+  withdrawalRequestHash: string;
+  /** One per vault, as signed. */
+  inputs: Array<{ scIdentifier: string; amount: number }>;
+  totalAmount: number;
+  btcAddress: string;
+  feeRate: number;
+  /** The VFX fee the request paid. */
+  fee: number;
+}
+
+export interface VbtcWithdrawalSharesResult {
+  withdrawalRequestHash: string;
+  shares: VbtcWithdrawalShare[];
+  /** Every share is final: paid, released, cancelled, closed, or legacy (needs FROST completion). */
+  settled: boolean;
+  /** Set when reads were still failing at the deadline: why the last one failed. */
+  lastError?: string;
 }
 
 export interface VbtcCancelResult {
@@ -163,7 +282,8 @@ export type VbtcProgressPhase =
   | 'frost_polling'
   | 'frost_complete'
   | 'btc_broadcast'
-  | 'completion_recorded';
+  | 'completion_recorded'
+  | 'watched_polling';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;

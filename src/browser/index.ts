@@ -5,8 +5,25 @@ import { Network, TxType } from '../constants';
 
 export type { VfxClientOptions, ReserveSendOptions } from '../client/vfx-client';
 export { VfxApiError } from '../client/base-api-client';
-export { VbtcWithdrawalIncompleteError, VbtcWithdrawalUnrecordedError } from '../client/vfx-client';
-export { TransactionDispatchError } from '../services/raw-transaction-service';
+export {
+  VbtcWithdrawalIncompleteError,
+  VbtcWithdrawalUnrecordedError,
+  VbtcNodeUnreachableError,
+  VbtcWithdrawalClosedError,
+} from '../client/vfx-client';
+export { parseWatchedWithdrawal, VBTC_WATCHED_MAX_FEE_RATE } from '../services/watched-withdrawal';
+export {
+  btcNameAcceptanceMessage,
+  buildBtcNameAcceptanceCode,
+  parseBtcNameAcceptanceCode,
+  BTC_NAME_ACCEPTANCE_MAX_AGE_SECONDS,
+} from '../services/btc-name-acceptance';
+export type { BtcNameAcceptance } from '../services/btc-name-acceptance';
+export {
+  PreSignCheckError,
+  TransactionDispatchError,
+  TransactionRefusedError,
+} from '../services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from '../btc/errors';
 
 // Re-export common interfaces and types from main package
@@ -21,7 +38,13 @@ export type {
   CreateVbtcResult,
   VbtcTransferResult,
   VbtcMultiTransferResult,
+  VbtcMultiWithdrawalResult,
+  VbtcWithdrawalShare,
+  VbtcWithdrawalShareOutcome,
+  VbtcWithdrawalSharesResult,
   VbtcWithdrawalResult,
+  VbtcWatchedWithdrawal,
+  VbtcWatchedWithdrawalTransaction,
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,
@@ -39,6 +62,14 @@ export type {
 export type { Signer, KeypairOrSigner } from '../signer';
 export { vfxSignatureFromDer } from '../signer';
 export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from '../services/vbtc-multi';
+export {
+  VBTC_MULTI_WITHDRAWAL_FUNCTION,
+  VBTC_MULTI_WITHDRAWAL_MAX_INPUTS,
+  assertBtcAddressOnNetwork,
+  vbtcMultiWithdrawalData,
+  withdrawalFeeFloorError,
+} from '../services/vbtc-multi-withdrawal';
+export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from '../services/vbtc-multi';
 export {
   TOKEN_BASE_ADDRESS,

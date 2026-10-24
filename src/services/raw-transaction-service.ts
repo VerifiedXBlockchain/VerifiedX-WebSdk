@@ -2,6 +2,7 @@ import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
 import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
 import KeypairService from './keypair-service';
+import { assertRecipientOnNetwork, isNameRecipient } from './recipient';
 
 export interface IRawTransactionServiceOptions {
   network: Network;
@@ -23,6 +24,17 @@ export interface IRawTransactionServiceOptions {
    */
   unlockTime?: number | null;
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
+  /**
+   * Throw TransactionRefusedError, carrying the node's reason, when the node
+   * refuses the transaction at verification, instead of resolving to null.
+   */
+  throwOnRefusal?: boolean;
+  /**
+   * Called with the transaction as it will be signed (fee and hash filled in),
+   * before the key signs it. Throw PreSignCheckError to refuse it; nothing is
+   * signed or sent, and process() rethrows that error.
+   */
+  beforeSign?: (tx: Record<string, unknown>) => void;
 }
 
 export class RawTransactionService {
@@ -35,6 +47,8 @@ export class RawTransactionService {
   private fromAddress: string;
   private unlockTime: number | null;
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
+  private throwOnRefusal: boolean;
+  private beforeSign: ((tx: Record<string, unknown>) => void) | null;
 
   private hash: string | null = null;
   private nonce: number | null = null;
@@ -52,6 +66,15 @@ export class RawTransactionService {
     // signer wired to the wrong network, fails at construction rather than
     // after the fee and nonce round-trips.
     this.signer = resolveSigner(signerInput, new KeypairService(this.network));
+    // The node refuses another network's address at admission, at every
+    // height, and a name from PathAuditRulesHeight, with nothing more than
+    // "Invalid Transaction". VfxClient resolves names before it gets here.
+    if (isNameRecipient(options.toAddress)) {
+      throw new Error(
+        `toAddress ${options.toAddress} is a name; send to the address it resolves to (VfxClient.lookupDomain)`,
+      );
+    }
+    assertRecipientOnNetwork(options.toAddress, this.network);
     this.toAddress = options.toAddress;
     this.txType = options.txType ?? 0;
     this.amount = options.amount ?? 0;
@@ -59,6 +82,8 @@ export class RawTransactionService {
     this.fromAddress = this.signer.address;
     this.unlockTime = options.unlockTime ?? null;
     this.apiOptions = options.apiOptions ?? {};
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
+    this.beforeSign = options.beforeSign ?? null;
   }
 
   private updateTransactionData(): Record<string, unknown> {
@@ -91,6 +116,7 @@ export class RawTransactionService {
       txData = this.updateTransactionData();
 
       this.hash = await client.getHash(txData);
+      this.beforeSign?.(this.updateTransactionData());
 
       this.signature = await this.signer.sign(this.hash);
 
@@ -106,10 +132,13 @@ export class RawTransactionService {
 
       txData = this.updateTransactionData();
 
-      const txIsValid = await client.verifyTransaction(txData);
+      const verdict = await client.verifyTransactionResult(txData);
 
-      if (!txIsValid) {
-        throw new Error('Invalid Transaction');
+      if (!verdict.valid) {
+        if (this.throwOnRefusal) {
+          throw new TransactionRefusedError(this.hash ?? '', verdict.message);
+        }
+        throw new Error(verdict.message ? `Invalid Transaction: ${verdict.message}` : 'Invalid Transaction');
       }
 
       if (dryRun) {
@@ -134,12 +163,42 @@ export class RawTransactionService {
 
       return this.hash;
     } catch (error) {
-      if (error instanceof TransactionDispatchError) {
+      if (
+        error instanceof TransactionDispatchError ||
+        error instanceof TransactionRefusedError ||
+        error instanceof PreSignCheckError
+      ) {
         throw error;
       }
       console.error(`Error in process():`, error);
       return null;
     }
+  }
+}
+
+/** Thrown by a `beforeSign` check that refuses the transaction. Nothing was signed or sent. */
+export class PreSignCheckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PreSignCheckError';
+    Object.setPrototypeOf(this, PreSignCheckError.prototype);
+  }
+}
+
+/**
+ * Thrown, for callers that ask for it, when the node refused the transaction
+ * at verification. Nothing was sent; `reason` is the node's message.
+ */
+export class TransactionRefusedError extends Error {
+  readonly hash: string;
+  readonly reason: string | null;
+
+  constructor(hash: string, reason: string | null) {
+    super(`The node refused transaction ${hash}: ${reason ?? 'no reason given'}. Nothing was sent.`);
+    this.name = 'TransactionRefusedError';
+    this.hash = hash;
+    this.reason = reason;
+    Object.setPrototypeOf(this, TransactionRefusedError.prototype);
   }
 }
 

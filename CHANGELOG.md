@@ -1,5 +1,64 @@
 # Changelog
 
+## 4.0.0 (2026-10-23): VerifiedX Core 9.0
+
+### Behavioral changes (read these)
+
+- **Recipients are checked before building.** A recipient address of the other
+  network (or a Bitcoin-style address) throws before any request, since a 9.0
+  node refuses it. A `.vfx`/`.rbx` recipient is resolved to its address first,
+  and the send is refused when that address's own record names another domain
+  (a lookup that disagrees with the record). Both are read from the same
+  Spyglass index, so this does not catch an index that lags the chain.
+- **Withdrawals from a vault the chain watches** run no signing ceremony and
+  send no completion transaction. `completeWithdrawal` / `requestWithdrawal`
+  resolve with `paid: false` and the withdrawal's state while Bitcoin is paying
+  it, `paid: true` once paid, or throw `VbtcWithdrawalClosedError` if it closed
+  unpaid. Results gain `paid` and `watched`. For other vaults these are always
+  `true` and `null`, and nothing else changes. When reads were still failing
+  at the deadline, a pending result also carries `lastError`.
+- **`mintToken` checks the token before building** and throws when a 9.0
+  node would refuse the mint (`TokenMintRulesHeight`): the token is paused,
+  the amount has more decimal places than the token's, or the supply or the
+  minter's balance would pass the largest amount the node holds. It now
+  always reads the token from Spyglass, even when `ticker` and `name` are
+  given.
+- **`.vfx` names follow Core's ADNR grammar** (`AdnrNameGrammarHeight`):
+  `isValidVfxDomain`, and so `buyVfxDomain`, accept lowercase a-z, 0-9 and
+  `-` (anywhere in the name), 1 to 65 characters before `.vfx`. Hyphenated
+  names, refused before, are now accepted; a name over 65 characters is
+  refused before any request.
+- **A refused transaction logs the node's reason** (`Invalid Transaction: <reason>`).
+  The `null` return of the existing send methods is unchanged.
+
+### Added
+
+- `isOtherNetworksAddress`, `assertRecipientOnNetwork`.
+- `getWithdrawalPin`, `bumpWithdrawalFee`, `releaseWithdrawal`,
+  `parseWatchedWithdrawal`, `VbtcWithdrawalClosedError`,
+  `VbtcNodeUnreachableError`, `TransactionRefusedError` (bump and release
+  throw it with the node's `reason`; `RawTransactionService` takes
+  `throwOnRefusal`).
+- `transferBtcDomain` accepts `btcToMessage`/`btcToSignature`;
+  `signBtcNameTransferAcceptance`, `btcNameAcceptanceMessage`,
+  `buildBtcNameAcceptanceCode`, `parseBtcNameAcceptanceCode` (which refuses a
+  name without `.btc`, as Core does).
+- Multi-vault withdrawals: `requestWithdrawalMulti` (one signed Type 27 that
+  withdraws a total to one Bitcoin address from up to 10 vaults; explicit
+  `inputs`, or allocated from Spyglass balances, optionally limited to
+  `vaults`; one vault covering it sends the single-vault request),
+  `getWithdrawalShares` and `followWithdrawalShares` (each share's state from
+  the node: paid, released, cancelled, closed, being paid, waiting, not mined,
+  or legacy), `vbtcMultiWithdrawalData`, `withdrawalFeeFloorError`,
+  `assertBtcAddressOnNetwork`, `VBTC_MULTI_WITHDRAWAL_FUNCTION`,
+  `VBTC_MULTI_WITHDRAWAL_MAX_INPUTS`, and `is_watched` on `VbtcV2Token`. A
+  share's fee is raised, or the share released or cancelled, with
+  `bumpWithdrawalFee` / `releaseWithdrawal` / `cancelWithdrawal` naming its
+  vault and the request's hash.
+- `RawTransactionService` takes `beforeSign` (throw `PreSignCheckError` to
+  refuse the transaction before the key signs it); `allocateVbtcInputs`
+  takes an optional `maxInputs`.
+
 ## 3.6.0 (2026-10-08)
 
 No public API removals or renames. One behavioral change is called out

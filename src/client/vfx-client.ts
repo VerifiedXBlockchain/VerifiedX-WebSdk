@@ -13,13 +13,31 @@ import {
   TxType,
 } from '../constants';
 import KeypairService from '../services/keypair-service';
-import { RawTransactionService, TransactionDispatchError } from '../services/raw-transaction-service';
+import {
+  PreSignCheckError,
+  RawTransactionService,
+  TransactionDispatchError,
+} from '../services/raw-transaction-service';
+import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
+import {
+  btcNameAcceptanceMessage,
+  btcNameAcceptanceProblem,
+  buildBtcNameAcceptanceCode,
+} from '../services/btc-name-acceptance';
+import {
+  assertWatchedFeeRate,
+  isUnreachableAnswer,
+  parseWatchedWithdrawal,
+  watchedWithdrawalFeeBumpData,
+} from '../services/watched-withdrawal';
 import {
   TokenTxData,
+  assertPositiveAmount,
   tokenBanAddressData,
   tokenBurnData,
   tokenDeployPayload,
   tokenMintData,
+  tokenMintRefusal,
   tokenOwnerChangeData,
   tokenPauseData,
   tokenTransferData,
@@ -28,6 +46,16 @@ import {
 } from '../services/token-data';
 import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
+import {
+  VBTC_MULTI_WITHDRAWAL_DEFAULT_MAX_FEE,
+  VBTC_MULTI_WITHDRAWAL_FUNCTION,
+  VBTC_MULTI_WITHDRAWAL_MAX_INPUTS,
+  assertBtcAddressOnNetwork,
+  isFinalShareOutcome,
+  shareOutcome,
+  vbtcMultiWithdrawalData,
+  withdrawalFeeFloorError,
+} from '../services/vbtc-multi-withdrawal';
 import {
   CreateVbtcResult,
   DeployTokenParams,
@@ -41,10 +69,14 @@ import {
   Transaction,
   VbtcCancelResult,
   VbtcMultiTransferResult,
+  VbtcMultiWithdrawalResult,
+  VbtcWithdrawalShare,
+  VbtcWithdrawalSharesResult,
   VbtcProgressEvent,
   VbtcTransfer,
   VbtcTransferResult,
   VbtcV2Token,
+  VbtcWatchedWithdrawal,
   VbtcWithdrawalRequest,
   VbtcWithdrawalResult,
   VfxAddress,
@@ -58,6 +90,7 @@ import {
   isValidVfxDomain,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
+import { VfxApiError } from './base-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
@@ -68,6 +101,7 @@ import {
   PreparedTransactionResponse,
   SentTransactionResponse,
   VbtcV2ApiClient,
+  WithdrawCompletePrepareResponse,
 } from './vbtc-v2-api-client';
 
 type SendFn = (body: { hash: string; signature: string; public_key: string }) => Promise<SentTransactionResponse>;
@@ -184,6 +218,39 @@ export class VbtcWithdrawalUnrecordedError extends Error {
     this.signedBtcTxHex = signedBtcTxHex;
     this.cause = cause;
     Object.setPrototypeOf(this, VbtcWithdrawalUnrecordedError.prototype);
+  }
+}
+
+/**
+ * Thrown when a withdrawal from a watched vault closed without being paid: its
+ * requester released it, or it expired or could not be paid. The vBTC was
+ * returned to the requester (less the release's Bitcoin fee, for a release).
+ */
+export class VbtcWithdrawalClosedError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly withdrawal: VbtcWatchedWithdrawal;
+
+  constructor(withdrawalRequestHash: string, withdrawal: VbtcWatchedWithdrawal) {
+    super(
+      `Withdrawal request ${withdrawalRequestHash} was closed without being paid (${withdrawal.state}): ` +
+        `${withdrawal.summary ?? withdrawal.message ?? 'no detail'}`,
+    );
+    this.name = 'VbtcWithdrawalClosedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.withdrawal = withdrawal;
+    Object.setPrototypeOf(this, VbtcWithdrawalClosedError.prototype);
+  }
+}
+
+/** Spyglass answered but could not reach the node, so the withdrawal's state is unknown; ask again. */
+export class VbtcNodeUnreachableError extends Error {
+  readonly answer: string;
+
+  constructor(answer: string) {
+    super(`Spyglass could not reach the node for the withdrawal's state; ask again: ${answer.slice(0, 300)}`);
+    this.name = 'VbtcNodeUnreachableError';
+    this.answer = answer;
+    Object.setPrototypeOf(this, VbtcNodeUnreachableError.prototype);
   }
 }
 
@@ -335,10 +402,11 @@ export class VfxClient {
     options: ReserveSendOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: toAddress,
+      toAddress: recipient,
       amount: amount,
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
@@ -454,12 +522,13 @@ export class VfxClient {
   public transferVfxDomain = async (keypair: KeypairOrSigner, toAddress: string): Promise<string | null> => {
     const signer = this.resolve(keypair);
     assertNotReserveSender(signer, 'transferVfxDomain');
-    if (!toAddress || toAddress === signer.address) {
+    const recipientAddress = toAddress ? await this.resolveRecipient(toAddress, 'transferVfxDomain') : toAddress;
+    if (!recipientAddress || recipientAddress === signer.address) {
       throw new Error('transferVfxDomain requires a recipient other than the sender');
     }
 
     const domain = await this.ownedVfxDomain(signer.address, 'transferVfxDomain');
-    const recipient = await this.addressApiClient.getAddressDetails(toAddress, { strict: true });
+    const recipient = await this.addressApiClient.getAddressDetails(recipientAddress, { strict: true });
     if (recipient?.adnr) {
       throw new Error(`Recipient already has a domain: ${recipient.adnr}`);
     }
@@ -467,7 +536,7 @@ export class VfxClient {
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress,
+      toAddress: recipientAddress,
       amount: DOMAIN_TRANSFER_COST,
       txType: TxType.Adnr,
       data: { Function: 'AdnrTransfer()', Name: domain },
@@ -499,31 +568,78 @@ export class VfxClient {
    * from then on. Costs 5 VFX. The signer must be the VFX account that
    * currently manages the domain for `btcFromAddress`; the node checks that
    * pairing and that `btcToAddress` has no domain.
+   *
+   * From the network's BtcNameSignerOwnsAddressHeight the receiving Bitcoin
+   * address must accept the name: pass the `btcToMessage` and `btcToSignature`
+   * the receiver made with signBtcNameTransferAcceptance (or parsed from their
+   * acceptance code with parseBtcNameAcceptanceCode). The acceptance must name
+   * `vfxToAddress` and be under 24 hours old. Before that height they are
+   * optional and the node ignores them.
    */
   public transferBtcDomain = async (
     keypair: KeypairOrSigner,
-    params: { btcFromAddress: string; btcToAddress: string; vfxToAddress: string },
+    params: {
+      btcFromAddress: string;
+      btcToAddress: string;
+      vfxToAddress: string;
+      btcToMessage?: string;
+      btcToSignature?: string;
+    },
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     assertNotReserveSender(signer, 'transferBtcDomain');
     if (!params.btcFromAddress || !params.btcToAddress || !params.vfxToAddress) {
       throw new Error('transferBtcDomain requires btcFromAddress, btcToAddress and vfxToAddress');
     }
+    if (!params.btcToMessage !== !params.btcToSignature) {
+      throw new Error('transferBtcDomain takes btcToMessage and btcToSignature together, or neither');
+    }
+    const vfxToAddress = await this.resolveRecipient(params.vfxToAddress, 'transferBtcDomain');
+    if (params.btcToMessage) {
+      const problem = btcNameAcceptanceProblem(params.btcToMessage, { owner: vfxToAddress });
+      if (problem) {
+        throw new Error(`transferBtcDomain: ${problem}`);
+      }
+    }
 
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: params.vfxToAddress,
+      toAddress: vfxToAddress,
       amount: DOMAIN_TRANSFER_COST,
       txType: TxType.Adnr,
       data: {
         Function: 'BTCAdnrTransfer()',
         BTCToAddress: params.btcToAddress,
         BTCFromAddress: params.btcFromAddress,
+        ...(params.btcToMessage ? { BTCToMessage: params.btcToMessage, BTCToSignature: params.btcToSignature } : {}),
       },
       apiOptions: this.apiOptions,
     });
     return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * The receiving side of a .btc name transfer: the key of the Bitcoin
+   * address the name moves to signs that it accepts `name` for `newOwner`
+   * (the VFX address that will manage it). Hand `code` to the sender, who
+   * passes its message and signature to transferBtcDomain. Good for 24 hours.
+   */
+  public signBtcNameTransferAcceptance = (params: {
+    /** Hex private key of the receiving Bitcoin address. */
+    btcPrivateKey: string;
+    name: string;
+    newOwner: string;
+    /** Unix seconds to sign at; defaults to now. */
+    timestamp?: number;
+  }): { message: string; signature: string; code: string } => {
+    if (!params.btcPrivateKey || !params.name || !params.newOwner) {
+      throw new Error('signBtcNameTransferAcceptance requires btcPrivateKey, name and newOwner');
+    }
+    const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
+    const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
+    const signature = new BtcClient(this.network).getSignature(message, params.btcPrivateKey);
+    return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 
   /** Release the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX. */
@@ -593,10 +709,12 @@ export class VfxClient {
   }): Promise<VbtcTransferResult> => {
     this.assertNotDryRun('transferVbtc');
     const signer = this.signerFor(params, 'transferVbtc');
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtc');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferVbtc toAddress');
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
-      to_address: params.toAddress,
+      to_address: toAddress,
       amount: params.amount,
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
@@ -629,6 +747,7 @@ export class VfxClient {
     if (!(params.totalAmount > 0)) {
       throw new Error('transferVbtcMulti requires a positive totalAmount');
     }
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtcMulti');
 
     let inputs = params.inputs;
     if (!inputs) {
@@ -657,7 +776,7 @@ export class VfxClient {
       const sent = await this.transferVbtc({
         scIdentifier: single.scIdentifier,
         fromAddress: signer.address,
-        toAddress: params.toAddress,
+        toAddress,
         amount: single.amount,
         privateKey: params.privateKey,
         signer: params.signer,
@@ -667,14 +786,14 @@ export class VfxClient {
 
     const data = vbtcMultiTransferData({
       fromAddress: signer.address,
-      toAddress: params.toAddress,
+      toAddress,
       totalAmount: params.totalAmount,
       inputs,
     });
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,
-      toAddress: params.toAddress,
+      toAddress,
       amount: 0,
       txType: TxType.VbtcV2Transfer,
       data,
@@ -848,6 +967,9 @@ export class VfxClient {
       // "incomplete" would tell the caller to resume via completeWithdrawal,
       // which is the one thing that can pay the destination twice.
       if (error instanceof VbtcWithdrawalUnrecordedError) throw error;
+      // A watched vault's withdrawal closed unpaid: that is where it stands,
+      // not something completeWithdrawal could resume.
+      if (error instanceof VbtcWithdrawalClosedError) throw error;
       throw new VbtcWithdrawalIncompleteError(withdrawalRequestHash, error);
     }
   };
@@ -859,6 +981,15 @@ export class VfxClient {
    * Safe to call for a request whose first completion attempt died at any
    * point before the BTC broadcast — FROST sessions are per-call and the
    * node rejects double-completion of a completed request.
+   *
+   * On a vault the chain watches (Core 9.0 Bitcoin attestation) there is no
+   * ceremony and no completion transaction: the chain pays the withdrawal,
+   * which takes Bitcoin confirmations. This sends nothing. It waits (up to
+   * `timeoutMs`) until the node has recorded the request, then resolves with
+   * `paid: true` and the paying txid if Bitcoin has paid it, or `paid: false`
+   * and its state in `watched` while it is being paid; follow that with
+   * getWithdrawalPin, or call this again. It throws VbtcWithdrawalClosedError
+   * if the withdrawal closed unpaid.
    */
   public completeWithdrawal = async (params: {
     scIdentifier: string;
@@ -885,11 +1016,38 @@ export class VfxClient {
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
 
-    const frostPrep = await this.vbtcV2ApiClient.prepareWithdrawComplete({
-      sc_identifier: params.scIdentifier,
-      withdrawal_request_hash: withdrawalRequestHash,
-      owner_address: params.requestorAddress,
-    });
+    // The first read decides between a watched vault and FROST, so a read
+    // that got no answer (a dropped request, a 5xx, Spyglass unable to reach
+    // the node) is asked again until the deadline rather than taken as either.
+    const deadline = Date.now() + timeoutMs;
+    let answer: Record<string, unknown> | undefined;
+    for (;;) {
+      try {
+        answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
+          sc_identifier: params.scIdentifier,
+          withdrawal_request_hash: withdrawalRequestHash,
+          owner_address: params.requestorAddress,
+        });
+        if (!isUnreachableAnswer(answer)) break;
+        if (Date.now() + pollIntervalMs > deadline) throw new VbtcNodeUnreachableError(JSON.stringify(answer));
+      } catch (error) {
+        if (!isTransientReadError(error) || Date.now() + pollIntervalMs > deadline) throw error;
+      }
+      await sleep(pollIntervalMs);
+    }
+    const watched = parseWatchedWithdrawal(answer);
+    if (watched) {
+      return this.watchedWithdrawalResult({
+        scIdentifier: params.scIdentifier,
+        requestorAddress: params.requestorAddress,
+        withdrawalRequestHash,
+        first: watched,
+        onProgress,
+        pollIntervalMs,
+        deadline,
+      });
+    }
+    const frostPrep = answer as unknown as WithdrawCompletePrepareResponse;
     if (!frostPrep?.success) {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
@@ -1052,6 +1210,71 @@ export class VfxClient {
   };
 
   /**
+   * Where a withdrawal from a vault the chain watches stands: its pinned
+   * Bitcoin transaction and fee rate, whether it is paid, and whether its fee
+   * can be raised (bumpWithdrawalFee) or it can be released
+   * (releaseWithdrawal). Null when the vault is not watched; its withdrawal is
+   * completed with completeWithdrawal as before. Throws when Spyglass could not
+   * reach the node, since that answer says neither.
+   */
+  public getWithdrawalPin = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+  }): Promise<VbtcWatchedWithdrawal | null> => {
+    const answer = await this.vbtcV2ApiClient.getWithdrawCompleteAnswer({
+      sc_identifier: params.scIdentifier,
+      withdrawal_request_hash: params.withdrawalRequestHash,
+      owner_address: params.requestorAddress,
+    });
+    if (isUnreachableAnswer(answer)) {
+      throw new VbtcNodeUnreachableError(JSON.stringify(answer));
+    }
+    return parseWatchedWithdrawal(answer);
+  };
+
+  /**
+   * Raise the Bitcoin fee of a pinned withdrawal on a watched vault that is not
+   * confirming. One Type 44 transaction from the requester to itself; the
+   * chain then pins a replacement that spends the same coins, and the higher
+   * fee comes out of the withdrawal's amount. `feeRate` (sat/vB) must be above
+   * the rate the pinned transaction pays (`minimumNextFeeRate` from
+   * getWithdrawalPin). The withdrawal is read first and the call refused
+   * unless it is pinned with a fee that can be raised and `feeRate` is high
+   * enough; a refusal by the node throws TransactionRefusedError with its
+   * reason. Resolves to the transaction hash.
+   */
+  public bumpWithdrawalFee = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    feeRate: number;
+    /** Local key of the requester. Pass either this or `signer`. */
+    privateKey?: string;
+    signer?: Signer;
+  }): Promise<string | null> => {
+    return this.sendWatchedFeeBump(params, false, 'bumpWithdrawalFee');
+  };
+
+  /**
+   * Give up a pinned withdrawal on a watched vault: the chain pins a Bitcoin
+   * transaction that returns its coins to the vault, and once Bitcoin confirms
+   * it the vBTC is returned to the requester, less that transaction's fee. If
+   * one of its payments confirms first it is paid instead. `feeRate` follows
+   * the same rule as bumpWithdrawalFee, and the node also refuses a release
+   * whose fee does not beat the pinned transaction's by its relay cost (that
+   * refusal comes back as TransactionRefusedError with the node's reason).
+   */
+  public releaseWithdrawal = async (params: {
+    scIdentifier: string;
+    withdrawalRequestHash: string;
+    feeRate: number;
+    privateKey?: string;
+    signer?: Signer;
+  }): Promise<string | null> => {
+    return this.sendWatchedFeeBump(params, true, 'releaseWithdrawal');
+  };
+
+  /**
    * Record an already-broadcast withdrawal on the VFX chain (Type 28) without
    * re-running FROST.
    *
@@ -1114,7 +1337,219 @@ export class VfxClient {
       btcTransactionHash: params.btcTransactionHash,
       completionTransactionHash: completionSent.Hash,
       withdrawalRequestHash: params.withdrawalRequestHash,
+      paid: true,
+      watched: null,
     };
+  };
+
+  /**
+   * Withdraw `totalAmount` vBTC to one Bitcoin address from several vaults at
+   * once: one Type 27 transaction, one signature. The chain opens one share
+   * per vault under the request's hash and each share is paid by its own
+   * Bitcoin transaction, so `feeRate` is paid once per share, out of that
+   * share. Follow the shares with getWithdrawalShares / followWithdrawalShares;
+   * raise a share's fee or release it with bumpWithdrawalFee /
+   * releaseWithdrawal, or cancel a Waiting share with cancelWithdrawal, each
+   * naming the share's vault and the request's hash.
+   *
+   * The vaults and amounts are `inputs` when given; otherwise they are chosen
+   * from the requester's spendable balances on Spyglass (largest first, at
+   * most 10 vaults), limited to `vaults` when given. When one vault covers
+   * the total, the ordinary single-vault request is sent instead, as the node
+   * does. Before signing, the SDK checks the Bitcoin address is on this
+   * network, every share clears the fee floor, and the transaction it is
+   * about to sign is the requester's own Type 27 carrying exactly these
+   * shares and a VFX fee no higher than `maxFee`. This sends only the
+   * request; it does not wait for payment.
+   */
+  public requestWithdrawalMulti = async (params: {
+    btcAddress: string;
+    totalAmount: number;
+    /** Bitcoin fee rate (sat/vB), charged once per share. */
+    feeRate: number;
+    /** Local key of the requester. Pass either this or `signer`. */
+    privateKey?: string;
+    signer?: Signer;
+    /** The exact vaults and amounts; skips the balance lookup. Must sum to `totalAmount`. */
+    inputs?: VbtcAllocationInput[];
+    /** Allocate only from these vaults (for example the ones the chain watches). */
+    vaults?: string[];
+    /** Refuse to sign when the VFX fee is above this. Default 0.01. */
+    maxFee?: number;
+  }): Promise<VbtcMultiWithdrawalResult> => {
+    const label = 'requestWithdrawalMulti';
+    this.assertNotDryRun(label);
+    const signer = this.signerFor(params, label);
+    assertNotReserveSender(signer, label);
+    if (!(params.totalAmount > 0)) {
+      throw new Error(`${label} requires a positive totalAmount`);
+    }
+    if (!Number.isInteger(params.feeRate) || params.feeRate <= 0) {
+      throw new Error(`${label}: feeRate must be a whole number of sat/vB greater than zero`);
+    }
+    assertBtcAddressOnNetwork(params.btcAddress, this.network, label);
+    const maxFee = params.maxFee ?? VBTC_MULTI_WITHDRAWAL_DEFAULT_MAX_FEE;
+
+    let inputs = params.inputs;
+    if (!inputs) {
+      const tokens = await this.vbtcV2ApiClient.getTokensForAddress(signer.address);
+      const allowed = params.vaults ? new Set(params.vaults) : null;
+      const balances: Record<string, number> = {};
+      for (const token of tokens) {
+        if (allowed && !allowed.has(token.sc_identifier)) continue;
+        balances[token.sc_identifier] =
+          token.available_balances?.[signer.address] ?? token.addresses?.[signer.address] ?? 0;
+      }
+      const allocation = allocateVbtcInputs(balances, params.totalAmount, VBTC_MULTI_WITHDRAWAL_MAX_INPUTS);
+      if (allocation.failure === 'insufficientBalance') {
+        throw new Error(
+          `${label}: insufficient vBTC: ${allocation.available} available across ${
+            Object.keys(balances).length
+          } vaults, ${params.totalAmount} requested`,
+        );
+      }
+      if (allocation.failure === 'tooManyInputs') {
+        throw new Error(
+          `${label}: withdrawing ${params.totalAmount} would need more than ${VBTC_MULTI_WITHDRAWAL_MAX_INPUTS} vaults; withdraw less`,
+        );
+      }
+      inputs = allocation.inputs;
+    }
+    if (inputs.length === 0) {
+      throw new Error(`${label}: no vault to withdraw from`);
+    }
+
+    if (inputs.length === 1) {
+      return this.requestSingleShare(signer, params, inputs[0], maxFee, label);
+    }
+
+    // Throws for anything the node would refuse (cap, duplicates, decimals,
+    // fee floor, total drift) before anything is built.
+    const data = vbtcMultiWithdrawalData({
+      requestorAddress: signer.address,
+      btcAddress: params.btcAddress,
+      totalAmount: params.totalAmount,
+      feeRate: params.feeRate,
+      inputs,
+    });
+    const expectedInputs = JSON.stringify(data.Inputs);
+    let fee = 0;
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.VbtcV2WithdrawalRequest,
+      data,
+      apiOptions: this.apiOptions,
+      throwOnRefusal: true,
+      beforeSign: (tx) => {
+        const txData = tx.Data as Record<string, unknown>;
+        const problems: string[] = [];
+        if (tx.FromAddress !== signer.address || tx.ToAddress !== signer.address)
+          problems.push('not to and from the requester');
+        if (tx.TransactionType !== TxType.VbtcV2WithdrawalRequest) problems.push(`type ${tx.TransactionType}`);
+        if (tx.Amount !== 0) problems.push(`amount ${tx.Amount}`);
+        if (txData?.Function !== VBTC_MULTI_WITHDRAWAL_FUNCTION) problems.push('not a multi-vault request');
+        if (txData?.BTCAddress !== params.btcAddress) problems.push(`destination ${String(txData?.BTCAddress)}`);
+        if (JSON.stringify(txData?.Inputs) !== expectedInputs) problems.push('shares differ from the allocation');
+        const txFee = typeof tx.Fee === 'number' ? tx.Fee : NaN;
+        if (!(txFee > 0) || txFee > maxFee) problems.push(`fee ${tx.Fee} VFX (limit ${maxFee})`);
+        if (problems.length > 0) {
+          throw new PreSignCheckError(`${label}: refused to sign: ${problems.join('; ')}`);
+        }
+        fee = txFee;
+      },
+    });
+    const withdrawalRequestHash = await txBuilder.process(false);
+    if (!withdrawalRequestHash) {
+      throw new Error(`${label}: the request was not sent (it failed before reaching the node)`);
+    }
+    return {
+      withdrawalRequestHash,
+      inputs,
+      totalAmount: data.TotalAmount as number,
+      btcAddress: params.btcAddress,
+      feeRate: params.feeRate,
+      fee,
+    };
+  };
+
+  /**
+   * Where each share of a withdrawal request stands, read from the node (the
+   * completion route answers per vault). `shares` are the vaults and amounts
+   * the request opened, as requestWithdrawalMulti returned them (`inputs`);
+   * a single-vault request has one. Throws when Spyglass cannot reach the node.
+   */
+  public getWithdrawalShares = async (params: {
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+    shares: VbtcAllocationInput[];
+  }): Promise<VbtcWithdrawalShare[]> => {
+    if (!params.withdrawalRequestHash || params.shares.length === 0) {
+      throw new Error('getWithdrawalShares requires withdrawalRequestHash and at least one share');
+    }
+    return Promise.all(
+      params.shares.map(async (share) => {
+        const watched = await this.getWithdrawalPin({
+          scIdentifier: share.scIdentifier,
+          withdrawalRequestHash: params.withdrawalRequestHash,
+          requestorAddress: params.requestorAddress,
+        });
+        return {
+          scIdentifier: share.scIdentifier,
+          amount: share.amount,
+          outcome: shareOutcome(watched),
+          watched,
+          pinnedBtcTransactionHash: watched?.pinnedBtcTransactionHash ?? null,
+          btcTransactionHash: watched?.btcTransactionHash ?? null,
+        };
+      }),
+    );
+  };
+
+  /**
+   * Read the shares until every one is final (paid, released, cancelled,
+   * closed, or on a vault the chain does not watch) or `timeoutMs` passes,
+   * reporting each read through `onProgress`. Reads that get no answer are
+   * asked again until the deadline. Paying takes Bitcoin confirmations, so a
+   * short timeout usually returns `settled: false` with the shares as they
+   * stand; call it again later.
+   */
+  public followWithdrawalShares = async (params: {
+    withdrawalRequestHash: string;
+    requestorAddress: string;
+    shares: VbtcAllocationInput[];
+    onProgress?: (shares: VbtcWithdrawalShare[]) => void;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }): Promise<VbtcWithdrawalSharesResult> => {
+    const pollIntervalMs = params.pollIntervalMs ?? 15_000;
+    const deadline = Date.now() + (params.timeoutMs ?? 10 * 60 * 1000);
+    let shares: VbtcWithdrawalShare[] | null = null;
+    let lastError: string | undefined;
+    for (;;) {
+      try {
+        shares = await this.getWithdrawalShares(params);
+        lastError = undefined;
+        params.onProgress?.(shares);
+        if (shares.every((share) => isFinalShareOutcome(share.outcome))) {
+          return { withdrawalRequestHash: params.withdrawalRequestHash, shares, settled: true };
+        }
+      } catch (error) {
+        if (!isTransientReadError(error)) throw error;
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      if (Date.now() + pollIntervalMs > deadline) {
+        return {
+          withdrawalRequestHash: params.withdrawalRequestHash,
+          shares: shares ?? [],
+          settled: false,
+          ...(lastError ? { lastError } : {}),
+        };
+      }
+      await sleep(pollIntervalMs);
+    }
   };
 
   public cancelWithdrawal = async (params: {
@@ -1204,18 +1639,29 @@ export class VfxClient {
     return transactionHash ? { transactionHash, scIdentifier } : null;
   };
 
-  /** Owner only; the token must be mintable. Tokens are credited to the signer. */
+  /**
+   * Owner only; the token must be mintable. Tokens are credited to the signer.
+   * Throws before building when the network would refuse the mint: a paused
+   * token, more decimal places than the token's, or a supply or balance past
+   * the largest amount, judged against the token as Spyglass last indexed it.
+   */
   public mintToken = async (
     signer: KeypairOrSigner,
     params: { scIdentifier: string; amount: number; ticker?: string; name?: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
-    const identity = await this.tokenIdentity(params);
+    assertPositiveAmount(params.amount);
+    const { token, holders } = await this.tokenApiClient.getToken(params.scIdentifier);
+    const refusal = tokenMintRefusal(token, params.amount, holders[resolved.address] ?? 0);
+    if (refusal) {
+      throw new Error(refusal);
+    }
     const data = tokenMintData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
       amount: params.amount,
-      ...identity,
+      ticker: params.ticker ?? token.ticker,
+      name: params.name ?? token.name,
     });
     return this.sendTokenTx(resolved, TOKEN_BASE_ADDRESS, data, params.unlockHours);
   };
@@ -1231,15 +1677,16 @@ export class VfxClient {
     } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferToken');
     const identity = await this.tokenIdentity(params);
     const data = tokenTransferData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
-      toAddress: params.toAddress,
+      toAddress,
       amount: params.amount,
       ...identity,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+    return this.sendTokenTx(resolved, toAddress, data, params.unlockHours);
   };
 
   /** Burns from the signer's own balance; the token must be burnable. */
@@ -1303,12 +1750,13 @@ export class VfxClient {
     params: { scIdentifier: string; toAddress: string } & ReserveSendOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferTokenOwnership');
     const data = tokenOwnerChangeData({
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
-      toAddress: params.toAddress,
+      toAddress,
     });
-    return this.sendTokenTx(resolved, params.toAddress, data, params.unlockHours);
+    return this.sendTokenTx(resolved, toAddress, data, params.unlockHours);
   };
 
   /**
@@ -1594,8 +2042,210 @@ export class VfxClient {
     }
   }
 
+  /**
+   * The single-vault shape of requestWithdrawalMulti, for an allocation one
+   * vault covers: the ordinary request through Spyglass, as the node's own
+   * builder does. Sends only the request.
+   */
+  private async requestSingleShare(
+    signer: ResolvedSigner,
+    params: { btcAddress: string; feeRate: number; privateKey?: string; signer?: Signer },
+    input: VbtcAllocationInput,
+    maxFee: number,
+    label: string,
+  ): Promise<VbtcMultiWithdrawalResult> {
+    const floor = withdrawalFeeFloorError(input.amount, params.feeRate, `Withdrawal from vault ${input.scIdentifier}`);
+    if (floor) throw new Error(`${label}: ${floor}`);
+    const prepared = await this.vbtcV2ApiClient.prepareWithdrawRequest({
+      sc_identifier: input.scIdentifier,
+      requestor_address: signer.address,
+      btc_address: params.btcAddress,
+      amount: input.amount,
+      fee_rate: params.feeRate,
+    });
+    this.assertPrepared(prepared, `${label}:prepare`);
+    const fee = typeof prepared.Fee === 'number' ? prepared.Fee : NaN;
+    if (!(fee > 0) || fee > maxFee) {
+      throw new PreSignCheckError(`${label}: refused to sign: fee ${prepared.Fee} VFX (limit ${maxFee})`);
+    }
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawRequest(body));
+    this.assertSent(sent, `${label}:send`);
+    return {
+      withdrawalRequestHash: sent.Hash,
+      inputs: [input],
+      totalAmount: input.amount,
+      btcAddress: params.btcAddress,
+      feeRate: params.feeRate,
+      fee,
+    };
+  }
+
+  private async sendWatchedFeeBump(
+    params: {
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      feeRate: number;
+      privateKey?: string;
+      signer?: Signer;
+    },
+    release: boolean,
+    label: string,
+  ): Promise<string | null> {
+    const signer = this.signerFor(params, label);
+    if (!params.scIdentifier || !params.withdrawalRequestHash) {
+      throw new Error(`${label} requires scIdentifier and withdrawalRequestHash`);
+    }
+    assertWatchedFeeRate(params.feeRate, label);
+
+    const withdrawal = await this.getWithdrawalPin({
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash: params.withdrawalRequestHash,
+      requestorAddress: signer.address,
+    });
+    if (!withdrawal) {
+      throw new Error(
+        `${label}: the vault is not one the chain watches; there is nothing to ${release ? 'release' : 'raise'}`,
+      );
+    }
+    const allowed = release ? withdrawal.canRelease : withdrawal.canRaiseFee;
+    if (!allowed) {
+      throw new Error(
+        `${label}: the withdrawal cannot be ${release ? 'released' : 'raised'} now (${
+          withdrawal.state ?? withdrawal.status
+        }): ` + `${withdrawal.summary ?? withdrawal.message ?? 'no detail'}`,
+      );
+    }
+    if (params.feeRate < withdrawal.minimumNextFeeRate) {
+      throw new Error(
+        `${label}: feeRate must be at least ${withdrawal.minimumNextFeeRate} sat/vB, above the ${withdrawal.feeRate} the pinned transaction pays`,
+      );
+    }
+
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.VbtcV2CoinPin,
+      data: watchedWithdrawalFeeBumpData({
+        scIdentifier: params.scIdentifier,
+        withdrawalRequestHash: params.withdrawalRequestHash,
+        feeRate: params.feeRate,
+        release,
+      }),
+      apiOptions: this.apiOptions,
+      throwOnRefusal: true,
+    });
+    return txBuilder.process(this.dryRun);
+  }
+
+  /**
+   * Where a watched vault's withdrawal stands, as completeWithdrawal reports
+   * it. Waits only while the node has not recorded the request yet; a failed
+   * request or an answer saying Spyglass could not reach the node is asked
+   * again until `timeoutMs`. Stops on a real answer that the vault is not
+   * watched, which cannot happen to a vault once watched.
+   */
+  private async watchedWithdrawalResult(opts: {
+    scIdentifier: string;
+    requestorAddress: string;
+    withdrawalRequestHash: string;
+    first: VbtcWatchedWithdrawal;
+    onProgress: (event: VbtcProgressEvent) => void;
+    pollIntervalMs: number;
+    deadline: number;
+  }): Promise<VbtcWithdrawalResult> {
+    const deadline = opts.deadline;
+    let withdrawal = opts.first;
+    let lastError: unknown = null;
+    for (;;) {
+      opts.onProgress({
+        phase: 'watched_polling',
+        message: withdrawal.summary ?? withdrawal.message ?? withdrawal.status,
+        data: withdrawal,
+      });
+      if (withdrawal.paid && withdrawal.btcTransactionHash) {
+        return {
+          withdrawalRequestHash: opts.withdrawalRequestHash,
+          btcTransactionHash: withdrawal.btcTransactionHash,
+          completionTransactionHash: withdrawal.completionTransactionHash ?? '',
+          paid: true,
+          watched: withdrawal,
+        };
+      }
+      if (withdrawal.closed) {
+        throw new VbtcWithdrawalClosedError(opts.withdrawalRequestHash, withdrawal);
+      }
+      if (!withdrawal.notMinedYet || Date.now() + opts.pollIntervalMs > deadline) {
+        return {
+          withdrawalRequestHash: opts.withdrawalRequestHash,
+          btcTransactionHash: '',
+          completionTransactionHash: '',
+          paid: false,
+          watched: withdrawal,
+        };
+      }
+
+      // Not mined yet: ask again, riding out failed requests until the deadline.
+      let next: VbtcWatchedWithdrawal | null | undefined;
+      while (next === undefined) {
+        await sleep(opts.pollIntervalMs);
+        try {
+          next = await this.getWithdrawalPin(opts);
+        } catch (error) {
+          if (!isTransientReadError(error)) throw error;
+          lastError = error;
+          if (Date.now() + opts.pollIntervalMs > deadline) {
+            return {
+              withdrawalRequestHash: opts.withdrawalRequestHash,
+              btcTransactionHash: '',
+              completionTransactionHash: '',
+              paid: false,
+              watched: withdrawal,
+              lastError: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
+      }
+      if (next === null) {
+        throw new Error(
+          `completeWithdrawal: withdrawal request ${opts.withdrawalRequestHash} was on a watched vault but the node ` +
+            `now answers that it is not${lastError ? ` (after: ${String(lastError)})` : ''}`,
+        );
+      }
+      withdrawal = next;
+    }
+  }
+
   private resolve(input: KeypairOrSigner | ResolvedSigner | { privateKey: string }): ResolvedSigner {
     return resolveSigner(input, this.keypairService);
+  }
+
+  /**
+   * The address a `.vfx`/`.rbx` recipient names; any other recipient as given.
+   * The network refuses a transaction addressed to a name, since it would
+   * credit the name string itself, so the name is resolved before building.
+   * The lookup is strict: an outage fails the call rather than reading as
+   * "no such name".
+   */
+  private async resolveRecipient(toAddress: string, label: string): Promise<string> {
+    if (!isNameRecipient(toAddress)) return toAddress;
+    const name = toAddress.trim().toLowerCase();
+    const address = await this.addressApiClient.lookupDomain(name, { strict: true });
+    if (!address) {
+      throw new Error(`${label}: no account holds the name ${toAddress}`);
+    }
+    // Send only when the address's own record agrees that it holds the name.
+    // Both reads come from the same Spyglass index, so this does not detect an
+    // index that lags the chain; it refuses a lookup that disagrees with it.
+    const holder = await this.addressApiClient.getAddressDetails(address, { strict: true });
+    if (holder?.adnr?.toLowerCase() !== name) {
+      throw new Error(
+        `${label}: ${toAddress} resolved to ${address}, whose own record names ${holder?.adnr ?? 'no domain'}; ` +
+          `the two disagree, so nothing was sent`,
+      );
+    }
+    return address;
   }
 
   /**
@@ -1686,6 +2336,17 @@ export class VfxClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * A read that got no answer: a dropped or timed-out request, a 5xx, or
+ * Spyglass saying it could not reach the node. Worth asking again; a 4xx or a
+ * malformed answer is not.
+ */
+function isTransientReadError(error: unknown): boolean {
+  if (error instanceof VbtcNodeUnreachableError) return true;
+  if (error instanceof VfxApiError) return error.status === undefined || error.status >= 500;
+  return error instanceof TypeError || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
 }
 
 /** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */

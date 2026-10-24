@@ -7,7 +7,7 @@ import {
   TOKEN_MIN_DECIMAL_PLACES,
   TOKEN_TICKER_MAX_LENGTH,
 } from '../constants';
-import { DeployTokenParams } from '../types';
+import { DeployTokenParams, FungibleToken } from '../types';
 
 /**
  * Builders for the `Data` payload of every fungible-token transaction, and
@@ -56,6 +56,63 @@ export function tokenMintData(params: {
     TokenTicker: params.ticker,
     TokenName: params.name,
   };
+}
+
+// System.Decimal's largest value: Core keeps token supply and balances in it.
+const CORE_DECIMAL_MAX = BigInt('79228162514264337593543950335');
+// System.Decimal holds at most 28 decimal places.
+const CORE_DECIMAL_MAX_SCALE = 28;
+
+function pow10(exponent: number): bigint {
+  return BigInt(`1${'0'.repeat(exponent)}`);
+}
+
+/** `value` as an exact decimal, digits / 10^scale, read from the shortest form JSON sends. */
+function exactDecimal(value: number): { digits: bigint; scale: number } {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(value));
+  if (!match) {
+    throw new Error(`Not a finite number: ${String(value)}`);
+  }
+  const [, sign, whole, fraction = '', exponent = '0'] = match;
+  let digits = BigInt(`${sign}${whole}${fraction}`);
+  let scale = fraction.length - Number(exponent);
+  if (scale < 0) {
+    digits *= pow10(-scale);
+    scale = 0;
+  }
+  return { digits, scale };
+}
+
+function scaledTo(value: { digits: bigint; scale: number }, scale: number): bigint {
+  return value.digits * pow10(scale - value.scale);
+}
+
+/**
+ * Why the network would refuse this TokenMint(), or null when it would not.
+ * Mirrors Core's LedgerIntegrityRules.TokenMintRefusal (TokenMintRulesHeight):
+ * a paused contract, more decimal places than the token's, or a supply or
+ * holder balance pushed past System.Decimal's largest value. `holderBalance`
+ * is the minter's own balance of the token, which the mint is credited to.
+ */
+export function tokenMintRefusal(token: FungibleToken, amount: number, holderBalance: number): string | null {
+  if (token.is_paused) {
+    return `Token ${token.sc_identifier} is paused; the network refuses a mint on a paused contract`;
+  }
+  const mint = exactDecimal(amount);
+  if (token.decimal_places < 0 || mint.scale > Math.min(token.decimal_places, CORE_DECIMAL_MAX_SCALE)) {
+    return `A mint of ${token.ticker} has at most ${token.decimal_places} decimal places, got ${String(amount)}`;
+  }
+  for (const [label, held] of [
+    ['supply', token.circulating_supply],
+    ['balance', holderBalance],
+  ] as const) {
+    const current = exactDecimal(held);
+    const scale = Math.max(mint.scale, current.scale);
+    if (scaledTo(mint, scale) + scaledTo(current, scale) > CORE_DECIMAL_MAX * pow10(scale)) {
+      return `A mint of ${String(amount)} ${token.ticker} would take the token's ${label} past the largest amount the network holds`;
+    }
+  }
+  return null;
 }
 
 export function tokenTransferData(params: {

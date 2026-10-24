@@ -17,6 +17,8 @@ export enum TxType {
   VbtcV2WithdrawalRequest = 27,
   VbtcV2WithdrawalComplete = 28,
   VbtcV2WithdrawalCancel = 29,
+  /** Raises the Bitcoin fee of, or releases, a pinned withdrawal on a watched vault. */
+  VbtcV2CoinPin = 44,
 }
 
 export enum Network {
@@ -25,6 +27,8 @@ export enum Network {
 }
 
 export const DOMAIN_PURCHASE_COST = 5.0;
+/** Longest .vfx name before the suffix (Core's Globals.ADNRLimit). */
+export const ADNR_NAME_MAX_LENGTH = 65;
 export const DOMAIN_TRANSFER_COST = 5.0;
 export const DOMAIN_DELETE_COST = 5.0;
 

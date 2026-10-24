@@ -6,6 +6,7 @@ import {
   tokenBurnData,
   tokenDeployPayload,
   tokenMintData,
+  tokenMintRefusal,
   tokenOwnerChangeData,
   tokenPauseData,
   tokenTransferData,
@@ -25,6 +26,8 @@ const keypair = {
 const OWNER = 'xOwner000000000000000000000000000';
 const RECIPIENT = 'xRecipient00000000000000000000000';
 const SC = 'abc123:1700000000';
+// System.Decimal.MaxValue as the nearest number, which is just above it.
+const DECIMAL_MAX = 7.922816251426434e28;
 
 const fakeToken = {
   sc_identifier: SC,
@@ -174,6 +177,39 @@ describe('token Data builders', () => {
   });
 });
 
+describe('tokenMintRefusal', () => {
+  const token = { ...fakeToken, decimal_places: 8, circulating_supply: 100, is_paused: false };
+
+  test('passes a mint within the decimals and the largest amount', () => {
+    expect(tokenMintRefusal(token, 1, 0)).toBeNull();
+    expect(tokenMintRefusal(token, 1.12345678, 0)).toBeNull();
+    expect(tokenMintRefusal({ ...token, decimal_places: 0 }, 5, 0)).toBeNull();
+    expect(tokenMintRefusal(token, 1e21, 0)).toBeNull();
+  });
+
+  test('refuses a paused contract first', () => {
+    expect(tokenMintRefusal({ ...token, is_paused: true, decimal_places: 0 }, 1.5, 0)).toMatch(/paused/);
+  });
+
+  test("refuses more decimal places than the token's", () => {
+    expect(tokenMintRefusal(token, 1.123456789, 0)).toMatch(/at most 8 decimal places, got 1.123456789/);
+    expect(tokenMintRefusal({ ...token, decimal_places: 0 }, 1.5, 0)).toMatch(/at most 0/);
+    expect(tokenMintRefusal({ ...token, decimal_places: -1 }, 1, 0)).toMatch(/at most -1/);
+    // Core rounds to at most 28 places, System.Decimal's limit
+    expect(tokenMintRefusal({ ...token, decimal_places: 30 }, 1.5, 0)).toBeNull();
+  });
+
+  test('refuses a supply or holder balance pushed past System.Decimal.MaxValue', () => {
+    expect(tokenMintRefusal({ ...token, circulating_supply: DECIMAL_MAX }, 1, 0)).toMatch(/supply/);
+    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, 1, DECIMAL_MAX)).toMatch(/balance/);
+    expect(tokenMintRefusal({ ...token, circulating_supply: 0 }, DECIMAL_MAX, 0)).toMatch(/supply/);
+    // The bound is exact, not float: reaching MaxValue passes, one past it does not
+    const supply = 7.9228162514264e28;
+    expect(tokenMintRefusal({ ...token, circulating_supply: supply }, 337593543950335, 0)).toBeNull();
+    expect(tokenMintRefusal({ ...token, circulating_supply: supply }, 337593543950336, 0)).toMatch(/supply/);
+  });
+});
+
 describe('tokenDeployPayload', () => {
   const minterAddress = OWNER;
 
@@ -294,6 +330,41 @@ describe('VfxClient token transactions', () => {
       TokenTicker: 'ACME',
       TokenName: 'Acme Fund',
     });
+  });
+
+  test.each([
+    ['a paused contract', { is_paused: true }, 5, /paused/],
+    ['more decimals than the token has', { decimal_places: 2 }, 1.005, /at most 2 decimal places/],
+    ['a supply overflow', { circulating_supply: DECIMAL_MAX }, 1, /supply past the largest amount/],
+  ])('mintToken refuses %s before building (Core TokenMintRulesHeight)', async (_label, tokenFields, amount, message) => {
+    const { calls } = installTokenPipeline({
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({ token: { ...fakeToken, ...tokenFields }, holders: {} }),
+    });
+    await expect(
+      client.mintToken(keypair, { scIdentifier: SC, amount, ticker: 'ACME', name: 'Acme Fund' }),
+    ).rejects.toThrow(message);
+    expect(calls.some((c) => c.url.includes('/raw/'))).toBe(false);
+  });
+
+  test("mintToken checks the minter's own balance", async () => {
+    installTokenPipeline({
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({
+        token: { ...fakeToken, circulating_supply: 0 },
+        holders: { [OWNER]: 0, [keypair.address]: DECIMAL_MAX },
+      }),
+    });
+    await expect(client.mintToken(keypair, { scIdentifier: SC, amount: 1 })).rejects.toThrow(/balance past/);
+  });
+
+  test('mintToken reads the token even when ticker and name are given, and mints within its decimals', async () => {
+    const { calls } = installTokenPipeline({
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({ token: { ...fakeToken, decimal_places: 2 }, holders: {} }),
+    });
+    expect(await client.mintToken(keypair, { scIdentifier: SC, amount: 1.25, ticker: 'ACME', name: 'Acme Fund' })).toBe(
+      'TX_HASH_ABC',
+    );
+    expect(calls[0].url).toContain(`/fungible-tokens/${encodeURIComponent(SC)}/`);
+    expect((sentTransaction(calls).Data as { Amount: number }).Amount).toBe(1.25);
   });
 
   test('transferToken targets the recipient and skips the lookup when ticker and name are given', async () => {

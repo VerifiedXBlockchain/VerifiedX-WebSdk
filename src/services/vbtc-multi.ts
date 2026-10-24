@@ -36,11 +36,16 @@ export interface VbtcAllocation {
 /**
  * Split `total` across `balances` (contract id → spendable vBTC) the way the
  * CLI's allocator does: largest balance first, ties broken by contract id,
- * greedy until covered. Works in whole satoshis so the inputs sum to the
+ * greedy until covered, at most `maxInputs` contracts (the transfer cap by
+ * default). Works in whole satoshis so the inputs sum to the
  * total exactly — the node rejects any drift between TotalAmount and the
  * inputs.
  */
-export function allocateVbtcInputs(balances: Record<string, number>, total: number): VbtcAllocation {
+export function allocateVbtcInputs(
+  balances: Record<string, number>,
+  total: number,
+  maxInputs: number = VBTC_MULTI_MAX_INPUTS,
+): VbtcAllocation {
   const candidates = Object.entries(balances)
     .map(([scIdentifier, balance]) => ({ scIdentifier, sats: toSats(balance) }))
     .filter((c) => c.sats > 0)
@@ -64,7 +69,7 @@ export function allocateVbtcInputs(balances: Record<string, number>, total: numb
   if (remaining > 0) {
     return { inputs: [], available, failure: 'insufficientBalance' };
   }
-  if (inputs.length > VBTC_MULTI_MAX_INPUTS) {
+  if (inputs.length > maxInputs) {
     return { inputs: [], available, failure: 'tooManyInputs' };
   }
   return { inputs, available };

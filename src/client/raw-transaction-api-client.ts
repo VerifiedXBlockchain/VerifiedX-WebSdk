@@ -52,10 +52,16 @@ export class RawTransactionApiClient extends BaseApiClient {
   }
 
   async verifyTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    return (await this.verifyTransactionResult(txData)).valid;
+  }
+
+  /** The node's verdict on a transaction, with its reason when it refuses one. */
+  async verifyTransactionResult(txData: Record<string, unknown>): Promise<{ valid: boolean; message: string | null }> {
     const params = { transaction: txData };
     const response = await this.makeJsonRequest('/verify/', 'POST', params);
-
-    return response?.Result === 'Success';
+    const valid = response?.Result === 'Success';
+    const message = typeof response?.Message === 'string' && response.Message ? response.Message : null;
+    return { valid, message: valid ? null : message };
   }
 
   /**

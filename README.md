@@ -161,13 +161,25 @@ addressFromPrivate(privateKey: string): string
 
 ```typescript
 // Send VFX. Resolves to the transaction hash, or null if it never reached the node.
+// A `.vfx`/`.rbx` toAddress is resolved to the address it names first (the network
+// refuses a transaction addressed to a name); every send that takes a recipient does this.
+// The send is refused if that address's own record does not name the domain (the
+// lookup and the record disagree). Both come from the same index, so this is not
+// protection against an index that lags the chain.
 sendCoin(keypair: Keypair | Signer, toAddress: string, amount: number): Promise<string | null>
 
 // Domains (5 VFX each). Transfer and delete read the owned name from Spyglass.
 buyVfxDomain(keypair: Keypair | Signer, domain: string): Promise<string | null>
 transferVfxDomain(keypair, toAddress)
 deleteVfxDomain(keypair)
-transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress })
+transferBtcDomain(keypair, { btcFromAddress, btcToAddress, vfxToAddress, btcToMessage?, btcToSignature? })
+
+// Cross-wallet .btc transfer acceptance (required once the network sets
+// BtcNameSignerOwnsAddressHeight). The receiver signs with the key of btcToAddress
+// and hands the code to the sender; the acceptance names vfxToAddress and lasts 24 hours.
+const { code } = signBtcNameTransferAcceptance({ btcPrivateKey, name: 'alice.btc', newOwner: vfxToAddress })
+const accepted = parseBtcNameAcceptanceCode(code) // { message, signature, timestamp, owner, name } or null
+transferBtcDomain(keypair, { ...addresses, btcToMessage: accepted.message, btcToSignature: accepted.signature })
 deleteBtcDomain(keypair, { btcFromAddress })
 
 // Address for an external signer's public key (the SDK never sees the private key)
@@ -438,6 +450,13 @@ try {
 }
 ```
 
+A recipient on the other network (a testnet `x…` address given to a mainnet
+client, or the reverse, or a Bitcoin-style address) throws before anything is
+built or sent: the network refuses it, because nothing sent there could ever be
+spent. Reserve (`xRBX`), shielded (`zfx_`) and `*_Base` recipients are not
+affected. `isOtherNetworksAddress(address, network)` runs the same check, so a
+wallet can flag the address as it is typed.
+
 vBTC withdrawals add two recovery errors. `VbtcWithdrawalIncompleteError` means
 the request is on chain and nothing was paid out; resume with
 `completeWithdrawal`. `VbtcWithdrawalUnrecordedError` means the Bitcoin
@@ -445,6 +464,45 @@ transaction was, or may have been, broadcast; never call `completeWithdrawal`
 for it. When the broadcast outcome itself is unknown the error carries
 `signedBtcTxHex`: look up `btcTransactionHash`, re-broadcast that same
 transaction if it is absent, then call `recordWithdrawalCompletion`.
+
+On a vault the chain watches (VerifiedX 9.0 Bitcoin attestation), the
+requester sends the request and nothing else. The chain fixes ("pins") the
+Bitcoin transaction, and the vault's signers sign and send it. There is no
+signing ceremony, and the network refuses a completion transaction.
+`completeWithdrawal` (and `requestWithdrawal` after the request) detects such
+a vault, sends nothing, and waits only until the node has recorded the request
+(riding out failed or unreachable reads until `timeoutMs`). Being paid takes
+Bitcoin confirmations, so the usual answer is a pending result, not an error:
+
+- `paid: true`: Bitcoin has paid it; `btcTransactionHash` is the paying
+  transaction.
+- `paid: false`: the chain has it and is paying it. Nothing needs to be done.
+  `btcTransactionHash` is empty and `watched` holds its state; follow it with
+  `getWithdrawalPin`, or call `completeWithdrawal` again.
+- `VbtcWithdrawalClosedError`: closed unpaid (released or expired). The vBTC
+  went back to the requester.
+
+Every result has `paid` and `watched`. For a vault the chain does not watch,
+`paid` is always true and `watched` is null, so existing code is unaffected.
+`getWithdrawalPin` throws `VbtcNodeUnreachableError` when Spyglass could not
+reach the node, rather than answering "not watched".
+
+While the withdrawal is pinned and not confirming, its requester can raise the
+fee with `bumpWithdrawalFee` or give it up with `releaseWithdrawal`. Each is a
+single transaction, with a `feeRate` above the pinned rate
+(`withdrawal.minimumNextFeeRate`) and at most 5000 sat/vB. Both read the
+withdrawal first and refuse when it cannot be raised or released, or the rate
+is too low. A refusal by the node throws `TransactionRefusedError` with the
+node's `reason`.
+
+```typescript
+const pin = await vfxClient.getWithdrawalPin({ scIdentifier, withdrawalRequestHash, requestorAddress });
+if (pin === null) {
+  // Not a watched vault: completeWithdrawal runs the signing ceremony as before.
+} else if (pin.canRaiseFee) {
+  await vfxClient.bumpWithdrawalFee({ scIdentifier, withdrawalRequestHash, feeRate: pin.minimumNextFeeRate + 4, privateKey });
+}
+```
 
 Bitcoin sends follow the same rule. `sendBtc` and `broadcastTransaction` throw
 `BtcBroadcastUnknownError` when the broadcast request went out but no definite
@@ -603,7 +661,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 3.6.0
+- **Version**: 4.0.0
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
 - **Documentation**: See inline TypeScript definitions for detailed API documentation

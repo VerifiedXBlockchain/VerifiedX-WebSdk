@@ -1,6 +1,6 @@
 import { Network } from '../constants';
 import { PaginatedResponse, VbtcTransfer, VbtcV2Token, VbtcWithdrawalRequest } from '../types';
-import { BaseApiClient } from './base-api-client';
+import { BaseApiClient, VfxApiError } from './base-api-client';
 
 export interface CeremonyPrepareResponse {
   success: boolean;
@@ -239,6 +239,32 @@ export class VbtcV2ApiClient extends BaseApiClient {
     owner_address: string;
   }): Promise<WithdrawCompletePrepareResponse> {
     return this.makeJsonRequest('/vbtc-v2/withdraw/complete/prepare/', 'POST', body);
+  }
+
+  /**
+   * The node's answer to PrepareCompleteWithdrawalRaw whatever its status. For
+   * a vault the chain watches it is the withdrawal's state (`Attested: true`),
+   * which Spyglass returns with HTTP 500 under `raw` when the node's `Success`
+   * is false (closed, or not mined yet), so a 500 with a JSON body is read as
+   * data. Any other failure throws.
+   */
+  async getWithdrawCompleteAnswer(body: {
+    sc_identifier: string;
+    withdrawal_request_hash: string;
+    owner_address: string;
+  }): Promise<Record<string, unknown>> {
+    try {
+      return await this.makeJsonRequest('/vbtc-v2/withdraw/complete/prepare/', 'POST', body);
+    } catch (error) {
+      if (error instanceof VfxApiError && error.status === 500 && error.body) {
+        try {
+          return JSON.parse(error.body);
+        } catch {
+          throw error;
+        }
+      }
+      throw error;
+    }
   }
 
   async executeWithdrawComplete(body: {
