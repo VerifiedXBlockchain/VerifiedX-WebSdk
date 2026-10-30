@@ -72,6 +72,7 @@ export type {
 // External signing (HSM / MPC)
 export type { Signer, KeypairOrSigner } from './signer';
 export { vfxSignatureFromDer } from './signer';
+export { verifySignature } from './services/keypair-service';
 export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from './services/vbtc-multi';
 export {
   VBTC_MULTI_WITHDRAWAL_FUNCTION,

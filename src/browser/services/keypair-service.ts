@@ -164,6 +164,11 @@ export class BrowserKeypairService {
   public getSignature(message: string, privateKeyHex: string): string {
     return this.inner.getSignature(message, privateKeyHex);
   }
+
+  /** See KeypairService.verifySignature: the network is read from the address. */
+  public verifySignature(message: string, signature: string, address: string): boolean {
+    return this.inner.verifySignature(message, signature, address);
+  }
 }
 
 export default BrowserKeypairService;

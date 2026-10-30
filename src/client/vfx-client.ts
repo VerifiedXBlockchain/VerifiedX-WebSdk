@@ -377,6 +377,15 @@ export class VfxClient {
     return this.keypairService.getSignature(message, privateKey);
   };
 
+  /**
+   * Whether `signature` is `address`'s signature of `message`, accepting
+   * exactly what the platform's verifier does. Never throws. The network is
+   * read from the address (`x` testnet, otherwise mainnet), not this client's.
+   */
+  public verifySignature = (message: string, signature: string, address: string): boolean => {
+    return this.keypairService.verifySignature(message, signature, address);
+  };
+
   // Raw Transaction API
   public getHash = async (txData: Record<string, unknown>): Promise<string> => {
     return this.rawTransactionApiClient.getHash(txData);
