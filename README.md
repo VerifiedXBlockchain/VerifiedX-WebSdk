@@ -672,7 +672,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 9.0.2 (major.minor follows the VerifiedX Core release it supports; patch releases are the SDK's own)
+- **Version**: 9.0.3 (major.minor follows the VerifiedX Core release it supports; patch releases are the SDK's own)
 - **Requires**: VerifiedX Core 9.0.1 or later
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)
