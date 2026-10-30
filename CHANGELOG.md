@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`verifySignature(message, signature, address)`** on `VfxClient`,
+  `KeypairService` and `BrowserKeypairService`, and as a standalone export. It
+  checks a `base64(DER).base58(publicKey)` signature (what `getSignature`
+  produces) against the key behind `address` and returns a boolean, never
+  throwing. It accepts exactly what butterfly-service's `verify_vfx_signature`
+  accepts, including a 63-byte public key (one whose leading zero byte was
+  dropped), compressed and `04`-prefixed public keys, and high-s signatures.
+  The network is read from the address (`x` is testnet, anything else
+  mainnet), not from the client. The cases, shared with butterfly-service,
+  are in `src/__tests__/compat/signature-vectors.json`. Many different strings
+  verify for one message and address, so do not use a signature string as a
+  dedupe or replay key.
+
 ## 9.0.2 (unreleased)
 
 Needs VerifiedX Core 9.0.1 or later.

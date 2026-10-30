@@ -17,6 +17,7 @@ import {
 } from '../utils';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import { ReserveKeypair } from '../types';
+import { parseVfxSignature } from './vfx-signature';
 
 // Curve context construction is the expensive part of elliptic — build once.
 const secp256k1Curve = new EC.ec('secp256k1');
@@ -316,6 +317,51 @@ export class KeypairService {
     const fullSignature = `${signatureBase64}.${publicKeyBufferBase58}`;
 
     return fullSignature;
+  }
+
+  /**
+   * Whether `signature` (`base64(DER).base58(publicKey)`, as getSignature
+   * produces) is a valid signature of `message` by the key behind `address`.
+   * Accepts exactly what butterfly-service's `verify_vfx_signature` accepts
+   * (see vfx-signature.ts) and returns false, never throws, on anything else.
+   *
+   * The network is read from the address, as the platform does: an address
+   * starting `x` is checked as testnet, anything else as mainnet. It is not
+   * compared with this service's network, so the testnet address of a key
+   * verifies on a mainnet client. Put the network in the signed message when
+   * it matters.
+   */
+  public verifySignature(message: string, signature: string, address: string): boolean {
+    return verifySignature(message, signature, address);
+  }
+}
+
+const verifierByNetwork: Record<Network, KeypairService> = {
+  [Network.Mainnet]: new KeypairService(Network.Mainnet),
+  [Network.Testnet]: new KeypairService(Network.Testnet),
+};
+
+/** KeypairService.verifySignature without a client: the network comes from the address. */
+export function verifySignature(message: string, signature: string, address: string): boolean {
+  if (typeof message !== 'string' || typeof signature !== 'string' || typeof address !== 'string') {
+    return false;
+  }
+  try {
+    const parsed = parseVfxSignature(signature);
+    if (!parsed) {
+      return false;
+    }
+    const network = address.startsWith('x') ? Network.Testnet : Network.Mainnet;
+    if (verifierByNetwork[network].addressFromPublic(parsed.publicKey) !== address) {
+      return false;
+    }
+    const digest = Buffer.from(CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex), 'hex');
+    const publicKey = secp256k1Curve.keyFromPublic('04' + parsed.publicKey, 'hex');
+    return secp256k1Curve.verify(digest, { r: parsed.r.toString(16), s: parsed.s.toString(16) }, publicKey);
+  } catch {
+    // A message that is not valid UTF-16 (a lone surrogate) cannot be hashed;
+    // the platform refuses it the same way.
+    return false;
   }
 }
 

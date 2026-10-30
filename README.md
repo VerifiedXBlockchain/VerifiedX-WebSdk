@@ -155,6 +155,17 @@ publicFromPrivate(privateKey: string): string
 
 // Get address from private key
 addressFromPrivate(privateKey: string): string
+
+// Sign a message: base64(DER signature).base58(public key)
+getSignature(message: string, privateKey: string): string
+
+// Check a signature against an address. Never throws; false on malformed input.
+// Accepts what the platform's verifier accepts. The network is read from the
+// address (x = testnet, otherwise mainnet), so bind the network in the message
+// if it matters. Several encodings of one signature verify (as on the platform),
+// so never key dedupe or replay checks on the signature string.
+// Also exported on its own: import { verifySignature } from 'vfx-web-sdk'
+verifySignature(message: string, signature: string, address: string): boolean
 ```
 
 #### Transactions
