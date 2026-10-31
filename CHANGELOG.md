@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 9.0.3 (2026-10-30)
+
+Needs VerifiedX Core 9.0.1 or later.
 
 ### Added
 
@@ -17,7 +19,7 @@
   verify for one message and address, so do not use a signature string as a
   dedupe or replay key.
 
-## 9.0.2 (unreleased)
+## 9.0.2 (2026-10-24)
 
 Needs VerifiedX Core 9.0.1 or later.
 
