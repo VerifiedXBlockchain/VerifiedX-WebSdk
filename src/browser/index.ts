@@ -40,6 +40,7 @@ export type {
   PaginatedResponse,
   VbtcV2Token,
   VbtcWithdrawalRequest,
+  VbtcWithdrawalStatus,
   VbtcTransfer,
   CreateVbtcResult,
   VbtcTransferResult,
