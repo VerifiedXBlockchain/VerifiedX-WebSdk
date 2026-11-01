@@ -135,7 +135,7 @@ export interface ITransactionService {
 export interface IAccountService {
   network: Network;
   addressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>;
-  transactions(address: string, limit?: number, before?: number | null): Promise<ITransaction[]>;
+  transactions(address: string, limit?: number, before?: string | null): Promise<ITransaction[]>;
 }
 
 // Main BTC Client interface
@@ -153,7 +153,7 @@ export interface IBtcClient {
 
     // Account and address info
     getAddressInfo: (address: string, inSatoshis?: boolean) => Promise<IAccountInfo>;
-    getTransactions: (address: string, limit?: number, before?: number | null) => Promise<ITransaction[]>;
+    getTransactions: (address: string, limit?: number, before?: string | null) => Promise<ITransaction[]>;
 
     // Transaction operations
     getFeeRates: () => Promise<IFeeRates | null>;

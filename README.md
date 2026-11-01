@@ -340,7 +340,7 @@ getSignatureFromWif(message: string, wif: string): string
 
 // Account information
 getAddressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>
-getTransactions(address: string, limit?: number, before?: number | null): Promise<ITransaction[]>
+getTransactions(address: string, limit?: number, before?: string | null): Promise<ITransaction[]> // newest first; before = last seen txid
 
 // Transaction operations
 getFeeRates(): Promise<IFeeRates | null>

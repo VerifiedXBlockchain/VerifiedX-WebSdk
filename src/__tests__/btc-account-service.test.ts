@@ -76,3 +76,49 @@ describe('transactions', () => {
     expect(txs[0].txid).toBe('ab'.repeat(32));
   });
 });
+
+describe('transactions', () => {
+  const tx = (id: string, confirmed = true) => ({ txid: id, status: { confirmed } });
+  const page = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => tx(`${prefix}${i}`));
+
+  test('first page comes from /txs and is cut to limit', async () => {
+    const { calls } = installFetch({ '/address/tb1qa/txs': () => page('c', 25) });
+    const txs = await service.transactions('tb1qa', 10);
+    expect(txs).toHaveLength(10);
+    expect(calls.map((c) => c.url)).toEqual(['https://signet.verifiedx.io/api/address/tb1qa/txs']);
+  });
+
+  test('pages /txs/chain/{lastConfirmedTxid} until limit is reached', async () => {
+    const { calls } = installFetch({
+      '/txs/chain/c24': () => page('d', 25),
+      '/address/tb1qa/txs': () => [tx('m0', false), ...page('c', 25)],
+    });
+    const txs = await service.transactions('tb1qa', 40);
+    expect(txs).toHaveLength(40);
+    expect(txs[0].txid).toBe('m0');
+    expect(txs[39].txid).toBe('d13');
+    expect(calls.map((c) => c.url)).toEqual([
+      'https://signet.verifiedx.io/api/address/tb1qa/txs',
+      'https://signet.verifiedx.io/api/address/tb1qa/txs/chain/c24',
+    ]);
+  });
+
+  test('stops when a page is short', async () => {
+    const { calls } = installFetch({ '/address/tb1qa/txs': () => page('c', 3) });
+    const txs = await service.transactions('tb1qa', 50);
+    expect(txs).toHaveLength(3);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('before starts from /txs/chain/{before}', async () => {
+    const { calls } = installFetch({ '/txs/chain/seen': () => page('o', 5) });
+    const txs = await service.transactions('tb1qa', 50, 'seen');
+    expect(txs.map((t) => t.txid)).toEqual(['o0', 'o1', 'o2', 'o3', 'o4']);
+    expect(calls[0].url).toBe('https://signet.verifiedx.io/api/address/tb1qa/txs/chain/seen');
+  });
+
+  test('rejects a non-positive limit', async () => {
+    installFetch({});
+    await expect(service.transactions('tb1qa', 0)).rejects.toThrow('limit must be a positive integer');
+  });
+});

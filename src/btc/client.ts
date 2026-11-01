@@ -84,7 +84,13 @@ export default class BtcClient {
     return this.accountService.addressInfo(address, inSatoshis);
   }
 
-  async getTransactions(address: string, limit = 50, before: number | null = null): Promise<ITransaction[]> {
+  /**
+   * Newest-first history for `address`, at most `limit` entries (default 50).
+   * `before` is a txid already seen: only confirmed transactions older than
+   * it are returned. Pass the last confirmed txid of one call as the next
+   * call's `before` to page back through the history.
+   */
+  async getTransactions(address: string, limit = 50, before: string | null = null): Promise<ITransaction[]> {
     return this.accountService.transactions(address, limit, before);
   }
 
