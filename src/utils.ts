@@ -284,6 +284,19 @@ export function cleanBtcDomain(domain: string): string {
   return cleaned;
 }
 
+/**
+ * The form Spyglass indexes ADNR names under: trimmed, lowercase, with a
+ * suffix. A `.btc` or legacy `.rbx` name keeps its suffix; anything else is
+ * treated as a `.vfx` name, so `Name`, `name` and `name.vfx` all become
+ * `name.vfx`.
+ */
+export function cleanAdnrName(domain: string): string {
+  const cleaned = domain.trim().toLowerCase();
+  if (cleaned.endsWith('.btc')) return cleanBtcDomain(cleaned);
+  if (cleaned.endsWith('.rbx')) return cleaned;
+  return cleanVfxDomain(cleaned);
+}
+
 export function domainWithoutSuffix(domain: string): string {
   if (domain.includes('.vfx') || domain.includes('.btc') || domain.includes('.rbx')) {
     return domain.split('.')[0];
