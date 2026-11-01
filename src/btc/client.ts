@@ -9,18 +9,10 @@ import type {
   IBroadcastTxResponse,
   IBroadcastCheck,
   IFeeRates,
+  BtcClientOptions,
 } from './types';
 
-export interface BtcClientOptions {
-  dryRun?: boolean;
-  /**
-   * Override the mempool.space-style (Esplora) API origin, including /api,
-   * e.g. a self-hosted mempool instance. Defaults: mainnet
-   * 'https://mempool.space/api', testnet (the VerifiedX signet)
-   * 'https://signet.verifiedx.io/api'.
-   */
-  apiBaseUrl?: string;
-}
+export type { BtcClientOptions };
 
 export default class BtcClient {
   private keypairService: KeypairService;

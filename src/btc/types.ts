@@ -138,12 +138,23 @@ export interface IAccountService {
   transactions(address: string, limit?: number, before?: string | null): Promise<ITransaction[]>;
 }
 
-// Main BTC Client interface
+export interface BtcClientOptions {
+  dryRun?: boolean;
+  /**
+   * Override the mempool.space-style (Esplora) API origin, including /api,
+   * e.g. a self-hosted mempool instance. Defaults: mainnet
+   * 'https://mempool.space/api', testnet (the VerifiedX signet)
+   * 'https://signet.verifiedx.io/api'.
+   */
+  apiBaseUrl?: string;
+}
+
+// Main BTC Client interface: the shape of the BtcClient class.
 export interface IBtcClient {
-  new (network: 'mainnet' | 'testnet', dryRun?: boolean): {
+  new (network?: 'mainnet' | 'testnet', dryRunOrOptions?: boolean | BtcClientOptions): {
     // Keypair generation and management
     generatePrivateKey: () => IBtcKeypair;
-    generateMnemonic: (words?: 12 | 24) => IBtcKeypair;
+    generateMnemonic: () => IBtcKeypair;
     privateKeyFromMnemonic: (mnemonic: string, index?: number) => IBtcKeypair;
     publicFromPrivate: (privateKey: string) => IBtcKeypair;
     addressFromPrivate: (privateKey: string) => IBtcKeypair;
@@ -169,6 +180,7 @@ export interface IBtcClient {
 
     // Utility functions
     getRawTransaction: (txId: string) => Promise<Buffer>;
+    generateEmailKeypair: (email: string, password: string, index?: number) => IBtcKeypair;
   };
 }
 
