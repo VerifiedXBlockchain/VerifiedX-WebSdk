@@ -45,7 +45,7 @@ describe('VFX data API', () => {
   });
 });
 
-describe('mempool.space API', () => {
+describe('Bitcoin Esplora API (testnet: VerifiedX signet)', () => {
   const btcClient = new btc.BtcClient('testnet', true);
 
   test('getFeeRates returns the recommended-fees shape', async () => {

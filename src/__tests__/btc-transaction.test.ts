@@ -119,3 +119,17 @@ describe('createTransaction', () => {
     expect(tx.outs[1].value).toBe(90_000 - 50_000 - 2_760);
   });
 });
+
+describe('apiBaseUrl defaults', () => {
+  test('testnet uses the VerifiedX signet Esplora API', () => {
+    expect(new TransactionService(true).apiBaseUrl).toBe('https://signet.verifiedx.io/api');
+  });
+
+  test('mainnet uses mempool.space', () => {
+    expect(new TransactionService(false).apiBaseUrl).toBe('https://mempool.space/api');
+  });
+
+  test('an explicit apiBaseUrl wins over the default', () => {
+    expect(new TransactionService(true, 'https://example.test/api').apiBaseUrl).toBe('https://example.test/api');
+  });
+});

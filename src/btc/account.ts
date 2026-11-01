@@ -1,5 +1,5 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import { SATOSHI_TO_BTC_MULTIPLIER } from './constants';
+import { SATOSHI_TO_BTC_MULTIPLIER, defaultApiBaseUrl } from './constants';
 
 const TESTNET = bitcoin.networks.testnet;
 const MAINNET = bitcoin.networks.bitcoin;
@@ -27,7 +27,7 @@ export default class AccountService {
 
   constructor(isTestnet: boolean, apiBaseUrl?: string) {
     this.network = isTestnet ? TESTNET : MAINNET;
-    this.apiBaseUrl = apiBaseUrl ?? (isTestnet ? 'https://mempool.space/testnet4/api' : 'https://mempool.space/api');
+    this.apiBaseUrl = apiBaseUrl ?? defaultApiBaseUrl(isTestnet);
   }
 
   public async addressInfo(address: string, inSatoshis = true) {
