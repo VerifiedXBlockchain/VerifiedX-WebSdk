@@ -77,7 +77,7 @@ describe('transactions', () => {
   });
 });
 
-describe('transactions', () => {
+describe('transactions paging (limit, before)', () => {
   const tx = (id: string, confirmed = true) => ({ txid: id, status: { confirmed } });
   const page = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => tx(`${prefix}${i}`));
 
