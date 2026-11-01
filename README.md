@@ -138,8 +138,16 @@ The `VfxClient` provides access to VerifiedX blockchain functionality:
 #### Constructor
 
 ```typescript
-new VfxClient(network: Network | string, dryRun?: boolean)
+new VfxClient(network: Network | 'mainnet' | 'testnet', dryRunOrOptions?: boolean | VfxClientOptions)
+
+interface VfxClientOptions {
+  dryRun?: boolean;    // return would-be hashes without broadcasting
+  baseUrl?: string;    // data API origin including /api, e.g. a self-hosted node
+  timeoutMs?: number;  // per-request timeout, default 30000; 0 disables
+}
 ```
+
+A boolean second argument is the historical `dryRun` flag and still works.
 
 #### Keypair Management
 
@@ -325,7 +333,7 @@ The `btc` namespace provides comprehensive Bitcoin functionality through the `Bt
 
 ```typescript
 // Initialize Bitcoin client
-const btcClient = new btc.BtcClient(network?: 'mainnet' | 'testnet', dryRun?: boolean)
+const btcClient = new btc.BtcClient(network?: 'mainnet' | 'testnet', dryRunOrOptions?: boolean | { dryRun?: boolean; apiBaseUrl?: string })
 
 // Keypair generation methods
 generatePrivateKey(): IBtcKeypair

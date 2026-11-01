@@ -1,4 +1,9 @@
+/**
+ * Core's TransactionType (Models/Transaction.cs, 9.0.1), values 0 to 46.
+ * Member names are the SDK's; Core's name is in each comment where it differs.
+ */
 export enum TxType {
+  /** TX */
   RbxTransfer = 0,
   Node = 1,
   NftMint = 2,
@@ -6,19 +11,67 @@ export enum TxType {
   NftBurn = 4,
   NftSale = 5,
   Adnr = 6,
+  /** DSTR: DST shop registration */
   DstShop = 7,
   VoteTopic = 8,
   Vote = 9,
   Reserve = 10,
+  /** SC_MINT: standard smart contract mint */
+  ScMint = 11,
+  /** SC_TX */
+  ScTx = 12,
+  /** SC_BURN */
+  ScBurn = 13,
+  /** FTKN_MINT: fungible token mint */
+  FungibleTokenMint = 14,
+  /** FTKN_TX: fungible token transfer and operations */
   TokenTx = 15,
+  /** FTKN_BURN */
+  FungibleTokenBurn = 16,
+  /** TKNZ_MINT in Core; the live fungible-token deploy type */
   TokenDeploy = 17,
+  /** TKNZ_TX */
+  TokenizationTx = 18,
+  /** TKNZ_BURN */
+  TokenizationBurn = 19,
+  /** TKNZ_WD_ARB */
+  TokenizationWithdrawalArbiter = 20,
+  /** TKNZ_WD_OWNER */
+  TokenizationWithdrawalOwner = 21,
+  VbtcV2ValidatorRegister = 22,
+  VbtcV2ValidatorHeartbeat = 23,
+  VbtcV2ValidatorExit = 24,
   VbtcV2ContractCreate = 25,
   VbtcV2Transfer = 26,
   VbtcV2WithdrawalRequest = 27,
   VbtcV2WithdrawalComplete = 28,
   VbtcV2WithdrawalCancel = 29,
+  /** Validator vote on a withdrawal cancellation */
+  VbtcV2WithdrawalVote = 30,
+  VfxShield = 31,
+  VfxUnshield = 32,
+  VfxPrivateTransfer = 33,
+  VbtcV2Shield = 34,
+  VbtcV2Unshield = 35,
+  VbtcV2PrivateTransfer = 36,
+  /** Lock vBTC for bridging to Base */
+  VbtcV2BridgeLock = 37,
+  /** Unlock vBTC after a burn on Base (single lock) */
+  VbtcV2BridgeUnlock = 38,
+  /** Credit vBTC from several locks to one VFX address */
+  VbtcV2BridgePoolUnlock = 39,
+  /** Record a Base burnForBTCExit as a Bitcoin withdrawal intent */
+  VbtcV2BridgeExitToBtc = 40,
+  VbtcV2BridgeExitToBtcComplete = 41,
+  VbtcV2BridgeExitToBtcFail = 42,
+  /** Sender-less (BTC_Attestation): Bitcoin headers and vault transactions of one Bitcoin block */
+  VbtcV2BtcReport = 43,
   /** Raises the Bitcoin fee of, or releases, a pinned withdrawal on a watched vault. */
   VbtcV2CoinPin = 44,
+  /** Sender-less (BTC_Attestation): rewinds reported events after a Bitcoin reorg */
+  VbtcV2BtcReorg = 45,
+  /** Sender-less: replaces a vault's key with one made by the current validators */
+  VbtcV2VaultRekey = 46,
 }
 
 export enum Network {
