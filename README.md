@@ -39,6 +39,8 @@ const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://my-mempool
 
 // Distinguish "not found" from an API outage where it matters:
 const available = await vfx.domainAvailable('name.vfx', { strict: true }); // throws VfxApiError on outage
+// A request that gets no HTTP response at all (DNS, refused connection, timeout)
+// throws VfxNetworkError, a VfxApiError with status undefined, the url and the cause.
 ```
 
 ### Signing with an HSM or MPC service

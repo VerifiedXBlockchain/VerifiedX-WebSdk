@@ -1,4 +1,4 @@
-import { VfxClient, VfxApiError, MediaApiClient } from '../index';
+import { VfxClient, VfxApiError, VfxNetworkError, MediaApiClient } from '../index';
 import { AddressApiClient } from '../client/address-api-client';
 import { Network } from '../constants';
 import { installFetch, jsonResponse } from './helpers/mock-fetch';
@@ -60,6 +60,56 @@ describe('VfxApiError', () => {
     expect(error.url).toContain('/addresses/adnr/x.vfx/');
     expect(error.body).toContain('boom');
     expect(error.message).toMatch(/^HTTP error! status: 500/);
+  });
+});
+
+describe('VfxNetworkError', () => {
+  const failFetch = (cause: unknown) => {
+    global.fetch = jest.fn(async () => {
+      throw cause;
+    }) as unknown as typeof fetch;
+  };
+
+  test('a fetch TypeError becomes a VfxNetworkError (a VfxApiError) with url and cause', async () => {
+    const cause = new TypeError('fetch failed');
+    failFetch(cause);
+    const client = new AddressApiClient(Network.Testnet);
+
+    const error = await client.domainAvailable('x.vfx', { strict: true }).then(
+      () => Promise.reject(new Error('expected a throw')),
+      (e) => e,
+    );
+
+    expect(error).toBeInstanceOf(VfxNetworkError);
+    expect(error).toBeInstanceOf(VfxApiError);
+    expect(error.name).toBe('VfxNetworkError');
+    expect(error.status).toBeUndefined();
+    expect(error.url).toContain('/addresses/adnr/x.vfx/');
+    expect(error.cause).toBe(cause);
+    expect(error.message).toMatch(/^HTTP error! status: network failure \(.*\) — fetch failed$/);
+  });
+
+  test('timeouts are wrapped too', async () => {
+    const cause = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    failFetch(cause);
+    const client = new AddressApiClient(Network.Testnet);
+    await expect(client.lookupDomain('x.vfx', { strict: true })).rejects.toMatchObject({
+      name: 'VfxNetworkError',
+      cause,
+    });
+  });
+
+  test('multipart uploads wrap transport failures', async () => {
+    failFetch(new TypeError('getaddrinfo ENOTFOUND'));
+    const client = new MediaApiClient(Network.Testnet);
+    await expect(client.makeMultipartRequest('/', new FormData())).rejects.toBeInstanceOf(VfxNetworkError);
+  });
+
+  test('lenient reads keep their fallbacks', async () => {
+    failFetch(new TypeError('fetch failed'));
+    const client = new AddressApiClient(Network.Testnet);
+    expect(await client.domainAvailable('x.vfx')).toBe(true);
+    expect(await client.lookupDomain('x.vfx')).toBeNull();
   });
 });
 

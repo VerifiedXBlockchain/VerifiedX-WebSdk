@@ -298,7 +298,7 @@ describe('completeWithdrawal on a watched vault', () => {
     installFetch({ [PREPARE]: sequence(notMinedYet, lost) });
     const result = await client.completeWithdrawal({ ...completeParams(), pollIntervalMs: 5, timeoutMs: 40 });
     expect(result.paid).toBe(false);
-    expect(result.lastError).toBe('fetch failed');
+    expect(result.lastError).toMatch(/^HTTP error! status: network failure \(.*\/withdraw\/complete\/prepare\/\) — fetch failed$/);
     expect(result.watched?.notMinedYet).toBe(true);
   });
 

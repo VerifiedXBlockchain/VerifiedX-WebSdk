@@ -5,7 +5,7 @@ export { VfxClient };
 export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
 
 // Export API error type + media client
-export { VfxApiError } from './client/base-api-client';
+export { VfxApiError, VfxNetworkError } from './client/base-api-client';
 export {
   VbtcWithdrawalIncompleteError,
   VbtcWithdrawalUnrecordedError,

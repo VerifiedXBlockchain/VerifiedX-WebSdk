@@ -4,7 +4,7 @@ import { BrowserKeypairService } from './services/keypair-service';
 import { Network, TxType } from '../constants';
 
 export type { VfxClientOptions, ReserveSendOptions } from '../client/vfx-client';
-export { VfxApiError } from '../client/base-api-client';
+export { VfxApiError, VfxNetworkError } from '../client/base-api-client';
 export {
   VbtcWithdrawalIncompleteError,
   VbtcWithdrawalUnrecordedError,
