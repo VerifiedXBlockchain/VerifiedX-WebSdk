@@ -1,4 +1,5 @@
 import { VfxClient, VfxApiError, VfxNetworkError, MediaApiClient } from '../index';
+import type { MediaUploadResult } from '../index';
 import { AddressApiClient } from '../client/address-api-client';
 import { Network } from '../constants';
 import { installFetch, jsonResponse } from './helpers/mock-fetch';
@@ -162,5 +163,24 @@ describe('mnemonic alias', () => {
 describe('exports', () => {
   test('MediaApiClient is constructible from the public entrypoint', () => {
     expect(() => new MediaApiClient(Network.Testnet)).not.toThrow();
+  });
+});
+
+describe('MediaApiClient.uploadAsset', () => {
+  test('resolves to { url } as the media endpoint returns it', async () => {
+    const { calls } = installFetch({ '/media/': () => ({ url: 'https://cdn.example.test/a.png' }) });
+    const client = new MediaApiClient(Network.Testnet);
+
+    const result: MediaUploadResult | null = await client.uploadAsset(new File(['x'], 'a.png'), { kind: 'nft' });
+
+    expect(result).toEqual({ url: 'https://cdn.example.test/a.png' });
+    expect(result?.url).toBe('https://cdn.example.test/a.png');
+    expect(calls[0].method).toBe('POST');
+  });
+
+  test('resolves to null on failure', async () => {
+    installFetch({ '/media/': () => jsonResponse({ detail: 'too big' }, 413) });
+    const client = new MediaApiClient(Network.Testnet);
+    expect(await client.uploadAsset(new File(['x'], 'a.png'))).toBeNull();
   });
 });

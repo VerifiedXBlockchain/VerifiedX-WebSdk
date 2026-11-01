@@ -33,6 +33,7 @@ export {
 } from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
+export type { MediaUploadResult } from './client/media-api-client';
 
 // Export VFX enums
 export { Network, TxType } from './constants';
