@@ -5,10 +5,11 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * Error thrown for non-2xx API responses (and surfaced for request
- * failures). `status` is the HTTP status when one was received, undefined
- * for transport-level failures. The message keeps the historical
- * "HTTP error! status: X" prefix so existing string matching keeps working.
+ * Error thrown for non-2xx API responses and for requests that got no
+ * response at all (see VfxNetworkError). `status` is the HTTP status when one
+ * was received, undefined for transport-level failures. The message keeps the
+ * historical "HTTP error! status: X" prefix so existing string matching keeps
+ * working.
  */
 export class VfxApiError extends Error {
   readonly status: number | undefined;
@@ -22,6 +23,32 @@ export class VfxApiError extends Error {
     this.status = options.status;
     this.url = options.url;
     this.body = options.body;
+  }
+}
+
+/**
+ * The request never got an HTTP response: DNS failure, refused or dropped
+ * connection, timeout or abort. `status` is undefined, `url` is the request
+ * URL and `cause` is the underlying error (usually the fetch TypeError, or a
+ * TimeoutError/AbortError DOMException).
+ */
+export class VfxNetworkError extends VfxApiError {
+  readonly cause: unknown;
+
+  constructor(options: { url: string; cause: unknown }) {
+    super({ url: options.url });
+    const detail = options.cause instanceof Error ? options.cause.message : String(options.cause);
+    this.message = `${this.message} — ${detail}`;
+    this.name = 'VfxNetworkError';
+    this.cause = options.cause;
+  }
+}
+
+async function fetchOrThrow(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    throw new VfxNetworkError({ url, cause });
   }
 }
 
@@ -80,7 +107,7 @@ export class BaseApiClient {
       init.body = JSON.stringify(params);
     }
 
-    const response = await fetch(url, init);
+    const response = await fetchOrThrow(url, init);
 
     if (!response.ok) {
       let body: string | undefined;
@@ -134,7 +161,7 @@ export class BaseApiClient {
 
     // No default timeout here: large uploads on slow links can legitimately
     // exceed the JSON-request budget.
-    const response = await fetch(url, {
+    const response = await fetchOrThrow(url, {
       method: 'POST',
       body: files,
       // Don't set Content-Type header for FormData - browser will set it with boundary

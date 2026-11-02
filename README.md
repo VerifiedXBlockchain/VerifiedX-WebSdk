@@ -33,11 +33,14 @@ accept an options object:
 // Point at a self-hosted node / replacement testnet without an SDK release:
 const vfx = new VfxClient('testnet', { baseUrl: 'https://my-node.example.com/api', timeoutMs: 15000 });
 
-// Same for the Bitcoin side (mempool.space-compatible API):
-const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://mempool.space/testnet4/api' });
+// Same for the Bitcoin side (mempool.space-compatible API). Testnet defaults to
+// the VerifiedX signet, https://signet.verifiedx.io/api:
+const btcClient = new btc.BtcClient('testnet', { apiBaseUrl: 'https://my-mempool.example.com/api' });
 
 // Distinguish "not found" from an API outage where it matters:
 const available = await vfx.domainAvailable('name.vfx', { strict: true }); // throws VfxApiError on outage
+// A request that gets no HTTP response at all (DNS, refused connection, timeout)
+// throws VfxNetworkError, a VfxApiError with status undefined, the url and the cause.
 ```
 
 ### Signing with an HSM or MPC service
@@ -135,8 +138,16 @@ The `VfxClient` provides access to VerifiedX blockchain functionality:
 #### Constructor
 
 ```typescript
-new VfxClient(network: Network | string, dryRun?: boolean)
+new VfxClient(network: Network | 'mainnet' | 'testnet', dryRunOrOptions?: boolean | VfxClientOptions)
+
+interface VfxClientOptions {
+  dryRun?: boolean;    // return would-be hashes without broadcasting
+  baseUrl?: string;    // data API origin including /api, e.g. a self-hosted node
+  timeoutMs?: number;  // per-request timeout, default 30000; 0 disables
+}
 ```
+
+A boolean second argument is the historical `dryRun` flag and still works.
 
 #### Keypair Management
 
@@ -322,7 +333,7 @@ The `btc` namespace provides comprehensive Bitcoin functionality through the `Bt
 
 ```typescript
 // Initialize Bitcoin client
-const btcClient = new btc.BtcClient(network?: 'mainnet' | 'testnet', dryRun?: boolean)
+const btcClient = new btc.BtcClient(network?: 'mainnet' | 'testnet', dryRunOrOptions?: boolean | { dryRun?: boolean; apiBaseUrl?: string })
 
 // Keypair generation methods
 generatePrivateKey(): IBtcKeypair
@@ -339,7 +350,7 @@ getSignatureFromWif(message: string, wif: string): string
 
 // Account information
 getAddressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>
-getTransactions(address: string, limit?: number, before?: number | null): Promise<ITransaction[]>
+getTransactions(address: string, limit?: number, before?: string | null): Promise<ITransaction[]> // newest first; before = last seen txid
 
 // Transaction operations
 getFeeRates(): Promise<IFeeRates | null>
@@ -672,7 +683,7 @@ async function crossChainExample() {
 
 ## Package Information
 
-- **Version**: 9.0.3 (major.minor follows the VerifiedX Core release it supports; patch releases are the SDK's own)
+- **Version**: 9.0.4 (major.minor follows the VerifiedX Core release it supports; patch releases are the SDK's own)
 - **Requires**: VerifiedX Core 9.0.1 or later
 - **License**: MIT
 - **Repository**: [VerifiedX-WebSdk](https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk)

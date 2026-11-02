@@ -178,12 +178,14 @@ console.log(`Balance: ${addressInfo.balance} satoshis`);
 console.log(`BTC Balance: ${addressInfo.balance / 100000000} BTC`);
 ```
 
-### `getTransactions(address)`
+### `getTransactions(address, limit?, before?)`
 
-Retrieves transaction history for an address.
+Retrieves transaction history for an address, newest first.
 
 **Parameters:**
 - `address` (string): The Bitcoin address to query
+- `limit` (number, optional): Maximum number of transactions to return. Default 50. The SDK fetches as many Esplora pages as it needs.
+- `before` (string, optional): A txid already seen. Only confirmed transactions older than it are returned, and mempool entries are left out. Pass the last confirmed txid of one call as the next call's `before` to page back through the history.
 
 **Returns:** `Promise<BtcTransaction[]>` - Array of transactions
 

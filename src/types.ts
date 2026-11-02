@@ -59,6 +59,13 @@ export interface VbtcV2Token {
   tx_count: number;
   is_pending_withdrawal: boolean;
   /**
+   * The next owner while a reserve-account (xRBX) transfer of the vault is
+   * still locked; null otherwise. `owner_address` stays the sender until the
+   * transfer unlocks, and a callback before then cancels it. Absent from
+   * Spyglass deployments older than the release that added it.
+   */
+  pending_owner_address?: string | null;
+  /**
    * The chain watches this vault (Core 9.0 Bitcoin attestation): its
    * withdrawals are paid by its signers, with no FROST completion. Absent
    * from Spyglass deployments older than 9.0.
@@ -129,6 +136,17 @@ export interface VbtcTransfer {
   to_address: string;
   amount: string;
   transaction_hash: string;
+  /**
+   * Part of a multi-input vBTC transfer (one transaction spending several
+   * vaults). Absent from older Spyglass deployments.
+   */
+  is_multi?: boolean;
+  /**
+   * A reserve-account send the node refused when it fell due because the
+   * sender no longer covered it: the vBTC never moved. Absent from older
+   * Spyglass deployments.
+   */
+  refused_at_maturity?: boolean;
   created_at: string;
 }
 

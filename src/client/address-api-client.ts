@@ -1,6 +1,6 @@
 import { Network } from '../constants';
 import { FungibleTokenBalance, VfxAddress } from '../types';
-import { addressWithoutActivity } from '../utils';
+import { addressWithoutActivity, cleanAdnrName } from '../utils';
 import { BaseApiClient, VfxApiError } from './base-api-client';
 
 export interface IApiClientOptions {
@@ -56,10 +56,13 @@ export class AddressApiClient extends BaseApiClient {
    * Pass `strict: true` to treat only a 404 as available and rethrow
    * transport/server errors — REQUIRED when a purchase decision follows,
    * otherwise an outage looks like a free domain.
+   *
+   * The name is normalised first (see cleanAdnrName): `Name`, `name` and
+   * `name.vfx` all check `name.vfx`, as the buy methods do.
    */
   public domainAvailable = async (domain: string, opts: { strict?: boolean } = {}): Promise<boolean> => {
     try {
-      await this.makeJsonRequest(`/adnr/${encodeURIComponent(domain)}/`);
+      await this.makeJsonRequest(`/adnr/${encodeURIComponent(cleanAdnrName(domain))}/`);
       return false;
     } catch (e) {
       if (opts.strict && !isNotFound(e)) {
@@ -87,9 +90,10 @@ export class AddressApiClient extends BaseApiClient {
     }
   };
 
+  /** The address holding `domain`, normalised as in domainAvailable, or null. */
   public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
     try {
-      const result = await this.makeJsonRequest(`/adnr/${encodeURIComponent(domain)}/`);
+      const result = await this.makeJsonRequest(`/adnr/${encodeURIComponent(cleanAdnrName(domain))}/`);
       return result?.address || null;
     } catch (e) {
       if (opts.strict && !isNotFound(e)) {

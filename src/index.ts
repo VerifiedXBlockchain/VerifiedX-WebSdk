@@ -5,7 +5,7 @@ export { VfxClient };
 export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
 
 // Export API error type + media client
-export { VfxApiError } from './client/base-api-client';
+export { VfxApiError, VfxNetworkError } from './client/base-api-client';
 export {
   VbtcWithdrawalIncompleteError,
   VbtcWithdrawalUnrecordedError,
@@ -33,6 +33,7 @@ export {
 } from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
+export type { MediaUploadResult } from './client/media-api-client';
 
 // Export VFX enums
 export { Network, TxType } from './constants';
@@ -45,6 +46,7 @@ export type {
   PaginatedResponse,
   VbtcV2Token,
   VbtcWithdrawalRequest,
+  VbtcWithdrawalStatus,
   VbtcTransfer,
   CreateVbtcResult,
   VbtcTransferResult,

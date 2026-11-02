@@ -10,6 +10,7 @@ import {
   VbtcWithdrawalIncompleteError,
   VbtcWithdrawalUnrecordedError,
   VfxClient,
+  VfxNetworkError,
 } from '../index';
 import KeypairService from '../services/keypair-service';
 import { Network } from '../constants';
@@ -161,7 +162,9 @@ describe.each(vbtcCases)('$name', ({ prepare, send, extra, run }) => {
 
     expect(error).toBeInstanceOf(TransactionDispatchError);
     expect(error).toMatchObject({ name: 'TransactionDispatchError', hash: 'PREPARED_HASH' });
-    expect((error as TransactionDispatchError).cause).toBeInstanceOf(TypeError);
+    const cause = (error as TransactionDispatchError).cause as VfxNetworkError;
+    expect(cause).toBeInstanceOf(VfxNetworkError);
+    expect(cause.cause).toBeInstanceOf(TypeError);
     // One send, no retry inside the SDK.
     expect(calls.filter((c) => c.url.includes(send))).toHaveLength(1);
   });

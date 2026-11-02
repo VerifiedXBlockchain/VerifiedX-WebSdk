@@ -1,4 +1,5 @@
-import { VfxClient, VfxApiError, MediaApiClient } from '../index';
+import { VfxClient, VfxApiError, VfxNetworkError, MediaApiClient } from '../index';
+import type { MediaUploadResult } from '../index';
 import { AddressApiClient } from '../client/address-api-client';
 import { Network } from '../constants';
 import { installFetch, jsonResponse } from './helpers/mock-fetch';
@@ -63,6 +64,56 @@ describe('VfxApiError', () => {
   });
 });
 
+describe('VfxNetworkError', () => {
+  const failFetch = (cause: unknown) => {
+    global.fetch = jest.fn(async () => {
+      throw cause;
+    }) as unknown as typeof fetch;
+  };
+
+  test('a fetch TypeError becomes a VfxNetworkError (a VfxApiError) with url and cause', async () => {
+    const cause = new TypeError('fetch failed');
+    failFetch(cause);
+    const client = new AddressApiClient(Network.Testnet);
+
+    const error = await client.domainAvailable('x.vfx', { strict: true }).then(
+      () => Promise.reject(new Error('expected a throw')),
+      (e) => e,
+    );
+
+    expect(error).toBeInstanceOf(VfxNetworkError);
+    expect(error).toBeInstanceOf(VfxApiError);
+    expect(error.name).toBe('VfxNetworkError');
+    expect(error.status).toBeUndefined();
+    expect(error.url).toContain('/addresses/adnr/x.vfx/');
+    expect(error.cause).toBe(cause);
+    expect(error.message).toMatch(/^HTTP error! status: network failure \(.*\) — fetch failed$/);
+  });
+
+  test('timeouts are wrapped too', async () => {
+    const cause = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    failFetch(cause);
+    const client = new AddressApiClient(Network.Testnet);
+    await expect(client.lookupDomain('x.vfx', { strict: true })).rejects.toMatchObject({
+      name: 'VfxNetworkError',
+      cause,
+    });
+  });
+
+  test('multipart uploads wrap transport failures', async () => {
+    failFetch(new TypeError('getaddrinfo ENOTFOUND'));
+    const client = new MediaApiClient(Network.Testnet);
+    await expect(client.makeMultipartRequest('/', new FormData())).rejects.toBeInstanceOf(VfxNetworkError);
+  });
+
+  test('lenient reads keep their fallbacks', async () => {
+    failFetch(new TypeError('fetch failed'));
+    const client = new AddressApiClient(Network.Testnet);
+    expect(await client.domainAvailable('x.vfx')).toBe(true);
+    expect(await client.lookupDomain('x.vfx')).toBeNull();
+  });
+});
+
 describe('strict mode', () => {
   test('domainAvailable: default stays true on server error, strict throws', async () => {
     installFetch({ '/addresses/adnr/': () => jsonResponse({ detail: 'down' }, 503) });
@@ -112,5 +163,24 @@ describe('mnemonic alias', () => {
 describe('exports', () => {
   test('MediaApiClient is constructible from the public entrypoint', () => {
     expect(() => new MediaApiClient(Network.Testnet)).not.toThrow();
+  });
+});
+
+describe('MediaApiClient.uploadAsset', () => {
+  test('resolves to { url } as the media endpoint returns it', async () => {
+    const { calls } = installFetch({ '/media/': () => ({ url: 'https://cdn.example.test/a.png' }) });
+    const client = new MediaApiClient(Network.Testnet);
+
+    const result: MediaUploadResult | null = await client.uploadAsset(new File(['x'], 'a.png'), { kind: 'nft' });
+
+    expect(result).toEqual({ url: 'https://cdn.example.test/a.png' });
+    expect(result?.url).toBe('https://cdn.example.test/a.png');
+    expect(calls[0].method).toBe('POST');
+  });
+
+  test('resolves to null on failure', async () => {
+    installFetch({ '/media/': () => jsonResponse({ detail: 'too big' }, 413) });
+    const client = new MediaApiClient(Network.Testnet);
+    expect(await client.uploadAsset(new File(['x'], 'a.png'))).toBeNull();
   });
 });

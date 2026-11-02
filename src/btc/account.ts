@@ -1,8 +1,11 @@
 import * as bitcoin from 'bitcoinjs-lib';
-import { SATOSHI_TO_BTC_MULTIPLIER } from './constants';
+import { SATOSHI_TO_BTC_MULTIPLIER, defaultApiBaseUrl } from './constants';
 
 const TESTNET = bitcoin.networks.testnet;
 const MAINNET = bitcoin.networks.bitcoin;
+
+// Esplora returns confirmed history in pages of 25; a shorter page is the last.
+const ESPLORA_CHAIN_PAGE_SIZE = 25;
 
 interface Transaction {
   txid: string;
@@ -27,7 +30,7 @@ export default class AccountService {
 
   constructor(isTestnet: boolean, apiBaseUrl?: string) {
     this.network = isTestnet ? TESTNET : MAINNET;
-    this.apiBaseUrl = apiBaseUrl ?? (isTestnet ? 'https://mempool.space/testnet4/api' : 'https://mempool.space/api');
+    this.apiBaseUrl = apiBaseUrl ?? defaultApiBaseUrl(isTestnet);
   }
 
   public async addressInfo(address: string, inSatoshis = true) {
@@ -55,10 +58,39 @@ export default class AccountService {
     };
   }
 
-  public async transactions(address: string, _limit = 50, _before: number | null = null): Promise<Transaction[]> {
-    const url = `${this.apiBaseUrl}/address/${address}/txs`;
+  /**
+   * Newest-first transaction history, at most `limit` entries.
+   *
+   * Without `before`, the first page is Esplora's `/address/{a}/txs`
+   * (unconfirmed transactions, then the newest confirmed ones). With
+   * `before` (a txid already seen), it starts from
+   * `/address/{a}/txs/chain/{before}`: confirmed transactions older than that
+   * one, no mempool entries. Further `/txs/chain/{lastConfirmedTxid}` pages
+   * are fetched until `limit` is reached or the history runs out. To page,
+   * pass the last returned confirmed txid as the next call's `before`.
+   */
+  public async transactions(address: string, limit = 50, before: string | null = null): Promise<Transaction[]> {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error(`limit must be a positive integer, got ${limit}`);
+    }
 
-    const response = await fetch(url);
+    const results: Transaction[] = [];
+    let path = before ? `/address/${address}/txs/chain/${before}` : `/address/${address}/txs`;
+
+    while (results.length < limit) {
+      const page = await this.fetchTransactionPage(path);
+      results.push(...page);
+
+      const confirmed = page.filter((tx) => tx.status?.confirmed);
+      if (confirmed.length < ESPLORA_CHAIN_PAGE_SIZE) break;
+      path = `/address/${address}/txs/chain/${confirmed[confirmed.length - 1].txid}`;
+    }
+
+    return results.slice(0, limit);
+  }
+
+  private async fetchTransactionPage(path: string): Promise<Transaction[]> {
+    const response = await fetch(`${this.apiBaseUrl}${path}`);
     if (!response.ok) {
       throw new Error(`Error fetching transactions: ${response.status}`);
     }

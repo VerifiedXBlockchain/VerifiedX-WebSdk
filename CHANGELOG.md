@@ -1,5 +1,49 @@
 # Changelog
 
+## 9.0.4 (2026-11-01)
+
+Needs VerifiedX Core 9.0.1 or later. Fixes from the 2026-11-01 docs review,
+which ran every SDK snippet on testnet.
+
+### Fixed
+
+- **`BtcClient('testnet')` uses the VerifiedX signet,**
+  `https://signet.verifiedx.io/api`, instead of mempool.space testnet4. The
+  VFX testnet's Bitcoin side is that signet, so the old default read balances
+  and broadcast on the wrong chain. Mainnet stays on `https://mempool.space/api`
+  and `apiBaseUrl` still overrides both. This was merged into the `testnet`
+  branch as 3.7.0 and never reached `main`.
+- **`getTransactions(address, limit, before)` honours both arguments.** It
+  returns at most `limit` transactions, newest first, fetching as many
+  Esplora pages as it needs. `before` is now a txid string: only confirmed
+  transactions older than it are returned. The old `number` type had no
+  meaning to Esplora and was ignored, so code that passed a number now fails
+  to compile instead of silently getting the first page.
+- **The `IBtcClient` type matches `BtcClient`**: the constructor takes
+  `boolean | BtcClientOptions`, `generateMnemonic()` takes no word count, and
+  `generateEmailKeypair` is listed.
+- **A request that gets no HTTP response throws `VfxNetworkError`** instead of
+  the raw fetch `TypeError`. It is a `VfxApiError` with `status` undefined,
+  the request `url` and the original error as `cause`, so existing
+  `instanceof VfxApiError` checks catch it. HTTP-status errors are unchanged.
+  `TransactionDispatchError.cause` and `completeWithdrawal`'s `lastError` now
+  carry this error and its message, which includes the URL.
+- **`MediaApiClient.uploadAsset` is typed as resolving to `{ url }`**
+  (`MediaUploadResult`), which is what it always returned.
+- **`lookupDomain`, `domainAvailable` and `lookupBtcDomain` normalise the
+  name** the way the buy methods do: trimmed, lowercase, with the suffix.
+  `Name`, `name` and `name.vfx` all check `name.vfx`; a `.btc` or `.rbx` name
+  keeps its suffix, and `lookupBtcDomain` always looks up `name.btc`. Before,
+  an uppercase or suffix-less form of a taken name read as available.
+
+### Added
+
+- `VbtcV2Token.pending_owner_address` and `VbtcTransfer.is_multi` and
+  `refused_at_maturity`, as Spyglass returns them on both networks.
+- `VbtcWithdrawalStatus`, `VfxNetworkError` and `MediaUploadResult` exports.
+- `TxType` covers all of Core's `TransactionType` values, 0 to 46. Existing
+  member names and values are unchanged.
+
 ## 9.0.3 (2026-10-30)
 
 Needs VerifiedX Core 9.0.1 or later.
