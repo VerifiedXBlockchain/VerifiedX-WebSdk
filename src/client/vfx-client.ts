@@ -353,6 +353,15 @@ export class VfxClient {
     return this.keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
   };
 
+  /**
+   * The vault the web wallet derives from a key's derivation text (an
+   * imported key's historical text forms each give their own vault; see
+   * `derivationTextCandidates`).
+   */
+  public reserveKeypairFromDerivationText = (derivationText: string): ReserveKeypair => {
+    return this.keypairService.reserveKeypairFromDerivationText(derivationText);
+  };
+
   /** A vault from its own private key; the recovery key is derived from it. */
   public reserveKeypairFromReservePrivateKey = (reservePrivateKey: string): ReserveKeypair => {
     return this.keypairService.reserveKeypairFromReservePrivateKey(reservePrivateKey);

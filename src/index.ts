@@ -86,6 +86,16 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+// Web wallet sign-in derivation (vault and Bitcoin account texts)
+export {
+  btcCredentialsFromDerivationText,
+  btcKeypairFromDerivationText,
+  canonicalPrivateKeyHex,
+  derivationTextCandidates,
+  derivationTextFromKeyText,
+  normalizeRecoveryPhrase,
+  walletDerivationText,
+} from './services/wallet-derivation';
 export {
   TOKEN_BASE_ADDRESS,
   RESERVE_BASE_ADDRESS,
