@@ -45,7 +45,24 @@ import {
   tokenVoteCastData,
   tokenVoteTopicCreateData,
 } from '../services/token-data';
-import { KeypairOrSigner, ResolvedSigner, Signer, resolveSigner } from '../signer';
+import {
+  KeypairOrSigner,
+  ResolvedSigner,
+  Signer,
+  SigningRequest,
+  SigningTransaction,
+  approveIntent,
+  newFlowId,
+  resolveSigner,
+  signMessages,
+} from '../signer';
+import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import {
+  DEFAULT_HASH_MODE,
+  HashMode,
+  TransactionHashMismatchError,
+  TxBuildSession,
+} from '../services/tx-build-session';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
   VBTC_MULTI_WITHDRAWAL_DEFAULT_MAX_FEE,
@@ -266,6 +283,19 @@ export interface VfxClientOptions {
   baseUrl?: string;
   /** Per-request timeout in ms (default 30000; 0 disables). */
   timeoutMs?: number;
+  /**
+   * Who builds transaction hashes, timestamps and fees for the sends this
+   * client makes; see HashMode. Default 'both': built locally and checked
+   * against Spyglass `/raw/hash`, throwing TransactionHashMismatchError on any
+   * difference.
+   */
+  hashMode?: HashMode;
+  /**
+   * Ask the node to verify each transaction (`/raw/verify`) before sending
+   * it. Default true for 'server' and 'both', false for 'local'; the send
+   * refuses a bad transaction with the same reason either way.
+   */
+  preflight?: boolean;
 }
 
 export class VfxClient {
@@ -280,6 +310,10 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  private hashMode: HashMode;
+  private preflight: boolean | undefined;
+  /** Clock offset and next-nonce cache shared by every send from this client. */
+  private txBuildSession = new TxBuildSession();
 
   /**
    * @param network 'mainnet' | 'testnet' (or the Network enum)
@@ -305,6 +339,17 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
+    this.preflight = options.preflight;
+  }
+
+  /** The transaction-building options every RawTransactionService this client makes shares. */
+  private get txBuildOptions(): { hashMode: HashMode; preflight?: boolean; session: TxBuildSession } {
+    return {
+      hashMode: this.hashMode,
+      session: this.txBuildSession,
+      ...(this.preflight !== undefined && { preflight: this.preflight }),
+    };
   }
 
   // Keypairs
@@ -387,6 +432,19 @@ export class VfxClient {
   };
 
   /**
+   * `getSignature` for any key source: a keypair, a bare `{ privateKey }`, or
+   * an external Signer. The message is signed as given, in the same
+   * `base64(DER).base58(publicKey)` format, so `verifySignature` accepts it;
+   * the signer receives a `message` request carrying the text. A signer that
+   * must never sign raw text (a browser extension prefixing its origin) is
+   * free to refuse it.
+   */
+  public signMessage = async (signer: KeypairOrSigner | { privateKey: string }, message: string): Promise<string> => {
+    const resolved = this.resolve(signer);
+    return resolved.sign(message, { kind: 'message', flowId: newFlowId(), message });
+  };
+
+  /**
    * Whether `signature` is `address`'s signature of `message`, accepting
    * exactly what the platform's verifier does. Never throws. The network is
    * read from the address (`x` testnet, otherwise mainnet), not this client's.
@@ -429,6 +487,7 @@ export class VfxClient {
       amount: amount,
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return await txBuilder.process(this.dryRun);
   };
@@ -481,6 +540,7 @@ export class VfxClient {
       txType: TxType.Adnr,
       data: data,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
 
     return await txBuilder.process(this.dryRun);
@@ -550,6 +610,7 @@ export class VfxClient {
       txType: TxType.Adnr,
       data: data,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
 
     return await txBuilder.process(this.dryRun);
@@ -583,6 +644,7 @@ export class VfxClient {
       txType: TxType.Adnr,
       data: { Function: 'AdnrTransfer()', Name: domain },
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return txBuilder.process(this.dryRun);
   };
@@ -601,6 +663,7 @@ export class VfxClient {
       txType: TxType.Adnr,
       data: { Function: 'AdnrDelete()', Name: domain },
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return txBuilder.process(this.dryRun);
   };
@@ -657,6 +720,7 @@ export class VfxClient {
         ...(params.btcToMessage ? { BTCToMessage: params.btcToMessage, BTCToSignature: params.btcToSignature } : {}),
       },
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return txBuilder.process(this.dryRun);
   };
@@ -703,6 +767,7 @@ export class VfxClient {
       txType: TxType.Adnr,
       data: { Function: 'BTCAdnrDelete()', BTCFromAddress: params.btcFromAddress },
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return txBuilder.process(this.dryRun);
   };
@@ -840,6 +905,7 @@ export class VfxClient {
       txType: TxType.VbtcV2Transfer,
       data,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     const transactionHash = await txBuilder.process(false);
     if (!transactionHash) {
@@ -866,6 +932,16 @@ export class VfxClient {
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 4000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
+    const flowId = newFlowId();
+    // Approved before the ceremony is prepared: its messages carry timestamps.
+    await approveIntent(signer, {
+      action: 'vbtc-create',
+      flowId,
+      ownerAddress: params.ownerAddress,
+      name: params.name,
+      description: params.description,
+      ticker: params.ticker,
+    });
 
     // Phase 1: MPC ceremony
     const ceremonyPrep = await this.vbtcV2ApiClient.prepareCeremony(params.ownerAddress);
@@ -873,8 +949,33 @@ export class VfxClient {
       throw new Error(`createVbtcToken ceremony prepare failed: ${JSON.stringify(ceremonyPrep)}`);
     }
 
-    const startSignature = await signer.sign(ceremonyPrep.messages_to_sign.start_message);
-    const shareSignature = await signer.sign(ceremonyPrep.messages_to_sign.share_distribution_message);
+    const ceremony = {
+      kind: 'vbtc-ceremony' as const,
+      flowId,
+      ceremonyId: ceremonyPrep.ceremony_id,
+      sessionId: ceremonyPrep.session_id,
+      ownerAddress: params.ownerAddress,
+    };
+    const [startSignature, shareSignature] = await signMessages(signer, [
+      {
+        message: ceremonyPrep.messages_to_sign.start_message,
+        request: {
+          ...ceremony,
+          step: 'start',
+          message: ceremonyPrep.messages_to_sign.start_message,
+          timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+        },
+      },
+      {
+        message: ceremonyPrep.messages_to_sign.share_distribution_message,
+        request: {
+          ...ceremony,
+          step: 'share',
+          message: ceremonyPrep.messages_to_sign.share_distribution_message,
+          timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+        },
+      },
+    ]);
 
     onProgress({
       phase: 'ceremony_started',
@@ -917,7 +1018,18 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = await signer.sign(ownershipMessage);
+    const ownerSignature = await signer.sign(ownershipMessage, {
+      kind: 'vbtc-ownership',
+      flowId,
+      message: ownershipMessage,
+      ownerAddress: params.ownerAddress,
+      name: params.name,
+      description: params.description,
+      ticker: params.ticker,
+      ceremonyId: ceremonyPrep.ceremony_id,
+      timestamp,
+      uniqueId,
+    });
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -933,7 +1045,7 @@ export class VfxClient {
     });
     this.assertPrepared(createPrep, 'createVbtcToken:prepare');
 
-    const sent = await this.signAndSend(createPrep, signer, (body) => this.vbtcV2ApiClient.sendCreate(body));
+    const sent = await this.signAndSend(createPrep, signer, (body) => this.vbtcV2ApiClient.sendCreate(body), flowId);
     this.assertSent(sent, 'createVbtcToken:send');
 
     onProgress({
@@ -1060,6 +1172,15 @@ export class VfxClient {
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
     const withdrawalRequestHash = params.withdrawalRequestHash;
+    const flowId = newFlowId();
+    // Approved before FROST is prepared: its start and share messages carry timestamps.
+    await approveIntent(signer, {
+      action: 'vbtc-withdrawal-complete',
+      flowId,
+      scIdentifier: params.scIdentifier,
+      ownerAddress: params.requestorAddress,
+      withdrawalRequestHash,
+    });
 
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
@@ -1100,22 +1221,52 @@ export class VfxClient {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
 
-    const frostStartSig = await signer.sign(frostPrep.StartMessage);
-    const frostShareSig = await signer.sign(frostPrep.ShareDistributionMessage);
-
     // Multi-input withdrawals (caster-upgrade nodes) return one start message
     // per vault UTXO. StartMessages[0] is byte-identical to the legacy
-    // StartMessage and is already covered by frostStartSig; every later entry
-    // is signed verbatim — the validators verify the exact Message strings the
-    // node returned, so they must never be reconstructed locally. Signing
-    // fewer inputs than the transaction needs fails Execute with
+    // StartMessage and is already covered by the start signature; every later
+    // entry is signed verbatim — the validators verify the exact Message
+    // strings the node returned, so they must never be reconstructed locally.
+    // Signing fewer inputs than the transaction needs fails Execute with
     // InputCountMismatch (retryable via a fresh prepare).
-    const extraStartSignatures: Array<{ input_index: number; signature: string }> = [];
-    for (const entry of frostPrep.StartMessages ?? []) {
-      if (entry.InputIndex > 0) {
-        extraStartSignatures.push({ input_index: entry.InputIndex, signature: await signer.sign(entry.Message) });
-      }
-    }
+    const frost = {
+      kind: 'frost-withdrawal' as const,
+      flowId,
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash,
+      ownerAddress: params.requestorAddress,
+      sessionId: frostPrep.SessionId,
+    };
+    const extraInputs = (frostPrep.StartMessages ?? []).filter((entry) => entry.InputIndex > 0);
+    const [frostStartSig, frostShareSig, ...extraSignatures] = await signMessages(signer, [
+      {
+        message: frostPrep.StartMessage,
+        request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
+      },
+      {
+        message: frostPrep.ShareDistributionMessage,
+        request: {
+          ...frost,
+          step: 'share',
+          message: frostPrep.ShareDistributionMessage,
+          timestamp: frostPrep.ShareDistributionTimestamp,
+        },
+      },
+      ...extraInputs.map((entry) => ({
+        message: entry.Message,
+        request: {
+          ...frost,
+          step: 'input' as const,
+          message: entry.Message,
+          sessionId: entry.SessionId ?? frostPrep.SessionId,
+          timestamp: entry.Timestamp,
+          inputIndex: entry.InputIndex,
+        },
+      })),
+    ]);
+    const extraStartSignatures = extraInputs.map((entry, index) => ({
+      input_index: entry.InputIndex,
+      signature: extraSignatures[index],
+    }));
 
     // Step 3: Execute FROST + poll
     const frostExec = await this.vbtcV2ApiClient.executeWithdrawComplete({
@@ -1490,6 +1641,7 @@ export class VfxClient {
       txType: TxType.VbtcV2WithdrawalRequest,
       data,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
       throwOnRefusal: true,
       beforeSign: (tx) => {
         const txData = tx.Data as Record<string, unknown>;
@@ -1682,6 +1834,7 @@ export class VfxClient {
       txType: TxType.TokenDeploy,
       data,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     const transactionHash = await txBuilder.process(this.dryRun);
     return transactionHash ? { transactionHash, scIdentifier } : null;
@@ -1897,6 +2050,7 @@ export class VfxClient {
       data,
       unlockTime: this.unlockTimeFor(signer, unlockHours),
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
     });
     return txBuilder.process(this.dryRun);
   }
@@ -1985,8 +2139,29 @@ export class VfxClient {
       );
     }
 
+    const flowId = newFlowId();
+    // Approved before the recovery message is stamped: the node accepts it for ten minutes.
+    const intent = {
+      action: 'reserve-recovery' as const,
+      flowId,
+      reserveAddress: resolved.address,
+      recoveryAddress,
+    };
+    await approveIntent(resolved, intent);
+    if (recovery !== resolved) {
+      await approveIntent(recovery, intent);
+    }
+
     const signatureTime = Math.round(Date.now() / 1000);
-    const recoverySigScript = await recovery.sign(`${signatureTime}${recoveryAddress}`);
+    const recoveryMessage = `${signatureTime}${recoveryAddress}`;
+    const recoverySigScript = await recovery.sign(recoveryMessage, {
+      kind: 'reserve-recovery',
+      flowId,
+      message: recoveryMessage,
+      reserveAddress: resolved.address,
+      recoveryAddress,
+      signatureTime,
+    });
 
     return this.sendReserveTx(
       resolved,
@@ -1997,6 +2172,7 @@ export class VfxClient {
         SignatureTime: signatureTime,
       },
       { amount: 0, unlockTime: 0 },
+      flowId,
     );
   };
 
@@ -2004,6 +2180,7 @@ export class VfxClient {
     signer: ResolvedSigner,
     data: Record<string, unknown>,
     opts: { amount: number; unlockTime: number | null },
+    approvedFlowId?: string,
   ): Promise<string | null> {
     const txBuilder = new RawTransactionService({
       network: this.network,
@@ -2014,6 +2191,8 @@ export class VfxClient {
       data,
       unlockTime: opts.unlockTime,
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      ...(approvedFlowId && { flowId: approvedFlowId, approved: true }),
     });
     return txBuilder.process(this.dryRun);
   }
@@ -2182,6 +2361,7 @@ export class VfxClient {
         release,
       }),
       apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
       throwOnRefusal: true,
     });
     return txBuilder.process(this.dryRun);
@@ -2319,9 +2499,10 @@ export class VfxClient {
     prepared: PreparedTransactionResponse,
     signer: ResolvedSigner,
     sendFn: SendFn,
+    flowId: string = newFlowId(),
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = await signer.sign(hash);
+    const signature = await signer.sign(hash, this.preparedSigningRequest(prepared, flowId));
     // Same contract as RawTransactionService.process(): a failure once the
     // send request has gone out (a lost response, a timeout, or a 5xx that
     // Spyglass also returns when its own call to the node times out) leaves it
@@ -2334,6 +2515,46 @@ export class VfxClient {
     } catch (error) {
       throw new TransactionDispatchError(hash, error);
     }
+  }
+
+  /**
+   * What a prepared (Spyglass-built) transaction says about itself, for the
+   * signer. When the builder returned its `HashPreimage`, the hash is checked
+   * against it first unless hashMode is 'server', so the SDK never signs a
+   * hash that does not belong to the transaction it was shown.
+   */
+  private preparedSigningRequest(prepared: PreparedTransactionResponse, flowId: string): SigningRequest {
+    const preimage = typeof prepared.HashPreimage === 'string' ? prepared.HashPreimage : undefined;
+    if (preimage !== undefined && this.hashMode !== 'server') {
+      const recomputed = hashPreimage(preimage);
+      if (recomputed !== prepared.Hash) {
+        throw new TransactionHashMismatchError(recomputed, prepared.Hash, preimage);
+      }
+    }
+    const txType =
+      typeof prepared.TransactionType === 'number'
+        ? prepared.TransactionType
+        : CORE_TX_TYPE_NAMES.indexOf(String(prepared.TransactionType ?? ''));
+    const transaction: SigningTransaction = {
+      Hash: prepared.Hash,
+      FromAddress: String(prepared.FromAddress ?? ''),
+      ToAddress: String(prepared.ToAddress ?? ''),
+      TransactionType: txType,
+      Amount: Number(prepared.Amount ?? 0),
+      Fee: Number(prepared.Fee ?? 0),
+      Nonce: Number(prepared.Nonce ?? 0),
+      Timestamp: Number(prepared.Timestamp ?? 0),
+      Data: prepared.Data ?? null,
+      UnlockTime: typeof prepared.UnlockTime === 'number' ? prepared.UnlockTime : null,
+    };
+    return {
+      kind: 'transaction',
+      flowId,
+      message: prepared.Hash,
+      transaction,
+      hashSource: 'prepared',
+      ...(preimage !== undefined && { hashPreimage: preimage }),
+    };
   }
 
   private async pollUntilDone<T>(opts: {

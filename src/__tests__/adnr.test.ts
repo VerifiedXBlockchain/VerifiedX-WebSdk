@@ -42,7 +42,7 @@ function sentTransaction(calls: CapturedCall[]): Record<string, unknown> {
 let client: VfxClient;
 
 beforeEach(() => {
-  client = new VfxClient('testnet');
+  client = new VfxClient('testnet', { hashMode: 'server' });
 });
 
 afterEach(() => {
@@ -54,13 +54,19 @@ afterEach(() => {
 describe('isValidVfxDomain', () => {
   const longest = 'a'.repeat(65);
 
-  test.each([['a.vfx'], ['abc123.vfx'], ['my-name.vfx'], ['-.vfx'], ['-a-.vfx'], ['a--b.vfx'], [`${longest}.vfx`], ['  Mixed.VFX ']])(
-    'accepts %s',
-    (domain) => {
-      expect(isValidVfxDomain(domain)).toBe(true);
-      expect(isValidVfxDomainBrowser(domain)).toBe(true);
-    },
-  );
+  test.each([
+    ['a.vfx'],
+    ['abc123.vfx'],
+    ['my-name.vfx'],
+    ['-.vfx'],
+    ['-a-.vfx'],
+    ['a--b.vfx'],
+    [`${longest}.vfx`],
+    ['  Mixed.VFX '],
+  ])('accepts %s', (domain) => {
+    expect(isValidVfxDomain(domain)).toBe(true);
+    expect(isValidVfxDomainBrowser(domain)).toBe(true);
+  });
 
   test.each([
     ['.vfx'],

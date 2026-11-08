@@ -102,7 +102,7 @@ describe('buyBtcDomain', () => {
     [Network.Mainnet, BTC_NAME_SIGNED_MESSAGE_HEIGHT_MAINNET],
   ])('%s: below the height it signs the bare timestamp', async (network, height) => {
     const { calls } = installPipeline(tipAt(height - 2));
-    const client = new VfxClient(network, { dryRun: true });
+    const client = new VfxClient(network, { dryRun: true, hashMode: 'server' });
     await client.buyBtcDomain(keypairFor(network), 'Alice', BTC_PRIVATE_KEY);
 
     const data = hashedData(calls);
@@ -118,7 +118,7 @@ describe('buyBtcDomain', () => {
   ])('%s with latest block %d: signs <timestamp>:<owner>:<name>.btc with the address key', async (network, latest) => {
     const { calls } = installPipeline(tipAt(latest));
     const keypair = keypairFor(network);
-    const client = new VfxClient(network, { dryRun: true });
+    const client = new VfxClient(network, { dryRun: true, hashMode: 'server' });
     await client.buyBtcDomain(keypair, 'Alice.btc', BTC_PRIVATE_KEY);
 
     const btcAddress = new BtcClient(network).addressFromPrivate(BTC_PRIVATE_KEY).address;
@@ -137,7 +137,7 @@ describe('buyBtcDomain', () => {
 
   test('fails with a clear error, before building, when the latest height cannot be read', async () => {
     const { calls } = installPipeline(() => jsonResponse({ detail: 'down' }, 503));
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.buyBtcDomain(keypairFor(Network.Testnet), 'alice', BTC_PRIVATE_KEY)).rejects.toThrow(
       /buyBtcDomain: could not read the latest block height/,
     );
@@ -146,7 +146,7 @@ describe('buyBtcDomain', () => {
 
   test('fails when Spyglass returns no block', async () => {
     installPipeline(() => ({ count: 0, results: [] }));
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.buyBtcDomain(keypairFor(Network.Testnet), 'alice', BTC_PRIVATE_KEY)).rejects.toThrow(
       /could not read the latest block height/,
     );

@@ -118,7 +118,7 @@ describe('VfxClient.transferVbtcMulti', () => {
   ];
 
   beforeEach(() => {
-    client = new VfxClient('testnet');
+    client = new VfxClient('testnet', { hashMode: 'server' });
   });
 
   afterEach(() => {
@@ -189,7 +189,11 @@ describe('VfxClient.transferVbtcMulti', () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
     await expect(
-      new VfxClient('testnet', true).transferVbtcMulti({ toAddress: RECIPIENT, totalAmount: 1, privateKey }),
+      new VfxClient('testnet', { dryRun: true, hashMode: 'server' }).transferVbtcMulti({
+        toAddress: RECIPIENT,
+        totalAmount: 1,
+        privateKey,
+      }),
     ).rejects.toThrow(/dryRun/);
     await expect(client.transferVbtcMulti({ toAddress: RECIPIENT, totalAmount: 0, privateKey })).rejects.toThrow(
       /positive totalAmount/,

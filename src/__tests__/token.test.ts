@@ -308,7 +308,7 @@ describe('VfxClient token transactions', () => {
   let client: VfxClient;
 
   beforeEach(() => {
-    client = new VfxClient('testnet');
+    client = new VfxClient('testnet', { hashMode: 'server' });
   });
 
   test('mintToken sends a Type 15 to Token_Base from the signer, looking up ticker and name', async () => {
@@ -336,15 +336,21 @@ describe('VfxClient token transactions', () => {
     ['a paused contract', { is_paused: true }, 5, /paused/],
     ['more decimals than the token has', { decimal_places: 2 }, 1.005, /at most 2 decimal places/],
     ['a supply overflow', { circulating_supply: DECIMAL_MAX }, 1, /supply past the largest amount/],
-  ])('mintToken refuses %s before building (Core TokenMintRulesHeight)', async (_label, tokenFields, amount, message) => {
-    const { calls } = installTokenPipeline({
-      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({ token: { ...fakeToken, ...tokenFields }, holders: {} }),
-    });
-    await expect(
-      client.mintToken(keypair, { scIdentifier: SC, amount, ticker: 'ACME', name: 'Acme Fund' }),
-    ).rejects.toThrow(message);
-    expect(calls.some((c) => c.url.includes('/raw/'))).toBe(false);
-  });
+  ])(
+    'mintToken refuses %s before building (Core TokenMintRulesHeight)',
+    async (_label, tokenFields, amount, message) => {
+      const { calls } = installTokenPipeline({
+        [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({
+          token: { ...fakeToken, ...tokenFields },
+          holders: {},
+        }),
+      });
+      await expect(
+        client.mintToken(keypair, { scIdentifier: SC, amount, ticker: 'ACME', name: 'Acme Fund' }),
+      ).rejects.toThrow(message);
+      expect(calls.some((c) => c.url.includes('/raw/'))).toBe(false);
+    },
+  );
 
   test("mintToken checks the minter's own balance", async () => {
     installTokenPipeline({
@@ -358,7 +364,10 @@ describe('VfxClient token transactions', () => {
 
   test('mintToken reads the token even when ticker and name are given, and mints within its decimals', async () => {
     const { calls } = installTokenPipeline({
-      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({ token: { ...fakeToken, decimal_places: 2 }, holders: {} }),
+      [`/fungible-tokens/${encodeURIComponent(SC)}/`]: () => ({
+        token: { ...fakeToken, decimal_places: 2 },
+        holders: {},
+      }),
     });
     expect(await client.mintToken(keypair, { scIdentifier: SC, amount: 1.25, ticker: 'ACME', name: 'Acme Fund' })).toBe(
       'TX_HASH_ABC',
@@ -544,7 +553,7 @@ describe('VfxClient.deployToken', () => {
   const compiled = [{ Function: 'TokenDeploy()', ContractUID: SC, Data: 'H4sI...', MD5List: 'x' }];
 
   test('compiles on the node, then sends a Type 17 from the signer to itself with the compiled Data', async () => {
-    const client = new VfxClient('testnet');
+    const client = new VfxClient('testnet', { hashMode: 'server' });
     const { calls } = installTokenPipeline({ '/raw/smart-contract-data/': () => compiled });
 
     const result = await client.deployToken(keypair, {
@@ -571,7 +580,7 @@ describe('VfxClient.deployToken', () => {
   });
 
   test('dryRun compiles and validates but does not send, and still returns the contract id', async () => {
-    const client = new VfxClient('testnet', true);
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     const { calls } = installTokenPipeline({ '/raw/smart-contract-data/': () => compiled });
     const result = await client.deployToken(keypair, { name: 'Acme', ticker: 'ACME', initialSupply: 100 });
     expect(result).toEqual({ transactionHash: 'TX_HASH_ABC', scIdentifier: SC });
@@ -580,7 +589,7 @@ describe('VfxClient.deployToken', () => {
   });
 
   test('a compile failure surfaces instead of producing a deploy with no contract', async () => {
-    const client = new VfxClient('testnet');
+    const client = new VfxClient('testnet', { hashMode: 'server' });
     installTokenPipeline({ '/raw/smart-contract-data/': () => jsonResponse({}, 500) });
     await expect(client.deployToken(keypair, { name: 'Acme', ticker: 'ACME', initialSupply: 1 })).rejects.toThrow(
       /500/,
@@ -592,7 +601,7 @@ describe('VfxClient.deployToken', () => {
   });
 
   test('invalid parameters fail before any request', async () => {
-    const client = new VfxClient('testnet');
+    const client = new VfxClient('testnet', { hashMode: 'server' });
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
     await expect(
@@ -606,7 +615,7 @@ describe('VfxClient token reads', () => {
   let client: VfxClient;
 
   beforeEach(() => {
-    client = new VfxClient('testnet');
+    client = new VfxClient('testnet', { hashMode: 'server' });
   });
 
   test('listFungibleTokens passes paging and returns the page', async () => {

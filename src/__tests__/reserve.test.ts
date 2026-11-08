@@ -54,7 +54,7 @@ let client: VfxClient;
 let now: number;
 
 beforeEach(() => {
-  client = new VfxClient('testnet');
+  client = new VfxClient('testnet', { hashMode: 'server' });
   now = Math.round(Date.now() / 1000);
 });
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased (9.1.0)
+
+### Added
+
+- **Signing context for external signers.** `Signer.signDigest(digestHex, request?)` now receives a typed `SigningRequest` (`transaction`, `vbtc-ceremony`, `vbtc-ownership`, `frost-withdrawal`, `reserve-recovery`, `message`) with the exact signed `message` and a `flowId` per user action. Optional `signBatch(items)` signs one action's messages together; optional `approve(intent)` runs before anything time-sensitive is built and cancels the action when it throws. One-argument signers are unchanged.
+- **Client-side transaction building.** `VfxClient` and `RawTransactionService` take `hashMode: 'server' | 'both' | 'local'` and `preflight`. `transactionHash`, `transactionHashPreimage`, `hashPreimage` and `localTransactionFee` port Core's hash and fee; pinned against the live testnet `/raw/hash` (81 vectors).
+- **`client.signMessage(signerOrKeypair, message)`**, the signer form of `getSignature`.
+- **Web wallet sign-in helpers**: `normalizeRecoveryPhrase`, `canonicalPrivateKeyHex`, `derivationTextCandidates`, `walletDerivationText`, `btcCredentialsFromDerivationText`, `btcKeypairFromDerivationText` and `reserveKeypairFromDerivationText`, pinned against the Flutter wallet's own code (151 vectors).
+
+### Changed
+
+- **Default `hashMode` is `'both'`**: sends are built in the SDK and checked against `/raw/hash`, throwing `TransactionHashMismatchError` (nothing signed) on a difference. A send no longer calls `/raw/timestamp` more than once per client, `/raw/fee` or `/raw/validate-signature`. Pass `hashMode: 'server'` for the previous pipeline.
+- Prepared vBTC transactions that carry `HashPreimage` are checked against it before signing, unless `hashMode` is `'server'`.
+
+### Known
+
+- Email/password: a password holding two or more literal runs like `/abc/g` derives a different key than the Flutter wallet, whose Dart regexes match that literal text. Pinned in the compat tests, not changed.
+
 ## 9.0.4 (2026-11-01)
 
 Needs VerifiedX Core 9.0.1 or later. Fixes from the 2026-11-01 docs review,
