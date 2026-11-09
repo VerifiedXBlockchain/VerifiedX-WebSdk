@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`BtcSigner`**, the Bitcoin side of the external-signer seam, so a browser extension, hardware wallet or HSM can sign Bitcoin without handing over the key. `BtcClient.createTransaction` and `sendBtc` take a `BtcSigner` where they took a WIF: the SDK builds the PSBT, the signer gets a typed `btc-transaction` request, and the SDK checks the result is the same transaction, validly signed by the signer's key, before broadcasting. `getSignatureWithSigner`, `buyBtcDomain(…, btcSigner)` and `signBtcNameTransferAcceptanceWithSigner` cover message signing through `signDigest`. `btcSignerFromWif` wraps a local key. Optional `approve(intent)` runs first. Everything is additive: the WIF and private-key paths are unchanged and build the same transaction.
+
 ## Unreleased (9.1.0)
 
 ### Added

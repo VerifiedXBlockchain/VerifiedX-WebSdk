@@ -6,6 +6,8 @@ import ecc from '@bitcoinerlab/secp256k1';
 import { BTC_TO_SATOSHI_MULTIPLIER, defaultApiBaseUrl } from './constants';
 import { BtcBroadcastUnknownError } from './errors';
 import type { IBroadcastCheck as BroadcastCheck } from './types';
+import { BtcSigner, assertBtcSignerAddress } from './signer';
+import { newFlowId } from '../signer';
 
 const ECPair = ECPairFactory(ecc);
 
@@ -113,12 +115,6 @@ export default class TransactionService {
     amount: number,
     feeRate = 0,
   ): Promise<CreateTxResponse> {
-    const amountSats = Math.round(amount * BTC_TO_SATOSHI_MULTIPLIER);
-
-    if (!Number.isFinite(amountSats) || amountSats <= 0) {
-      return this._buildCreateResponse(false, null, `Invalid amount: ${amount} BTC`);
-    }
-
     const keyPair: ECPairInterface = ECPair.fromWIF(senderWif, this.network);
 
     const { address } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network: this.network });
@@ -126,10 +122,120 @@ export default class TransactionService {
     if (address == null) {
       return this._buildCreateResponse(false, null, 'Could not get address');
     }
+
+    const built = await this.buildPayment(address, recipientAddress, amount, feeRate);
+    if (!built.psbt) {
+      return this._buildCreateResponse(false, null, built.error);
+    }
+    const psbt = built.psbt;
+
+    psbt.signAllInputs(keyPair);
+    psbt.finalizeAllInputs();
+
+    const transactionHex = psbt.extractTransaction().toHex();
+
+    return this._buildCreateResponse(true, transactionHex, null);
+  }
+
+  /**
+   * `createTransaction` with a BtcSigner instead of a WIF: the same PSBT is
+   * built and handed to `signer.signPsbt` with a `btc-transaction` request.
+   * The returned PSBT must be the same transaction with every input signed
+   * by `signer.publicKey`; anything else is refused before it can be
+   * broadcast. The signer's `approve` runs first when it has one.
+   */
+  public async createTransactionWithSigner(
+    signer: BtcSigner,
+    recipientAddress: string,
+    amount: number,
+    feeRate = 0,
+    flowId: string = newFlowId(),
+  ): Promise<CreateTxResponse> {
+    const pubkey = assertBtcSignerAddress(signer, this.network);
+    const amountSats = Math.round(amount * BTC_TO_SATOSHI_MULTIPLIER);
+    await signer.approve?.({
+      action: 'btc-send',
+      flowId,
+      fromAddress: signer.address,
+      toAddress: recipientAddress,
+      amountSats,
+      feeRate,
+    });
+
+    const built = await this.buildPayment(signer.address, recipientAddress, amount, feeRate);
+    if (!built.psbt) {
+      return this._buildCreateResponse(false, null, built.error);
+    }
+    const psbt = built.psbt;
+    const psbtBase64 = psbt.toBase64();
+    const returned = await signer.signPsbt(psbtBase64, {
+      kind: 'btc-transaction',
+      flowId,
+      network: this.network === TESTNET ? 'testnet' : 'mainnet',
+      fromAddress: signer.address,
+      inputs: built.inputs,
+      outputs: built.outputs,
+      feeSats: built.feeSats,
+      feeRate: built.feeRate,
+      psbtBase64,
+    });
+
+    const signed = parsePsbt(returned, this.network);
+    const problem = sameTransactionProblem(psbt, signed);
+    if (problem) {
+      return this._buildCreateResponse(false, null, `BtcSigner returned a different transaction: ${problem}`);
+    }
+    for (let index = 0; index < signed.data.inputs.length; index++) {
+      const input = signed.data.inputs[index];
+      if (input.finalScriptWitness) {
+        if (!finalWitnessIsValid(signed, index, pubkey)) {
+          return this._buildCreateResponse(false, null, `BtcSigner input ${index} is not signed by its key`);
+        }
+        continue;
+      }
+      const partial = input.partialSig?.find((sig) => sig.pubkey.equals(pubkey));
+      const sighashAll =
+        !!partial && bitcoin.script.signature.decode(partial.signature).hashType === bitcoin.Transaction.SIGHASH_ALL;
+      if (!partial || !sighashAll || !signed.validateSignaturesOfInput(index, ecdsaValidator, pubkey)) {
+        return this._buildCreateResponse(false, null, `BtcSigner did not sign input ${index} with its key`);
+      }
+      signed.finalizeInput(index);
+    }
+
+    return this._buildCreateResponse(true, signed.extractTransaction().toHex(), null);
+  }
+
+  /**
+   * The unsigned P2WPKH payment from `address`: every UTXO in, `amount` to
+   * the recipient, change back when it is worth keeping. Shared by the WIF
+   * and BtcSigner paths so both build the same transaction.
+   */
+  private async buildPayment(
+    address: string,
+    recipientAddress: string,
+    amount: number,
+    feeRate: number,
+  ): Promise<
+    | {
+        psbt: bitcoin.Psbt;
+        inputs: Array<{ txid: string; vout: number; valueSats: number }>;
+        outputs: Array<{ address: string; valueSats: number; isChange: boolean }>;
+        feeSats: number;
+        feeRate: number;
+        error: null;
+      }
+    | { psbt: null; error: string }
+  > {
+    const amountSats = Math.round(amount * BTC_TO_SATOSHI_MULTIPLIER);
+
+    if (!Number.isFinite(amountSats) || amountSats <= 0) {
+      return { psbt: null, error: `Invalid amount: ${amount} BTC` };
+    }
+
     const utxos = await this.getUtxos(address);
 
     if (utxos.length === 0) {
-      return this._buildCreateResponse(false, null, 'No UTXOs found for the given address.');
+      return { psbt: null, error: 'No UTXOs found for the given address.' };
     }
 
     if (!feeRate) {
@@ -138,6 +244,8 @@ export default class TransactionService {
     }
 
     const psbt = new bitcoin.Psbt({ network: this.network });
+    const inputs: Array<{ txid: string; vout: number; valueSats: number }> = [];
+    const outputs: Array<{ address: string; valueSats: number; isChange: boolean }> = [];
 
     let inputSum = 0;
     let inputSize = 0;
@@ -152,6 +260,7 @@ export default class TransactionService {
           value: utxo.value, // satoshis
         },
       });
+      inputs.push({ txid: utxo.txid, vout: utxo.vout, valueSats: utxo.value });
       inputSum += utxo.value;
       inputSize += P2WPKH_INPUT_SIZE;
     });
@@ -160,6 +269,7 @@ export default class TransactionService {
       address: recipientAddress,
       value: amountSats,
     });
+    outputs.push({ address: recipientAddress, valueSats: amountSats, isChange: false });
 
     // Fee is estimated for the tx shape actually produced: with a change
     // output when the change is worth keeping, without one when the
@@ -175,22 +285,19 @@ export default class TransactionService {
         address: address,
         value: change,
       });
+      outputs.push({ address, valueSats: change, isChange: true });
     } else if (inputSum - amountSats - feeWithoutChange < 0) {
-      return this._buildCreateResponse(
-        false,
-        null,
-        `Insufficient funds: inputs total ${inputSum} sats, need ${amountSats + feeWithoutChange} sats ` +
+      return {
+        psbt: null,
+        error:
+          `Insufficient funds: inputs total ${inputSum} sats, need ${amountSats + feeWithoutChange} sats ` +
           `(${amountSats} + ${feeWithoutChange} fee at ${feeRate} sat/vB)`,
-      );
+      };
     }
     // else: sub-dust remainder is left to the miner as fee
 
-    psbt.signAllInputs(keyPair);
-    psbt.finalizeAllInputs();
-
-    const transactionHex = psbt.extractTransaction().toHex();
-
-    return this._buildCreateResponse(true, transactionHex, null);
+    const feeSats = inputSum - outputs.reduce((sum, output) => sum + output.valueSats, 0);
+    return { psbt, inputs, outputs, feeSats, feeRate, error: null };
   }
 
   /**
@@ -352,4 +459,61 @@ export function classifyBroadcastFailure(status: number, body: string): 'already
   if (status === 400 || status >= 500) return 'unknown';
   if (status >= 400) return 'refused';
   return 'unknown';
+}
+
+const ecdsaValidator = (pubkey: Buffer, msghash: Buffer, signature: Buffer): boolean =>
+  ecc.verify(msghash, pubkey, signature);
+
+/** A PSBT from a signer, which may answer in base64 or hex. */
+function parsePsbt(text: string, network: bitcoin.Network): bitcoin.Psbt {
+  const trimmed = String(text ?? '').trim();
+  if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0) {
+    return bitcoin.Psbt.fromHex(trimmed, { network });
+  }
+  return bitcoin.Psbt.fromBase64(trimmed, { network });
+}
+
+/** Why `signed` is not the transaction `built` asked to be signed, or null. */
+function sameTransactionProblem(built: bitcoin.Psbt, signed: bitcoin.Psbt): string | null {
+  if (signed.version !== built.version || signed.locktime !== built.locktime) return 'version or locktime';
+  if (signed.txInputs.length !== built.txInputs.length) return 'input count';
+  if (signed.txOutputs.length !== built.txOutputs.length) return 'output count';
+  for (let i = 0; i < built.txInputs.length; i++) {
+    const a = built.txInputs[i];
+    const b = signed.txInputs[i];
+    if (!a.hash.equals(b.hash) || a.index !== b.index || a.sequence !== b.sequence) return `input ${i}`;
+  }
+  for (let i = 0; i < built.txOutputs.length; i++) {
+    const a = built.txOutputs[i];
+    const b = signed.txOutputs[i];
+    if (!a.script.equals(b.script) || a.value !== b.value) return `output ${i}`;
+  }
+  return null;
+}
+
+/** A finalized P2WPKH input: the witness must be [signature, pubkey] for our key and verify. */
+function finalWitnessIsValid(psbt: bitcoin.Psbt, index: number, pubkey: Buffer): boolean {
+  const input = psbt.data.inputs[index];
+  const witnessUtxo = input.witnessUtxo;
+  if (!input.finalScriptWitness || !witnessUtxo) return false;
+  // finalScriptWitness is a serialized witness vector: item count, then
+  // length-prefixed items. A P2WPKH spend has exactly two items, each
+  // shorter than 0xfd bytes, so single-byte lengths suffice.
+  const raw = input.finalScriptWitness;
+  const items: Buffer[] = [];
+  let offset = 0;
+  const count = raw[offset++];
+  for (let i = 0; i < count && offset < raw.length; i++) {
+    const length = raw[offset++];
+    items.push(raw.subarray(offset, offset + length));
+    offset += length;
+  }
+  if (count !== 2 || items.length !== 2 || offset !== raw.length || !items[1].equals(pubkey)) return false;
+  const decoded = bitcoin.script.signature.decode(items[0]);
+  const scriptCode = bitcoin.payments.p2pkh({ pubkey }).output as Buffer;
+  const unsigned = bitcoin.Transaction.fromBuffer(
+    (psbt.data.globalMap.unsignedTx as unknown as { toBuffer(): Buffer }).toBuffer(),
+  );
+  const hash = unsigned.hashForWitnessV0(index, scriptCode, witnessUtxo.value, decoded.hashType);
+  return decoded.hashType === bitcoin.Transaction.SIGHASH_ALL && ecc.verify(hash, pubkey, decoded.signature);
 }

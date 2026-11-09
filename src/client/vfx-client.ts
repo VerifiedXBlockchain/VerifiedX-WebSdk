@@ -1,5 +1,6 @@
 import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
 import BtcClient from '../btc';
+import { BtcSigner, isBtcSigner } from '../btc/signer';
 import {
   DOMAIN_DELETE_COST,
   DOMAIN_PURCHASE_COST,
@@ -585,8 +586,9 @@ export class VfxClient {
   };
 
   /**
-   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey`,
-   * managed by the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
+   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey` (a
+   * hex key, or a BtcSigner whose `signDigest` signs the claim), managed by
+   * the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
    * Core's BtcNameSignerOwnsAddressHeight (read against the latest block on
    * Spyglass) over `<unix seconds>:<signer address>:<name>.btc`, below it over
    * the bare timestamp. Throws when the latest block height cannot be read.
@@ -594,7 +596,7 @@ export class VfxClient {
   public buyBtcDomain = async (
     keypair: KeypairOrSigner,
     domain: string,
-    btcPrivateKey: string,
+    btcPrivateKey: string | BtcSigner,
   ): Promise<string | null> => {
     domain = cleanBtcDomain(domain);
 
@@ -629,13 +631,17 @@ export class VfxClient {
       : `${timestamp}`;
     const btcClient = new BtcClient(this.network);
 
-    const signature = btcClient.getSignature(message, btcPrivateKey);
-    const btcAccount = btcClient.addressFromPrivate(btcPrivateKey);
+    const signature = isBtcSigner(btcPrivateKey)
+      ? await btcClient.getSignatureWithSigner(message, btcPrivateKey, 'btc-name-claim')
+      : btcClient.getSignature(message, btcPrivateKey);
+    const btcAddress = isBtcSigner(btcPrivateKey)
+      ? btcPrivateKey.address
+      : btcClient.addressFromPrivate(btcPrivateKey).address;
 
     const data = {
       Function: 'BTCAdnrCreate()',
       Name: domainWithoutSuffix(domain),
-      BTCAddress: btcAccount.address,
+      BTCAddress: btcAddress,
       Message: message,
       Signature: signature,
     };
@@ -783,6 +789,31 @@ export class VfxClient {
     const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
     const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
     const signature = new BtcClient(this.network).getSignature(message, params.btcPrivateKey);
+    return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
+  };
+
+  /**
+   * `signBtcNameTransferAcceptance` with a BtcSigner for the receiving
+   * Bitcoin address instead of its private key. The signer gets a
+   * `btc-message` request with purpose `btc-name-transfer-acceptance`.
+   */
+  public signBtcNameTransferAcceptanceWithSigner = async (params: {
+    btcSigner: BtcSigner;
+    name: string;
+    newOwner: string;
+    /** Unix seconds to sign at; defaults to now. */
+    timestamp?: number;
+  }): Promise<{ message: string; signature: string; code: string }> => {
+    if (!params.btcSigner || !params.name || !params.newOwner) {
+      throw new Error('signBtcNameTransferAcceptanceWithSigner requires btcSigner, name and newOwner');
+    }
+    const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
+    const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
+    const signature = await new BtcClient(this.network).getSignatureWithSigner(
+      message,
+      params.btcSigner,
+      'btc-name-transfer-acceptance',
+    );
     return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 
