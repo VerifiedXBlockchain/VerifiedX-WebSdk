@@ -10,7 +10,11 @@ export {
   VbtcWithdrawalUnrecordedError,
   VbtcNodeUnreachableError,
   VbtcWithdrawalClosedError,
+  VbtcFrostJobNotFoundError,
+  VbtcWithdrawalAlreadySignedError,
 } from '../client/vfx-client';
+export { frostResumeActionFor } from '../services/frost-resume';
+export type { FrostResumeAction } from '../services/frost-resume';
 export { parseWatchedWithdrawal, VBTC_WATCHED_MAX_FEE_RATE } from '../services/watched-withdrawal';
 export {
   btcNameAcceptanceMessage,
@@ -55,6 +59,7 @@ export type {
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,
+  VbtcWithdrawalCheckpoint,
   FungibleToken,
   FungibleTokenDetail,
   FungibleTokenBalance,
@@ -63,7 +68,12 @@ export type {
   DeployTokenParams,
   DeployTokenResult,
   ReserveKeypair,
+  VfxBlock,
+  VaultKeypair,
+  LegacyVaultSource,
+  LegacyRecoveryLookup,
 } from '../types';
+export type { CoinPrice, CoinPricePoint, PricedCoin } from '../client/price-api-client';
 
 // External signing (HSM / MPC)
 export type {
@@ -98,6 +108,30 @@ export {
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
 export { vbtcContractHasNoMedia } from '../services/vbtc-media';
+export {
+  VBTC_WITHDRAWAL_EXPIRY_BLOCKS,
+  VBTC_WITHDRAWAL_STALE_AFTER_MS,
+  isWithdrawalResumable,
+  isWithdrawalStale,
+  liveResumableWithdrawalsFor,
+  resumableWithdrawalsFor,
+  vbtcMultiWithdrawalMax,
+  watchedWithdrawalRowState,
+  withdrawalRowCanCancel,
+} from '../services/vbtc-withdrawal-state';
+export type { WatchedWithdrawalRowState } from '../services/vbtc-withdrawal-state';
+// NFTs (VFX10)
+export { NftBulkMintError } from '../client/vfx-client';
+export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from '../client/nft-api-client';
+export type { VfxNft, NftListQuery, NftEvolveStage } from '../client/nft-api-client';
+export {
+  nftMintPayload,
+  nftOwnershipProof,
+  NFT_FEATURE_EVOLVE,
+  NFT_FEATURE_ROYALTY,
+  NFT_FEATURE_MULTI_ASSET,
+} from '../services/nft-data';
+export type { NftAssetInput, NftMintParams, NftEvolvePhaseInput } from '../services/nft-data';
 // Web wallet sign-in derivation (vault and Bitcoin account texts)
 export {
   btcCredentialsFromDerivationText,

@@ -326,15 +326,19 @@ A reserve account is an `xRBX…` address on the same key material as an
 ordinary address, with a different version prefix. Sends from it wait behind
 an unlock time (24 hours minimum) and can be called back until they settle;
 a recovery key can sweep the vault. The node applies the delay to VFX, vBTC
-and NFT sends; a fungible-token transfer from a vault carries the unlock time
-but settles at once.
+and NFT sends, and refuses fungible-token transfers and burns from a vault.
 
 ### Keys
 
-- `reserveKeypairFromPrivateKey(mainPrivateKey)` → `ReserveKeypair` — the vault the web wallet pairs with a main account, derived the same way (seed from the first 32 hex characters plus a counter, retried until the address is `xRBX`; recovery key seeded from the vault key). Pinned against the wallet's keygen bundle by the compat tests.
-- `reserveKeypairFromReservePrivateKey(reservePrivateKey)` — from the vault key alone; the recovery key is derived from it.
+- `newVaultKeypair()` → `VaultKeypair` — a new vault key from the CSPRNG, with no recovery key.
+- `vaultKeypairFromPrivateKey(vaultPrivateKey)` → `VaultKeypair` — an existing vault key.
+- `newRecoveryKey()` → `Keypair` — a random recovery key. Store it apart from the wallet; register only its address.
+- `recoveryKeyFromPasskeyPrf(prfOutput)` → `Keypair` — HKDF-SHA256 of a dedicated passkey's PRF output (salt `VerifiedX vault recovery key`, info `vfx-vault-recovery-key-v1`). Use a passkey made only for this, ideally on another authenticator. A passkey is bound to its rp_id, so the web wallet, extension and desktop app can share one only if they share that rp_id.
 - `reserveKeypairFromRestoreCode(code)` — from `base64("<privateKey>//<recoveryPrivateKey>")`, the code the CLI prints and the wallet backs up. The recovery key in the code is used as-is.
-- `generateReserveKeypair()` — a standalone vault on a fresh key.
+- `restoreLegacyWebWalletVault(mainPrivateKey)` → `ReserveKeypair` — **legacy, no theft protection.** The vault the Flutter web wallet pairs with a main account (seed from the first 32 hex characters plus a counter, retried until the address is `xRBX`; recovery key seeded from the vault key). For finding existing web-wallet vaults only. Pinned against the wallet by the compat tests.
+- `restoreLegacyWebWalletVaultFromVaultKey(vaultPrivateKey)` / `restoreLegacyWebWalletVaultFromDerivationText(text)` — **legacy, no theft protection**: the same scheme from the vault key or a key's derivation text.
+- `deriveLegacyRecoveryKey({ mainPrivateKey } | { vaultPrivateKey } | { derivationText })` → `Keypair & { vaultAddress }` — **legacy**: the recovery key the Flutter wallet derived for that vault.
+- `findLegacyRecovery(source, { includeKey? })` → `{ address, vaultAddress, hasActivity, summary, recoveryKey? }` — **legacy**: derives the legacy vault and recovery address and asks Spyglass (`/addresses/{address}/`, `/transaction/address/{address}/` for both). Activity is a balance or any transaction on either address, an activated vault, or a `Register()` from the vault naming the recovery address. Outages throw. The key is returned only with `includeKey: true`. Show "Restore legacy vault" only when `hasActivity` is true.
 - `reserveAddressFromPublic(publicKeyHex)` — the `xRBX` address of a public key, for HSM-held vault keys.
 
 Sign with the `ReserveKeypair` object itself. Its private key on its own
@@ -342,7 +346,7 @@ resolves to the key's ordinary address. A `Signer` whose `address` is the
 `xRBX` form is verified against `reserveAddressFromPublic` and signs for the
 vault.
 
-### `registerReserveAccount(signer, { recoveryAddress? })`
+### `registerReserveAccount(signer, { recoveryAddress })`
 
 Activates a funded vault with a 4 VFX `Register()` naming the recovery
 address. The vault must already hold the 4 VFX plus the fee plus the 0.5 VFX
