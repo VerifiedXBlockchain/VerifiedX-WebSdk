@@ -109,7 +109,7 @@ export {
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
 // Spyglass wallet reads and the relay's block_addresses event
-export { isBlockAddressesEvent, blockAddressesTouching } from '../services/socket-events';
+export { isBlockAddressesEvent, parseBlockAddressesEvent, blockAddressesTouching } from '../services/socket-events';
 export { ADDRESS_ACTIVITY_MAX } from '../client/address-api-client';
 export type {
   AddressActivity,

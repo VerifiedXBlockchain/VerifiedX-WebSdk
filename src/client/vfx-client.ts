@@ -799,13 +799,18 @@ export class VfxClient {
     address: string;
     vaultAddress: string;
   }): Promise<LegacyRecoveryLookup['summary']> {
+    // An address Spyglass has never seen can answer its history with a 404:
+    // that is an empty history, while any other failure still throws.
+    const history = (address: string, page: number, limit: number) =>
+      this.transactionApiClient.listTransactionsForAddress(address, page, limit, { strict: true }).catch((e) => {
+        if (e instanceof VfxApiError && e.status === 404) return null;
+        throw e;
+      });
     const [recoveryDetails, vaultDetails, recoveryTxs, vaultTxs] = await Promise.all([
       this.addressApiClient.getAddressDetails(derived.address, { strict: true }),
       this.addressApiClient.getAddressDetails(derived.vaultAddress, { strict: true }),
-      this.transactionApiClient.listTransactionsForAddress(derived.address, 1, 1, { strict: true }),
-      this.transactionApiClient.listTransactionsForAddress(derived.vaultAddress, 1, LEGACY_VAULT_HISTORY_PAGE_SIZE, {
-        strict: true,
-      }),
+      history(derived.address, 1, 1),
+      history(derived.vaultAddress, 1, LEGACY_VAULT_HISTORY_PAGE_SIZE),
     ]);
     const namesThisRecovery = (tx: Transaction) => {
       if (tx.to_address !== RESERVE_BASE_ADDRESS || tx.from_address !== derived.vaultAddress) return false;
@@ -816,12 +821,7 @@ export class VfxClient {
     // pages are read until it turns up or the history ends.
     let registeredWithThisRecovery = (vaultTxs?.results ?? []).some(namesThisRecovery);
     for (let page = 2; !registeredWithThisRecovery && page <= (vaultTxs?.num_pages ?? 1); page++) {
-      const older = await this.transactionApiClient.listTransactionsForAddress(
-        derived.vaultAddress,
-        page,
-        LEGACY_VAULT_HISTORY_PAGE_SIZE,
-        { strict: true },
-      );
+      const older = await history(derived.vaultAddress, page, LEGACY_VAULT_HISTORY_PAGE_SIZE);
       registeredWithThisRecovery = (older?.results ?? []).some(namesThisRecovery);
     }
     return {

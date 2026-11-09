@@ -1,4 +1,4 @@
-import { VfxClient, isBlockAddressesEvent, blockAddressesTouching } from '../index';
+import { VfxClient, isBlockAddressesEvent, parseBlockAddressesEvent, blockAddressesTouching } from '../index';
 import { installFetch } from './helpers/mock-fetch';
 
 const A = 'xMjrfrzkrNC2g3KJidbwF21gB7R3m46B9w';
@@ -188,13 +188,22 @@ describe('the block_addresses socket event', () => {
     message: 'block 118600 addresses',
   };
 
-  test('recognised as an object or as JSON text; new_block and junk are not', () => {
+  test('the guard takes parsed objects only; the parser takes objects or JSON text', () => {
     expect(isBlockAddressesEvent(event)).toBe(true);
-    expect(isBlockAddressesEvent(JSON.stringify(event))).toBe(true);
+    // A string is never narrowed to an event: parse it first.
+    expect(isBlockAddressesEvent(JSON.stringify(event))).toBe(false);
+    expect(parseBlockAddressesEvent(JSON.stringify(event))).toEqual(event);
+    expect(parseBlockAddressesEvent(event)).toEqual(event);
     expect(isBlockAddressesEvent({ type: 'new_block', data: { height: 1 }, message: '' })).toBe(false);
     expect(isBlockAddressesEvent({ type: 'block_addresses', data: { height: 1, hash: 'h' } })).toBe(false);
-    expect(isBlockAddressesEvent('not json')).toBe(false);
+    expect(parseBlockAddressesEvent('not json')).toBeNull();
+    expect(parseBlockAddressesEvent(JSON.stringify({ type: 'new_block' }))).toBeNull();
     expect(isBlockAddressesEvent(null)).toBe(false);
+  });
+
+  test('a parsed text event can be matched against wallet addresses', () => {
+    const parsed = parseBlockAddressesEvent(JSON.stringify(event));
+    expect(parsed && blockAddressesTouching(parsed, [A])).toEqual([A]);
   });
 
   test('blockAddressesTouching picks the wallet addresses the block listed', () => {

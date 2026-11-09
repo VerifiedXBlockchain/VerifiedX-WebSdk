@@ -1,22 +1,28 @@
 import { BlockAddressesEvent } from '../types';
 
 /**
- * Whether a relay socket message is a `block_addresses` event. Takes the
- * message as received: a parsed object or its JSON text. `new_block` and
- * every other event type answer false.
+ * A relay socket message as a `block_addresses` event, or null for any other
+ * message (`new_block`, other types, malformed text). Takes the message as
+ * received: a parsed object or its JSON text.
  */
-export function isBlockAddressesEvent(message: unknown): message is BlockAddressesEvent {
+export function parseBlockAddressesEvent(message: unknown): BlockAddressesEvent | null {
   let value = message;
   if (typeof value === 'string') {
     try {
       value = JSON.parse(value);
     } catch {
-      return false;
+      return null;
     }
   }
-  const event = value as Partial<BlockAddressesEvent> | null;
+  return isBlockAddressesEvent(value) ? value : null;
+}
+
+/** Whether an already-parsed socket message is a `block_addresses` event. For JSON text use parseBlockAddressesEvent. */
+export function isBlockAddressesEvent(message: unknown): message is BlockAddressesEvent {
+  const event = message as Partial<BlockAddressesEvent> | null;
   return (
     !!event &&
+    typeof event === 'object' &&
     event.type === 'block_addresses' &&
     !!event.data &&
     typeof event.data.height === 'number' &&

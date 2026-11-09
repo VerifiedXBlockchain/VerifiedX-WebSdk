@@ -250,6 +250,41 @@ describe('findLegacyRecovery reads the whole vault history', () => {
   });
 });
 
+describe('findLegacyRecovery history fallback and unseen addresses', () => {
+  const walletVector = flowVectors.email[0];
+  const derived = testnet.deriveLegacyRecoveryKey({ mainPrivateKey: '00' + walletVector.privateKey });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('a 404 for an unseen address history is an empty history, so the vault is still found', async () => {
+    installFetch({
+      ...olderSpyglass,
+      [`/transaction/address/${derived.address}/`]: () => new Response('{"detail":"Not found."}', { status: 404 }),
+      [`/transaction/address/${derived.vaultAddress}/`]: () => ({
+        count: 1,
+        page: 1,
+        num_pages: 1,
+        results: [
+          {
+            hash: 'r',
+            to_address: 'Reserve_Base',
+            from_address: derived.vaultAddress,
+            data: JSON.stringify({ Function: 'Register()', RecoveryAddress: derived.address }),
+          },
+        ],
+      }),
+      [`/addresses/`]: () => ({ address: 'x', balance: 0, balance_total: 0, activated: true }),
+    });
+    const result = await new VfxClient('testnet').findLegacyRecovery({
+      mainPrivateKey: '00' + walletVector.privateKey,
+    });
+    expect(result).toMatchObject({
+      hasActivity: true,
+      lookedUpWith: 'history',
+      summary: { recoveryHasTransactions: false, registeredWithThisRecovery: true },
+    });
+  });
+});
+
 describe('findLegacyRecovery on a Spyglass with the activity route', () => {
   const walletVector = flowVectors.email[0];
   const derived = testnet.deriveLegacyRecoveryKey({ mainPrivateKey: '00' + walletVector.privateKey });
