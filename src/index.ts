@@ -2,7 +2,7 @@ import { VfxClient } from './client/vfx-client';
 
 // Export main VFX client
 export { VfxClient };
-export type { VfxClientOptions, ReserveSendOptions, SendCoinOptions } from './client/vfx-client';
+export type { VfxClientOptions, ReserveSendOptions, SendCoinOptions, RefusalOptions } from './client/vfx-client';
 
 // Export API error type + media client
 export { VfxApiError, VfxNetworkError } from './client/base-api-client';
