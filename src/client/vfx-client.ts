@@ -3881,11 +3881,20 @@ export class VfxClient {
     try {
       sent = await sendFn({ hash, signature, public_key: signer.publicKey });
     } catch (error) {
+      // Spyglass 78+ answers a send the node refused with a 500 that carries
+      // the node's reason as `node_message` (null when the node did not
+      // answer). With a reason the refusal is definite, not a lost answer.
+      const nodeMessage = this.throwOnRefusal ? nodeMessageOf(error) : null;
+      if (nodeMessage) {
+        throw new TransactionRefusedError(hash, nodeMessage);
+      }
       throw new TransactionDispatchError(hash, error);
     }
     if (this.throwOnRefusal && sent?.success === false) {
-      const body = sent as unknown as { message?: unknown; Message?: unknown };
-      const reason = [body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as string | undefined;
+      const body = sent as unknown as { node_message?: unknown; message?: unknown; Message?: unknown };
+      const reason = [body.node_message, body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as
+        | string
+        | undefined;
       throw new TransactionRefusedError(hash, reason ?? null);
     }
     return sent;
@@ -4008,6 +4017,21 @@ function isTransientReadError(error: unknown): boolean {
   if (error instanceof VbtcNodeUnreachableError) return true;
   if (error instanceof VfxApiError) return error.status === undefined || error.status >= 500;
   return error instanceof TypeError || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
+}
+
+/**
+ * The node's refusal reason in a Spyglass error answer (`node_message`, from
+ * Spyglass 78), or null when there is none: an older Spyglass, the node not
+ * answering, or not an HTTP error at all.
+ */
+function nodeMessageOf(error: unknown): string | null {
+  if (!(error instanceof VfxApiError) || !error.body) return null;
+  try {
+    const message = (JSON.parse(error.body) as { node_message?: unknown })?.node_message;
+    return typeof message === 'string' && message !== '' ? message : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */
