@@ -181,7 +181,7 @@ export default class TransactionService {
     });
 
     const signed = parsePsbt(returned, this.network);
-    const problem = sameTransactionProblem(psbt, signed);
+    const problem = sameTransactionProblem(psbt, signed) ?? sameSpentOutputsProblem(psbt, signed);
     if (problem) {
       return this._buildCreateResponse(false, null, `BtcSigner returned a different transaction: ${problem}`);
     }
@@ -487,6 +487,22 @@ function sameTransactionProblem(built: bitcoin.Psbt, signed: bitcoin.Psbt): stri
     const a = built.txOutputs[i];
     const b = signed.txOutputs[i];
     if (!a.script.equals(b.script) || a.value !== b.value) return `output ${i}`;
+  }
+  return null;
+}
+
+/**
+ * Why the outputs `signed` claims to spend differ from the ones `built`
+ * spends, or null. A signature commits to the spent amount, so a signer that
+ * changed `witnessUtxo` could sign a hash that verifies against its own
+ * amount while the network, which uses the real one, refuses it. The
+ * SDK's own amounts and scripts are what the signatures are checked against.
+ */
+function sameSpentOutputsProblem(built: bitcoin.Psbt, signed: bitcoin.Psbt): string | null {
+  for (let i = 0; i < built.data.inputs.length; i++) {
+    const a = built.data.inputs[i].witnessUtxo;
+    const b = signed.data.inputs[i].witnessUtxo;
+    if (!a || !b || a.value !== b.value || !a.script.equals(b.script)) return `spent output of input ${i}`;
   }
   return null;
 }

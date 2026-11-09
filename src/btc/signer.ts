@@ -147,10 +147,32 @@ export async function signBtcMessage(
 }
 
 /**
- * A BtcSigner backed by a local key (WIF), for in-memory wallets and tests.
- * Signs exactly as the SDK's key-based paths do.
+ * A bitcoinjs network from a real one, a name, or the browser namespace's
+ * `networks` placeholders (`{ name: 'testnet' }`), which carry no
+ * parameters of their own.
  */
-export function btcSignerFromWif(wif: string, network: bitcoin.Network): BtcSigner {
+function resolveBitcoinNetwork(network: bitcoin.Network | 'mainnet' | 'testnet' | { name: string }): bitcoin.Network {
+  if (typeof network === 'object' && 'bech32' in network) {
+    return network as bitcoin.Network;
+  }
+  const name = typeof network === 'string' ? network : network.name;
+  if (name === 'testnet') return bitcoin.networks.testnet;
+  if (name === 'mainnet' || name === 'bitcoin') return bitcoin.networks.bitcoin;
+  if (name === 'regtest') return bitcoin.networks.regtest;
+  throw new Error(`Unknown Bitcoin network: ${String(name)}`);
+}
+
+/**
+ * A BtcSigner backed by a local key (WIF), for in-memory wallets and tests.
+ * Signs exactly as the SDK's key-based paths do. `networkOrName` is a
+ * bitcoinjs network, 'mainnet' / 'testnet', or one of the browser
+ * namespace's `btc.networks` values.
+ */
+export function btcSignerFromWif(
+  wif: string,
+  networkOrName: bitcoin.Network | 'mainnet' | 'testnet' | { name: string },
+): BtcSigner {
+  const network = resolveBitcoinNetwork(networkOrName);
   const keyPair = ECPair.fromWIF(wif, network);
   const address = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network }).address as string;
   return {

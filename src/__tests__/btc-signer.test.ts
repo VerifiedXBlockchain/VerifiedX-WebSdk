@@ -274,3 +274,32 @@ describe('buyBtcDomain with a BtcSigner', () => {
     expect(requests[0]).toMatchObject({ kind: 'btc-message', purpose: 'btc-name-claim' });
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('a signer that changes the spent amount is refused even though its signature verifies for that amount', async () => {
+    const keyPair = ECPair.fromWIF(SENDER_WIF, TESTNET);
+    const base = btcSignerFromWif(SENDER_WIF, TESTNET);
+    const lying: BtcSigner = {
+      ...base,
+      signPsbt: (psbt) => {
+        const p = bitcoin.Psbt.fromBase64(psbt, { network: TESTNET });
+        const utxo = p.data.inputs[0].witnessUtxo as { script: Buffer; value: number };
+        p.data.inputs[0].witnessUtxo = { script: utxo.script, value: utxo.value + 1_000 };
+        p.signAllInputs(keyPair);
+        return p.toBase64();
+      },
+    };
+    installUtxoFetch([100_000]);
+    const result = await service.createTransactionWithSigner(lying, RECIPIENT, 0.0005, 10);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/spent output of input 0/);
+  });
+
+  test("btcSignerFromWif takes 'testnet', a bitcoinjs network, or the browser namespace's placeholder", async () => {
+    const real = btcSignerFromWif(SENDER_WIF, TESTNET);
+    const { networks: browserNetworks } = await import('../browser/btc');
+    expect(btcSignerFromWif(SENDER_WIF, 'testnet').address).toBe(real.address);
+    expect(btcSignerFromWif(SENDER_WIF, browserNetworks.testnet).address).toBe(real.address);
+    expect(() => btcSignerFromWif(SENDER_WIF, { name: 'nonsense' })).toThrow(/Unknown Bitcoin network/);
+  });
+});
