@@ -223,6 +223,22 @@ export class KeypairService {
     }
     return '00' + child.privateKey.toString('hex');
   }
+  /**
+   * The VFX key the Flutter web wallet signs in with when a user imports a
+   * Bitcoin key (auth_utils.dart handleImportWithBtcPrivateKey): the key
+   * text exactly as typed, 64 hex characters or a 52-character WIF, seeds
+   * `privateKeyFromSeedString` with its first and last 16 characters. The
+   * text is not normalized, as the wallet does not normalize it: the same
+   * key in upper-case hex, or as a WIF, gives a different VFX key.
+   */
+  public privateKeyFromBtcKey(btcPrivateKeyOrWif: string): string {
+    if (btcPrivateKeyOrWif.length !== 64 && btcPrivateKeyOrWif.length !== 52) {
+      throw new Error(
+        `privateKeyFromBtcKey: expected a 64-character hex key or a 52-character WIF, got ${btcPrivateKeyOrWif.length} characters`,
+      );
+    }
+    return this.privateKeyFromSeedString(`${btcPrivateKeyOrWif.slice(0, 16)}${btcPrivateKeyOrWif.slice(-16)}`);
+  }
 
   // -- Vaults ---------------------------------------------------------------
   //
@@ -392,8 +408,10 @@ export class KeypairService {
    */
   public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
     const decoded = Buffer.from(restoreCode.trim(), 'base64').toString('utf-8');
+    // Core reads the first two parts and ignores any after them
+    // (ReserveAccount.RestoreReserveAccount), so this does too.
     const parts = decoded.split('//');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    if (parts.length < 2 || !parts[0] || !parts[1]) {
       throw new Error('Invalid restore code: expected base64 of "<privateKey>//<recoveryPrivateKey>"');
     }
     const privateKey = normalizePrivateKey(parts[0].replace(/\s/g, '').toLowerCase());

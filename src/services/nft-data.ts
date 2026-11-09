@@ -34,6 +34,8 @@ export interface NftEvolvePhaseInput {
   properties?: Record<string, string>;
   /** Only for `type: 'blockHeight'`: the height from which this stage is reached. */
   blockHeight?: number;
+  /** Only for `type: 'time'`: the moment from which this stage is reached (a Date, or an ISO 8601 string with a zone). */
+  evolveDate?: Date | string;
 }
 
 export interface NftMintParams {
@@ -52,9 +54,54 @@ export interface NftMintParams {
   /**
    * Stages the minter can move the NFT through with `evolveNft`. 'manual'
    * stages change only when the minter evolves it; 'blockHeight' stages also
-   * become reachable at their height. Time-based evolution is not offered.
+   * become reachable at their height, and 'time' stages at their
+   * `evolveDate` (sent in UTC, as the wallet does).
    */
-  evolve?: { type: 'manual' | 'blockHeight'; phases: NftEvolvePhaseInput[] };
+  evolve?: { type: 'manual' | 'blockHeight' | 'time'; phases: NftEvolvePhaseInput[] };
+}
+
+/**
+ * A 'time' stage's EvolveDate as the wallet sends it: UTC ISO 8601
+ * (evolve_phase.dart dateTimeForCompiler). Core parses it into a DateTime
+ * and compiles its ticks into the contract (EvolveSourceGenerator.cs).
+ */
+function evolveDateForCompiler(value: Date | string | undefined): string {
+  if (value === undefined) {
+    throw new Error("every phase of a 'time' evolve needs an evolveDate");
+  }
+  if (typeof value === 'string' && !/(Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) {
+    throw new Error(`evolveDate ${value} has no time zone; give a Date or an ISO string ending in Z or an offset`);
+  }
+  if (typeof value === 'string' && !isoDatePartsExist(value.trim())) {
+    // Date would roll 2027-02-31 over to March 3 rather than refuse it.
+    throw new Error(`evolveDate ${value} is not a valid date`);
+  }
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`evolveDate ${String(value)} is not a valid date`);
+  }
+  return date.toISOString();
+}
+
+/** Whether an ISO 8601 date-time names a real calendar day and time of day, as written. */
+function isoDatePartsExist(text: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2}):?(\d{2}))$/i.exec(
+    text,
+  );
+  if (!match) return false;
+  const [year, month, day, hour, minute, second = '0', offsetHours = '0', offsetMinutes = '0'] = match.slice(1);
+  const daysInMonth = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+  return (
+    Number(month) >= 1 &&
+    Number(month) <= 12 &&
+    Number(day) >= 1 &&
+    Number(day) <= daysInMonth &&
+    Number(hour) <= 23 &&
+    Number(minute) <= 59 &&
+    Number(second) <= 59 &&
+    Number(offsetHours) <= 23 &&
+    Number(offsetMinutes) <= 59
+  );
 }
 
 function extensionOf(fileName: string): string {
@@ -134,6 +181,13 @@ export function nftMintPayload(params: NftMintParams & { minterAddress: string }
       }
       phases.sort((a, b) => (a.blockHeight as number) - (b.blockHeight as number));
     }
+    const evolveDates = new Map<NftEvolvePhaseInput, string>();
+    if (type === 'time') {
+      for (const phase of phases) {
+        evolveDates.set(phase, evolveDateForCompiler(phase.evolveDate));
+      }
+      phases.sort((a, b) => Date.parse(evolveDates.get(a) as string) - Date.parse(evolveDates.get(b) as string));
+    }
     features.push({
       FeatureName: NFT_FEATURE_EVOLVE,
       FeatureFeatures: phases.map((phase, index) => {
@@ -141,11 +195,11 @@ export function nftMintPayload(params: NftMintParams & { minterAddress: string }
         return {
           Name: phase.name,
           Description: phase.description,
-          IsDynamic: type === 'blockHeight',
+          IsDynamic: type !== 'manual',
           EvolutionState: index + 1,
           IsCurrentState: false,
           SmartContractAsset: phase.asset ? compilerAsset(phase.asset, minterName) : null,
-          EvolveDate: null,
+          EvolveDate: evolveDates.get(phase) ?? null,
           EvolveBlockHeight: type === 'blockHeight' ? phase.blockHeight : null,
           ...(properties && { Properties: properties }),
         };

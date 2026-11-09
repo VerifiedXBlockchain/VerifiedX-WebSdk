@@ -185,6 +185,38 @@ export class VbtcV2ApiClient extends BaseApiClient {
     return response?.results ?? [];
   }
 
+  /**
+   * Ask the vBTC node to push a vault contract's media to a beacon for
+   * `toAddress`, signed by the owner over the contract id. Resolves to the
+   * beacon locator, or null when the node did not give one.
+   */
+  async beaconUpload(scIdentifier: string, toAddress: string, signature: string): Promise<string | null> {
+    const response = await this.makeJsonRequest(
+      `/vbtc-v2/beacon-upload/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(toAddress)}/${encodeURIComponent(
+        signature,
+      )}/`,
+    );
+    const locator = response?.success === true && typeof response.locator === 'string' ? response.locator.trim() : '';
+    return locator === '' ? null : locator;
+  }
+
+  /** The Type 18 Data that moves a vault's ownership to `toAddress` (Core GetVBTCOwnershipTransferData). */
+  async getOwnershipTransferData(
+    scIdentifier: string,
+    toAddress: string,
+    locator: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const response = await this.makeJsonRequest(
+      `/vbtc-v2/ownership-transfer/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(
+        toAddress,
+      )}/${encodeURIComponent(locator)}/`,
+    );
+    if (response?.success !== true || !Array.isArray(response.tx_data)) {
+      throw new Error(`Unexpected ownership-transfer result: ${JSON.stringify(response)}`);
+    }
+    return response.tx_data;
+  }
+
   async getWithdrawals(scIdentifier: string): Promise<VbtcWithdrawalRequest[]> {
     const response: { results: VbtcWithdrawalRequest[] } = await this.makeJsonRequest(
       `/vbtc-v2/withdrawals/${scIdentifier}/`,

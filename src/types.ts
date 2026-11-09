@@ -23,6 +23,20 @@ export interface VfxAddress {
   deactivated?: boolean;
 }
 
+/** A block as Spyglass indexes it. */
+export interface VfxBlock {
+  height: number;
+  hash: string;
+  previous_hash: string;
+  validator_address: string;
+  validator_signature?: string;
+  chain_ref_id?: string;
+  merkle_root?: string;
+  date_crafted?: string;
+  master_node?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
 export interface Transaction {
   hash: string;
   height: number;
@@ -117,6 +131,25 @@ export interface VbtcWithdrawalRequest {
   btc_address: string;
   amount: string;
   fee_rate: string;
+  /**
+   * On a watched vault, while the request is open: the node's state for it,
+   * `Waiting` (no Bitcoin transaction fixed yet, can still be cancelled) or
+   * `Pinned`. Null once closed, before the node was read, and on vaults the
+   * chain does not watch. Absent from older Spyglass deployments.
+   */
+  pin_state?: string | null;
+  /** The pinned Bitcoin transaction's txid while the request is open and pinned. */
+  pin_txid?: string | null;
+  /** The pinned transaction's fee rate (sat/vB). */
+  pin_fee_rate?: number | null;
+  /** The requester asked to release the pinned withdrawal; the vBTC comes back once it closes. */
+  releasing?: boolean | null;
+  /** The height after which an open watched request expires. */
+  expires_at_height?: number | null;
+  /** Why a cancelled request closed unpaid (Cancelled, Released, Expired or Void). */
+  closed_because?: string | null;
+  /** What a closed request refunded when less than its amount (a release keeps its Bitcoin fee). */
+  refunded_amount?: string | null;
   btc_transaction_hash: string;
   /**
    * See {@link VbtcWithdrawalStatus} for the per-value caveats. `pending_btc`
@@ -128,7 +161,39 @@ export interface VbtcWithdrawalRequest {
   completion_transaction_hash: string | null;
   created_at: string;
   completed_at: string | null;
+  /**
+   * When FROST produced a broadcastable Bitcoin transaction for this request
+   * (the signed hex itself is withheld). Set means signing already ran.
+   * Absent from Spyglass deployments older than the release that added it.
+   */
+  signed_at?: string | null;
 }
+
+/**
+ * A moment in `completeWithdrawal` worth persisting, so a closed tab can
+ * finish the withdrawal later: resume `frost-job-started` with
+ * `resumeJobId`, and finish `btc-broadcast` with `recordWithdrawalCompletion`
+ * (never by signing again).
+ */
+export type VbtcWithdrawalCheckpoint =
+  | {
+      kind: 'frost-job-started';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      amount: number;
+      btcAddress: string;
+    }
+  | {
+      kind: 'btc-broadcast';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      btcTransactionHash: string;
+      signedBtcTxHex: string;
+      amount: number;
+      btcAddress: string;
+    };
 
 export interface VbtcTransfer {
   id: number;
@@ -301,7 +366,9 @@ export type VbtcProgressPhase =
   | 'frost_complete'
   | 'btc_broadcast'
   | 'completion_recorded'
-  | 'watched_polling';
+  | 'watched_polling'
+  /** An `onCheckpoint` hook threw; the withdrawal carries on. */
+  | 'checkpoint_failed';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;

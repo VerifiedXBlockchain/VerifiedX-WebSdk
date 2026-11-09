@@ -153,10 +153,31 @@ export class RawTransactionApiClient extends BaseApiClient {
     return response.locator;
   }
 
+  /**
+   * Ask the node to fetch an NFT's media from the beacons in `locators` for
+   * `address`, the new owner, signed by it over the contract id. Spyglass
+   * refreshes the NFT's media URLs about 30 s after it succeeds. Throws when
+   * the node refuses.
+   */
+  async beaconAssetsRequest(scIdentifier: string, locators: string, address: string, signature: string): Promise<void> {
+    const response = await this.makeJsonRequest(
+      `/beacon-assets/${[scIdentifier, locators, address, signature].map(encodeURIComponent).join('/')}/`,
+    );
+    if (response?.success !== true) {
+      throw new Error(`Beacon assets request failed: ${JSON.stringify(response)}`);
+    }
+  }
+
   async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    return (await this.sendTransactionResult(txData)).sent;
+  }
+
+  /** Send a signed transaction; the node's verdict, with its reason when it refuses. */
+  async sendTransactionResult(txData: Record<string, unknown>): Promise<{ sent: boolean; message: string | null }> {
     const params = { transaction: txData };
     const response = await this.makeJsonRequest('/send/', 'POST', params);
-
-    return response?.Result === 'Success';
+    const sent = response?.Result === 'Success';
+    const message = typeof response?.Message === 'string' && response.Message ? response.Message : null;
+    return { sent, message: sent ? null : message };
   }
 }

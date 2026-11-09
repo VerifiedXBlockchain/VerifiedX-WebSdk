@@ -1,0 +1,61 @@
+{
+  "source": "vfx-gui assets/js/keygen-v3.js (seedToPrivate, importPrivateKey), auth_utils.dart handleImportWithBtcPrivateKey",
+  "walletCommit": "8b25b37050c1116cb4e1cace1330114e70a049ce",
+  "generator": "scripts/wallet-compat/gen-btc-seed-vectors.js",
+  "vectors": [
+    {
+      "name": "hexLower",
+      "btcKey": "47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+      "seed": "47412619788fecb021b80cc0b1260ba5",
+      "privateKey": "5c6179c0478805d1891dee685a712646b83369d914b27d5eee4754602ed1cf55",
+      "publicKey": "04a32a0ec696148c8bc9996eb86a400b118f3267833cae0055c78c00b1ed626a2cbdcb3d5be7c1becce3903faa0860479d8372325c91c9d3f819fe9a4f7fe91ea1",
+      "testnetAddress": "xTHJAERmV7wN2QV31maSzoX1FpvjvQ7qcU",
+      "mainnetAddress": "RUFrLsUapEFu42kN8Tvuf9ZRnz67C1XCfC"
+    },
+    {
+      "name": "hexUpper",
+      "btcKey": "47412619788FECB0EA0B152D1398E5EC742223D14DD8F46121B80CC0B1260BA5",
+      "seed": "47412619788FECB021B80CC0B1260BA5",
+      "privateKey": "48368a29a9801c7963ab5f9f45d434ca858453492b3c67e1c5bb40168107507a",
+      "publicKey": "047cad90a8482c6cd8834b8df48ae0893898aa12d6750cc9c663a85498085efca137fea6669bb60afedcbb9fca162505cbb482d5d7ba639da60b62391a2cc0fce0",
+      "testnetAddress": "xCwYpBAe8mzRtq47iaufN84yJYVhaGVVAs",
+      "mainnetAddress": "RDv6zpDTTtJxvTKSqHG82U7Pqhf4spzSn1"
+    },
+    {
+      "name": "hexLeadingZeros",
+      "btcKey": "0000000000000000000000000000000000000000000000000000000000000001",
+      "seed": "00000000000000000000000000000001",
+      "privateKey": "0ae4aaa5df7da1303eace947afc009e3d1faac99fa8aac8a7472bd3d1e26671b",
+      "publicKey": "04e2e111f733da1dfb9da8b8e38fbd0bec1a23cc571301c54d57341428eea5bd9fbc955e1ac1c88c84b3f476fef12ebfbbff708fe1f9e83563e64d17577c0822f9",
+      "testnetAddress": "xMFNB5cPc41GAY5s3Y5Fgzge2nRjqKXyoK",
+      "mainnetAddress": "RNDvMifCwAKoCAMCAERiMLj4Zwb73Vqetv"
+    },
+    {
+      "name": "wifTestnet",
+      "btcKey": "cPyDCEfZ849CfGmme8zXF5QmTFauaB5sgcXE3BgX7dCcedAqn6z5",
+      "seed": "cPyDCEfZ849CfGmm3BgX7dCcedAqn6z5",
+      "privateKey": "f7bc40bacddc518d42dfa3f7c7628d92c0ddb431d56fbb5a1013933155e063b7",
+      "publicKey": "046d20675c59162086a819f53f7c30f15599eb7d5f72500967e9769f51202c2c3e6a59a2d99ce2e67043194a01254ecc41a039ec015e0f5e59636435b995d0dff1",
+      "testnetAddress": "xEHhjX6GuCqK6fZkBd61piTvKhCWopRQzd",
+      "mainnetAddress": "RFGFvA96EK9r8Hq5JKSUV4WLrrMt5Qwfha"
+    },
+    {
+      "name": "wifMainnet",
+      "btcKey": "KycDjKfhgzSwVqJWFjBPskuhq2HVuizBcaNkvmE1cWYcPt9exDr5",
+      "seed": "KycDjKfhgzSwVqJWvmE1cWYcPt9exDr5",
+      "privateKey": "53394926b8e8244a7c42ed0cd99f9ee6b9a72723f681282f5413dd57059fbdb3",
+      "publicKey": "04db030da45b68aca22a315158d380f532de628b639a08b67eaa2c532451e5a3a756096480dcf468e6f9ff8303d78354e07a8a2a57678d200b40e653e41227602b",
+      "testnetAddress": "xBVo7bJzjzXqG8hbJS6XQX9WqyKkXthcXG",
+      "mainnetAddress": "RCUMJEMp56rNHkxvR8Sz4sBwP8V7oEV9qU"
+    },
+    {
+      "name": "wifTestnet2",
+      "btcKey": "cN4e1VEEAonQi5wvswrhJwNgQ8k99Qd2tR3gwKQvTUE6G75y3Ddx",
+      "seed": "cN4e1VEEAonQi5wvwKQvTUE6G75y3Ddx",
+      "privateKey": "812d88cef9fffbbfa3ca3d75f7466962ca407da4c5abbee5b97d1632a8d27836",
+      "publicKey": "04505bc0214ada6ae3f8113553d511738f64cedf7026611a997b89e0e425e573052e72b84ac43296c790524e07730e242d2cd90881099b8b484b53ce146ea88e07",
+      "testnetAddress": "xUhhHumVXAGsggK6JYVL6rG6pX9KizDT4q",
+      "mainnetAddress": "RVgFUYpJrGbQiJaRREqnmCJXMgJgxdymAB"
+    }
+  ]
+}
