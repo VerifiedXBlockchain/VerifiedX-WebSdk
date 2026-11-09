@@ -8,6 +8,8 @@ export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER };
 // Re-export types
 export * from '../btc/types';
 export { BtcBroadcastUnknownError } from '../btc/errors';
+export { btcSignerFromWif, signBtcMessage, btcMessageDigest, isBtcSigner } from '../btc/signer';
+export type { BtcSigner, BtcSigningRequest, BtcSigningIntent } from '../btc/signer';
 
 // For browser compatibility, use fallback networks
 // (bitcoinjs-lib networks may not work in all browser environments)
@@ -42,3 +44,14 @@ export class BrowserBtcClient extends OriginalBtcClient {
 // Export the browser-compatible client as both named and default export
 export { BrowserBtcClient as BtcClient };
 export default BrowserBtcClient;
+
+// Address types a key can spend from
+export { addressForSpendType } from '../btc/address-types';
+export type { BtcSpendType, BitcoinNetworkInput } from '../btc/address-types';
+export {
+  recommendedFeeRates,
+  BTC_FALLBACK_FEE_RATES,
+  BTC_TESTNET_FEE_RATE_FLOORS,
+  DEFAULT_FEE_RATES_TIMEOUT_MS,
+} from '../btc/fee-rates';
+export type { RecommendedFeeRates } from '../btc/fee-rates';
