@@ -364,6 +364,8 @@ export class NftBulkMintError extends Error {
   }
 }
 
+const LEGACY_VAULT_HISTORY_PAGE_SIZE = 50;
+
 /** The larger of an address's available and total balance; 0 when Spyglass has neither. */
 function largestBalance(details: { balance: number; balanceTotal: number } | null): number {
   const finite = (value: number) => (Number.isFinite(value) ? value : 0);
@@ -533,7 +535,7 @@ export class VfxClient {
    *   - a balance, any transaction, or an activated vault record on the
    *     vault address (same two endpoints);
    *   - a `Register()` from the vault naming this recovery address (read from
-   *     the vault's transactions to `Reserve_Base`).
+   *     the vault's transactions to `Reserve_Base`, every page).
    *
    * Lookups are strict: an outage throws rather than reading as "nothing
    * there". The key is returned only with `includeKey: true`; a wallet
@@ -548,13 +550,27 @@ export class VfxClient {
       this.addressApiClient.getAddressDetails(derived.address, { strict: true }),
       this.addressApiClient.getAddressDetails(derived.vaultAddress, { strict: true }),
       this.transactionApiClient.listTransactionsForAddress(derived.address, 1, 1, { strict: true }),
-      this.transactionApiClient.listTransactionsForAddress(derived.vaultAddress, 1, 50, { strict: true }),
+      this.transactionApiClient.listTransactionsForAddress(derived.vaultAddress, 1, LEGACY_VAULT_HISTORY_PAGE_SIZE, {
+        strict: true,
+      }),
     ]);
-    const registeredWithThisRecovery = (vaultTxs?.results ?? []).some((tx) => {
+    const namesThisRecovery = (tx: Transaction) => {
       if (tx.to_address !== RESERVE_BASE_ADDRESS || tx.from_address !== derived.vaultAddress) return false;
       const data = parseTxData(tx.data);
       return data?.Function === 'Register()' && data?.RecoveryAddress === derived.address;
-    });
+    };
+    // The Register() is usually the vault's oldest transaction, so older
+    // pages are read until it turns up or the history ends.
+    let registeredWithThisRecovery = (vaultTxs?.results ?? []).some(namesThisRecovery);
+    for (let page = 2; !registeredWithThisRecovery && page <= (vaultTxs?.num_pages ?? 1); page++) {
+      const older = await this.transactionApiClient.listTransactionsForAddress(
+        derived.vaultAddress,
+        page,
+        LEGACY_VAULT_HISTORY_PAGE_SIZE,
+        { strict: true },
+      );
+      registeredWithThisRecovery = (older?.results ?? []).some(namesThisRecovery);
+    }
     const summary = {
       recoveryBalance: largestBalance(recoveryDetails),
       recoveryTransactionCount: recoveryTxs?.count ?? 0,

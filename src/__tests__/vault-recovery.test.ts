@@ -204,3 +204,36 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
     ).rejects.toMatchObject({ name: 'VfxApiError' });
   });
 });
+
+describe('findLegacyRecovery reads the whole vault history', () => {
+  const walletVector = flowVectors.email[0];
+  const derived = testnet.deriveLegacyRecoveryKey({ mainPrivateKey: '00' + walletVector.privateKey });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  test('finds a Register() that sits past the first page', async () => {
+    const send = { hash: 's', to_address: 'xSomeone', from_address: derived.vaultAddress, data: null };
+    const register = {
+      hash: 'r',
+      to_address: 'Reserve_Base',
+      from_address: derived.vaultAddress,
+      data: JSON.stringify({ Function: 'Register()', RecoveryAddress: derived.address }),
+    };
+    const { calls } = installFetch({
+      [`/transaction/address/${derived.address}/`]: () => ({ count: 0, page: 1, num_pages: 1, results: [] }),
+      [`/transaction/address/${derived.vaultAddress}/`]: (url) =>
+        new URL(url).searchParams.get('page') === '3'
+          ? { count: 101, page: 3, num_pages: 3, results: [register] }
+          : { count: 101, page: 1, num_pages: 3, results: Array(50).fill(send) },
+      [`/addresses/`]: () => ({ address: 'x', balance: 0, balance_total: 0, activated: true }),
+    });
+    const result = await new VfxClient('testnet').findLegacyRecovery({
+      mainPrivateKey: '00' + walletVector.privateKey,
+    });
+    expect(result.summary.registeredWithThisRecovery).toBe(true);
+    const pages = calls
+      .filter((c) => c.url.includes(`/transaction/address/${derived.vaultAddress}/`))
+      .map((c) => new URL(c.url).searchParams.get('page'));
+    expect(pages).toEqual(['1', '2', '3']);
+  });
+});
