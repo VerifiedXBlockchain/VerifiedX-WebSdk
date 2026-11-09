@@ -117,6 +117,10 @@ import {
   VbtcWithdrawalRequest,
   VbtcWithdrawalResult,
   VfxAddress,
+  AddressActivity,
+  AddressActivityPage,
+  DomainAvailability,
+  VbtcV2ReadOptions,
 } from '../types';
 import {
   cleanBtcDomain,
@@ -764,6 +768,37 @@ export class VfxClient {
     opts: { includeKey?: boolean } = {},
   ): Promise<LegacyRecoveryLookup> => {
     const derived = this.keypairService.deriveLegacyRecoveryKey(source);
+    // One request where Spyglass has the activity route; the four reads
+    // (plus older history pages) below on one that predates it.
+    const activity = await this.addressApiClient.getAddressesActivity([derived.address, derived.vaultAddress]);
+    const summary = activity
+      ? {
+          recoveryHasBalance: activity[0].hasBalance,
+          recoveryHasTransactions: activity[0].hasTransactions,
+          vaultHasBalance: activity[1].hasBalance,
+          vaultHasTransactions: activity[1].hasTransactions,
+          vaultActivated: activity[1].vaultActivated,
+          registeredWithThisRecovery: activity[1].registerRecoveryAddresses.includes(derived.address),
+        }
+      : await this.legacyRecoveryFromHistory(derived);
+    const hasActivity = Object.values(summary).some(Boolean);
+    return {
+      address: derived.address,
+      vaultAddress: derived.vaultAddress,
+      hasActivity,
+      summary,
+      lookedUpWith: activity ? 'activity-route' : 'history',
+      ...(opts.includeKey && {
+        recoveryKey: { privateKey: derived.privateKey, publicKey: derived.publicKey, address: derived.address },
+      }),
+    };
+  };
+
+  /** findLegacyRecovery's reads on a Spyglass without `/addresses/activity/`. */
+  private async legacyRecoveryFromHistory(derived: {
+    address: string;
+    vaultAddress: string;
+  }): Promise<LegacyRecoveryLookup['summary']> {
     const [recoveryDetails, vaultDetails, recoveryTxs, vaultTxs] = await Promise.all([
       this.addressApiClient.getAddressDetails(derived.address, { strict: true }),
       this.addressApiClient.getAddressDetails(derived.vaultAddress, { strict: true }),
@@ -789,31 +824,15 @@ export class VfxClient {
       );
       registeredWithThisRecovery = (older?.results ?? []).some(namesThisRecovery);
     }
-    const summary = {
-      recoveryBalance: largestBalance(recoveryDetails),
-      recoveryTransactionCount: recoveryTxs?.count ?? 0,
-      vaultBalance: largestBalance(vaultDetails),
-      vaultTransactionCount: vaultTxs?.count ?? 0,
+    return {
+      recoveryHasBalance: largestBalance(recoveryDetails) > 0,
+      recoveryHasTransactions: (recoveryTxs?.count ?? 0) > 0,
+      vaultHasBalance: largestBalance(vaultDetails) > 0,
+      vaultHasTransactions: (vaultTxs?.count ?? 0) > 0,
       vaultActivated: vaultDetails?.activated === true,
       registeredWithThisRecovery,
     };
-    const hasActivity =
-      summary.recoveryBalance > 0 ||
-      summary.recoveryTransactionCount > 0 ||
-      summary.vaultBalance > 0 ||
-      summary.vaultTransactionCount > 0 ||
-      summary.vaultActivated ||
-      registeredWithThisRecovery;
-    return {
-      address: derived.address,
-      vaultAddress: derived.vaultAddress,
-      hasActivity,
-      summary,
-      ...(opts.includeKey && {
-        recoveryKey: { privateKey: derived.privateKey, publicKey: derived.publicKey, address: derived.address },
-      }),
-    };
-  };
+  }
 
   /** LEGACY, NO THEFT PROTECTION: the vault the Flutter web wallet pairs with this main private key. */
   public restoreLegacyWebWalletVault = (mainPrivateKey: string): ReserveKeypair => {
@@ -882,6 +901,40 @@ export class VfxClient {
 
   public domainAvailable = (domain: string, opts: { strict?: boolean } = {}): Promise<boolean> => {
     return this.addressApiClient.domainAvailable(domain, opts);
+  };
+
+  /**
+   * Whether a name can be bought, from Spyglass's own availability route,
+   * with the height it was indexed to: only `available: true` means free.
+   * Null when Spyglass predates the route; fall back to domainAvailable.
+   */
+  public domainAvailability = (domain: string): Promise<DomainAvailability | null> => {
+    return this.adnrApiClient.domainAvailability(domain);
+  };
+
+  /**
+   * Whether each address was ever used: any transaction, a balance, a
+   * Register() (an activated vault) and the recovery addresses it
+   * registered. One request for up to 20 addresses, in the order given.
+   * Null when Spyglass predates the route; any other failure throws, never
+   * reads as "no activity".
+   */
+  public addressHasActivity = (addresses: string[]): Promise<AddressActivity[] | null> => {
+    return this.addressApiClient.getAddressesActivity(addresses);
+  };
+
+  /**
+   * Transactions to or from any of up to 20 addresses (a main account and
+   * its vault, say), newest first, by cursor: pass a page's `nextCursor` as
+   * `before` for the next one. `limit` is 1 to 100 (default 30). No total
+   * count, and new blocks do not shift later pages. Null when Spyglass
+   * predates the route; fall back to listTransactionsForAddresses.
+   */
+  public listAddressActivity = (
+    addresses: string[],
+    opts: { limit?: number; before?: string } = {},
+  ): Promise<AddressActivityPage | null> => {
+    return this.transactionApiClient.listActivity(addresses, opts);
   };
 
   // Transactions
@@ -963,8 +1016,25 @@ export class VfxClient {
     });
   };
 
-  public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
-    return this.addressApiClient.lookupDomain(domain, opts);
+  /**
+   * The address a name points at, or null. `lean: true` asks Spyglass for
+   * the address field only (`/adnr/<domain>/?fields=address`) instead of the
+   * holder's balances; an older Spyglass ignores the field list, so the
+   * answer is the same.
+   */
+  public lookupDomain = async (
+    domain: string,
+    opts: { strict?: boolean; lean?: boolean } = {},
+  ): Promise<string | null> => {
+    if (!opts.lean) {
+      return this.addressApiClient.lookupDomain(domain, opts);
+    }
+    try {
+      return await this.adnrApiClient.lookupDomainAddress(domain);
+    } catch (e) {
+      if (opts.strict) throw e;
+      return null;
+    }
   };
 
   public lookupBtcDomain = async (domain: string): Promise<string | null> => {
@@ -1374,16 +1444,25 @@ export class VfxClient {
     return liveResumableWithdrawalsFor(token, address, { currentBlockHeight, requestBlockHeights });
   };
 
-  public listVbtcTokens = async (): Promise<VbtcV2Token[]> => {
-    return this.vbtcV2ApiClient.listAllTokens();
+  // `view: 'wallet'` (Spyglass 78+) trims each token's `nft` to
+  // VbtcV2WalletNft; an older Spyglass ignores it and sends the full shape.
+  public listVbtcTokens = async (opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token[]> => {
+    return this.vbtcV2ApiClient.listAllTokens(opts);
   };
 
-  public getVbtcTokens = async (address: string): Promise<VbtcV2Token[]> => {
-    return this.vbtcV2ApiClient.getTokensForAddress(address);
+  /** One page of every vBTC V2 token in the wallet shape; an older Spyglass sends them all as one page. */
+  public listVbtcTokensPage = async (
+    opts: { page?: number; limit?: number } = {},
+  ): Promise<PaginatedResponse<VbtcV2Token>> => {
+    return this.vbtcV2ApiClient.listTokensPage(opts);
   };
 
-  public getVbtcTokenDetail = async (scIdentifier: string): Promise<VbtcV2Token> => {
-    return this.vbtcV2ApiClient.getTokenDetail(scIdentifier);
+  public getVbtcTokens = async (address: string, opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token[]> => {
+    return this.vbtcV2ApiClient.getTokensForAddress(address, opts);
+  };
+
+  public getVbtcTokenDetail = async (scIdentifier: string, opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token> => {
+    return this.vbtcV2ApiClient.getTokenDetail(scIdentifier, opts);
   };
 
   public getVbtcTransfers = async (scIdentifier: string): Promise<VbtcTransfer[]> => {
