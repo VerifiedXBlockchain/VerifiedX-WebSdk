@@ -1,0 +1,18 @@
+{
+  "source": "eciesjs 0.3.18 encrypt() (the JS twin of Python eciespy 0.4.x)",
+  "privateKey": "0x47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5",
+  "vectors": [
+    {
+      "plaintext": "Meet at the lighthouse at dawn.",
+      "ciphertext": "BNWAwGFGnrCnvwdKVeeME09FID5zLWwJJtCigcwCar3/NOICllc+6iIRV6JC/+DLwOdxSmA/qHKgEhIL5PUNGP+KKKfqnhSZpJHpx71QTRK/L2c2QAV8P8OBj5DEVK0tW0u5ZSotYvZCMug8vXC60Kky8Be2EGF79GaswZJ/OZ4="
+    },
+    {
+      "plaintext": "Clé secrète: 秘密 ✓",
+      "ciphertext": "BMmvc4dbADoCj7f4Qg33vJwHaCdQA7CkpEwyeeUCsNPij+bw7MxMRaK4MRrXB489qGq8YTiaRLGIT2dHcOR1SZtQunNdP9zDDFr2rf52E9qMBx1ZCl1PcYcZqay4S4JORDejumr8wDrZq0ZAi8jUXDZ7AvY08e89aoc="
+    },
+    {
+      "plaintext": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "ciphertext": "BCCsdh4WQdvLiKmguGQREBcndhpOGNP5MPs5DnZJlegBDGsHU4onhrqquVPMaY0XhiY4OVFRYVFFB1Zo5XliV8/WIlicBLAWvTrM0YTa8Cmsv21+WjR2BkyzT0HXwa7sxCCmVEp3iY7qtUsWrbPZUedodPdYwmtRcrTNCoaNDCcaBwzyKlZwFMvK6c27ql3yghM2Z2cL57hapdtDsgnG3bSjM22FVrZJlnldi0llq4qvoLWZDcnwYF+Er9PmYaWuwT9L+UaU7zL11B1fJYugb0Nry2HHkFNV44zML8+M92wD2LuyFi0Pa9aZoYbD0b7Q+bHI7MrrB8hC2VQWpjWzVynB9nxF3Z4Fb21/f4Lm7msZ3h+y7ufCja6fEeP/yU3OHBVKZk3gYLeZAlg+spFtq5eyFoajjlDmtxUL01HBUYcOxvlcIHbqqsWq4UIc5v6o0S3h+TzKfxs4GoiT26ulKoqwkTbydE4FSEhMPCEi0Dp+TqyKvaY4uSHMEIvnfo2d1vf+8iEwTBtRHJPYHg=="
+    }
+  ]
+}

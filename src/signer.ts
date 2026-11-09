@@ -56,6 +56,12 @@ export type SigningRequest =
       hashSource: 'local' | 'server' | 'prepared';
     })
   | (SigningRequestBase & {
+      /** The owner's signature over the contract id, asking the node to push a vBTC vault's media to a beacon for `toAddress`. */
+      kind: 'vbtc-beacon-upload';
+      scIdentifier: string;
+      toAddress: string;
+    })
+  | (SigningRequestBase & {
       kind: 'vbtc-ceremony';
       step: 'start' | 'share';
       ceremonyId: string;
@@ -97,6 +103,12 @@ export type SigningRequest =
       toAddress: string;
     })
   | (SigningRequestBase & {
+      /** The new owner's signature over the contract id, asking the node to fetch the NFT's media from its beacons. */
+      kind: 'nft-beacon-download';
+      scIdentifier: string;
+      locators: string;
+    })
+  | (SigningRequestBase & {
       /** A proof that the signer owns the NFT, handed to someone who checks it with `verifyNftOwnership`. */
       kind: 'nft-ownership-proof';
       scIdentifier: string;
@@ -125,6 +137,13 @@ export type SigningIntent =
       txType: number;
       data: unknown;
       unlockTime: number | null;
+      /**
+       * The fee the transaction will carry, and amount + fee: quoted before
+       * approval and then used as-is. Absent when no quote was made
+       * ('server' mode with a signer that has no `approve`).
+       */
+      fee?: number;
+      total?: number;
     }
   | {
       action: 'vbtc-create';
@@ -148,6 +167,14 @@ export type SigningIntent =
       fromAddress: string;
       toAddress: string;
       amount: number;
+    }
+  | {
+      /** Hand a vBTC vault (its contract and the right to withdraw) to another account. */
+      action: 'vbtc-ownership-transfer';
+      flowId: string;
+      scIdentifier: string;
+      fromAddress: string;
+      toAddress: string;
     }
   | {
       /** A Type 27 request; the completion that follows (FROST and the Type 28 record) shares its flow. */

@@ -1,4 +1,4 @@
-import { VfxClient } from '../index';
+import { SignerError, VfxClient } from '../index';
 import KeypairService from '../services/keypair-service';
 import { Network } from '../constants';
 import { HashableTransaction, transactionHash } from '../services/transaction-hash';
@@ -190,5 +190,105 @@ describe('throwOnRefusal on the NFT writes', () => {
     const failure = new VfxClient('testnet').mintNfts(keypair, [mint, mint], { throwOnRefusal: true });
     await expect(failure).rejects.toMatchObject({ name: 'NftBulkMintError', index: 0, minted: [] });
     await expect(failure).rejects.toHaveProperty('cause.name', 'TransactionRefusedError');
+  });
+});
+
+describe('throwOnRefusal and a signer that refuses to sign', () => {
+  // A browser extension rejects with a provider error, not an Error instance.
+  const rejection = { code: 4001, message: 'User rejected the request.' };
+  const refusingSigner = {
+    address: keypair.address,
+    publicKey: keypair.publicKey,
+    signDigest: () => {
+      throw rejection;
+    },
+  };
+
+  test('default unchanged: the send resolves to null', async () => {
+    const { calls } = install({ Result: 'Success' }, { Result: 'Success' });
+    expect(await new VfxClient('testnet').sendCoin(refusingSigner, RECIPIENT, 1)).toBeNull();
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
+  });
+
+  test('with throwOnRefusal it throws SignerError carrying the signer error, before anything is sent', async () => {
+    const { calls } = install({ Result: 'Success' }, { Result: 'Success' });
+    for (const client of [new VfxClient('testnet', { throwOnRefusal: true }), new VfxClient('testnet')]) {
+      const send = client.sendCoin(refusingSigner, RECIPIENT, 1, { throwOnRefusal: true });
+      await expect(send).rejects.toBeInstanceOf(SignerError);
+      await expect(send).rejects.toMatchObject({ cause: rejection });
+      await expect(send).rejects.toThrow(/User rejected the request.*Nothing was sent/);
+    }
+    // The client option alone covers the other sends.
+    await expect(
+      new VfxClient('testnet', { throwOnRefusal: true }).sendCoin(refusingSigner, RECIPIENT, 1),
+    ).rejects.toBeInstanceOf(SignerError);
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
+  });
+
+  test('prepared vBTC sends: the signer error unchanged by default, SignerError with throwOnRefusal', async () => {
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: true, hash: 'PREPARED_HASH' }),
+    });
+    const transfer = { scIdentifier: 'sc-1', fromAddress: keypair.address, toAddress: RECIPIENT, amount: 1 };
+    await expect(new VfxClient('testnet').transferVbtc({ ...transfer, signer: refusingSigner })).rejects.toBe(
+      rejection,
+    );
+    const wrapped = new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc({
+      ...transfer,
+      signer: refusingSigner,
+    });
+    await expect(wrapped).rejects.toBeInstanceOf(SignerError);
+    await expect(wrapped).rejects.toMatchObject({ cause: rejection });
+    expect(calls.some((c) => c.url.includes('/transfer/send/'))).toBe(false);
+  });
+});
+
+describe('node_message on prepared vBTC sends (Spyglass 78)', () => {
+  const transfer = { scIdentifier: 'sc-1', fromAddress: keypair.address, toAddress: RECIPIENT, amount: 1, privateKey };
+  const refusedBy = (nodeMessage: string | null) =>
+    new Response(JSON.stringify({ success: false, message: 'Failed to send', raw: null, node_message: nodeMessage }), {
+      status: 500,
+    });
+
+  test('with throwOnRefusal, a 500 carrying the node reason is a definite TransactionRefusedError', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy('Insufficient vBTC balance'),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionRefusedError',
+      hash: 'PREPARED_HASH',
+      reason: 'Insufficient vBTC balance',
+    });
+  });
+
+  test('no node reason (the node did not answer), or no throwOnRefusal: still TransactionDispatchError', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy(null),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionDispatchError',
+      hash: 'PREPARED_HASH',
+    });
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy('Insufficient vBTC balance'),
+    });
+    await expect(new VfxClient('testnet').transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionDispatchError',
+    });
+  });
+
+  test('a success: false body prefers node_message as the reason', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: false, message: 'Failed', node_message: 'Bad nonce' }),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionRefusedError',
+      reason: 'Bad nonce',
+    });
   });
 });
