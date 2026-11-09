@@ -93,11 +93,17 @@ export class BaseApiClient {
     return AbortSignal.timeout(this.timeoutMs);
   }
 
-  private async _makeRequest(path: string, method: HttpMethod = 'GET', params: Record<string, unknown> = {}) {
+  private async _makeRequest(
+    path: string,
+    method: HttpMethod = 'GET',
+    params: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
     let url = `${this.baseUrl}${this.basePath}${path}`;
 
     const init: RequestInit = {
       method,
+      ...(Object.keys(headers).length > 0 && { headers: { ...headers } }),
     };
     const signal = this.timeoutSignal();
     if (signal) {
@@ -115,7 +121,7 @@ export class BaseApiClient {
       }
     } else {
       // Set body and headers for other methods
-      init.headers = { 'Content-Type': 'application/json' };
+      init.headers = { ...headers, 'Content-Type': 'application/json' };
       init.body = JSON.stringify(params);
     }
 
@@ -138,8 +144,9 @@ export class BaseApiClient {
     path: string,
     method: HttpMethod = 'GET',
     params: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
   ): Promise<T> {
-    const response = await this._makeRequest(path, method, params);
+    const response = await this._makeRequest(path, method, params, headers);
     return response.json();
   }
 

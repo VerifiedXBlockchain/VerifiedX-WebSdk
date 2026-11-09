@@ -96,6 +96,8 @@ or `message`. Two optional methods go with it:
   is built, so the person approves first. Throw from it to cancel; nothing is
   signed or sent.
 
+For a transaction, `approve` also receives `fee` and `total` (amount + fee). The fee is quoted before approval and the transaction is then built with exactly that fee. In `'server'` mode this happens only for signers with `approve`, so other callers keep the old call order. `client.quoteSendCoin(keypair, to, amount)` returns the same `{ fee, amount, total }` without signing, and `client.estimateTransactionFee({ fromAddress, toAddress, amount, txType, data })` gives an offline upper bound for any transaction.
+
 A signer written for the one-argument `signDigest(digestHex)` keeps working
 unchanged. `client.signMessage(signerOrKeypair, message)` is the signer form of
 `getSignature`.
@@ -321,31 +323,82 @@ Two behaviours worth knowing before wiring these into anything automated:
 `ticker` and `name` ride in every token transaction for indexers and wallets;
 pass them to skip the Spyglass lookup the SDK otherwise makes.
 
+#### NFTs (VFX10)
+
+The node builds each NFT transaction's Data through Spyglass; the SDK signs
+and sends it like any other transaction, so every key source (`Signer`,
+`approve`, local hashing) applies. Each write is one approved action.
+
+```typescript
+// Media: upload to Spyglass, then mint. Omit `asset` for an NFT without media.
+const asset = await client.uploadNftAsset(fileBlob, 'art.png');
+const { scIdentifier } = await client.mintNft(signer, {
+  name: 'Lighthouse',
+  description: 'First light',
+  minterName: 'Mintwood',
+  asset,
+  additionalAssets: [],                                   // more media files
+  properties: { rarity: 'rare' },
+  royalty: { type: 'percent', amount: 0.05, payToAddress: signer.address },
+  evolve: { type: 'manual', phases: [{ name: 'Day', description: 'd' }, { name: 'Night', description: 'n' }] },
+});
+await client.mintNfts(signer, [item1, item2]);            // bulk: one approval, one tx each
+
+await client.transferNft(signer, { scIdentifier, toAddress });          // media goes via a beacon
+await client.transferNft(vault, { scIdentifier, toAddress, unlockHours: 48 }); // from a vault
+await client.evolveNft(minter, { scIdentifier, stage: 2 });             // minter only; lower = devolve
+await client.burnNft(signer, { scIdentifier });
+
+const proof = await client.proveNftOwnership(signer, scIdentifier);    // address<>message<>signature<>id
+await client.verifyNftOwnership(proof);                                 // true / false
+
+await client.listNfts({ ownerAddress, page: 1 });
+await client.listNftsForAddresses([main.address, vault.address]);
+const nft = await client.getNft(scIdentifier);
+nftCurrentStage(nft); nftEvolveStages(nft); nftIsMedialess(nft);       // parse smart_contract_data
+await client.associateNftMedia(owner, { scIdentifier, mediaMap });      // replace media URLs (owner)
+```
+
 #### Reserve (Vault) Accounts
 
 A reserve account is an `xRBX…` address whose outgoing sends wait behind an
 unlock time (24 hours minimum) and can be called back until they settle, with
 a recovery key that can sweep the vault if its key is compromised. The
-network applies the delay to VFX, vBTC and NFT sends. A fungible-token
-transfer from a vault must carry the unlock time but settles immediately, so
-a vault protects treasury, not fund tokens.
+network applies the delay to VFX, vBTC and NFT sends, and refuses
+fungible-token transfers and burns from a vault, so a vault protects
+treasury, not fund tokens.
+
+The recovery key only protects the vault if a thief who takes the vault key
+cannot compute it, so a new vault's recovery key is made on its own and only
+its address is registered. The SDK never derives one.
 
 ```typescript
-// Keys. The vault the web wallet pairs with a main key is derived from it, so
-// the same wallet account gives the same vault here (pinned by golden vectors).
-const vault = client.reserveKeypairFromPrivateKey(mainPrivateKey); // ReserveKeypair
-client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code
-client.reserveKeypairFromReservePrivateKey(key)     // from the vault key alone
-client.generateReserveKeypair()                     // standalone vault
+// Keys for a new vault: the vault key, and a recovery key kept somewhere else.
+const vault = client.newVaultKeypair();                       // { privateKey, publicKey, address: 'xRBX…' }
+const recovery = client.newRecoveryKey();                     // random; store it apart (a backup code)
+// or: client.recoveryKeyFromPasskeyPrf(prfOutput)           // a dedicated passkey's PRF output (HKDF)
+// or: the address of an account in another wallet / hardware wallet
+client.vaultKeypairFromPrivateKey(key)              // an existing vault key
+client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code (both keys)
 client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM key
+
+// Finding vaults the Flutter web wallet made. LEGACY: their recovery key is
+// derived from the main key, so they have NO theft protection; move funds to
+// a new vault with an independent recovery key. Offer the restore only when
+// Spyglass shows the legacy vault or its recovery address was ever used.
+const legacy = await client.findLegacyRecovery({ mainPrivateKey });   // { address, vaultAddress, hasActivity, summary }
+if (legacy.hasActivity) {
+  const vault = client.restoreLegacyWebWalletVault(mainPrivateKey);   // vault + derived recovery key
+}
+client.deriveLegacyRecoveryKey({ vaultPrivateKey })                    // the derived recovery key itself
 
 // Lifecycle. Fund the vault first (5 VFX covers activation plus the 0.5 floor).
 await client.sendCoin(main, vault.address, 5);
-await client.registerReserveAccount(vault);                            // 4 VFX Register()
+await client.registerReserveAccount(vault, { recoveryAddress: recovery.address }); // 4 VFX Register()
 await client.sendCoin(vault, toAddress, 100);                          // settles in 24h
 await client.sendCoin(vault, toAddress, 100, { unlockHours: 72 });     // or longer
 await client.callBackReserveTransaction(vault, { hash });             // before it settles
-await client.recoverReserveAccount(vault);                             // sweep to the recovery address
+await client.recoverReserveAccount(vault, { recoverySigner: recovery }); // sweep to the recovery address
 
 // With an HSM: the vault Signer presents the xRBX address; recovery needs
 // its own signer (or keypair) for the second signature.
@@ -355,8 +408,10 @@ await client.recoverReserveAccount(vaultSigner, { recoverySigner });
 
 `getAddressDetails` reports `activated` (a Register() exists), `deactivated`
 (a Recover() exists) and `balanceLocked` (sends still waiting to settle).
-Pass the `ReserveKeypair` object itself when signing: its private key on its
+Pass the vault keypair object itself when signing: its private key on its
 own resolves to the key's ordinary address, not the vault.
+`registerReserveAccount` refuses the recovery address the legacy scheme would
+derive from the vault key.
 
 #### Chain and price reads
 
@@ -404,6 +459,7 @@ generateEmailKeypair(email: string, password: string, index?: number): IBtcKeypa
 // Signing methods
 getSignature(message: string, privateKey: string): string
 getSignatureFromWif(message: string, wif: string): string
+getSignatureWithSigner(message: string, signer: BtcSigner, purpose?): Promise<string> // same format
 
 // Account information
 getAddressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>
@@ -411,13 +467,42 @@ getTransactions(address: string, limit?: number, before?: string | null): Promis
 
 // Transaction operations
 getFeeRates(): Promise<IFeeRates | null>
-createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
+createTransaction(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
 broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
-sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
+sendBtc(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
 checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>
 
 // Utility methods
 getRawTransaction(txId: string): Promise<Buffer>
+```
+
+#### Signing Bitcoin with an external key (`BtcSigner`)
+
+Wherever a WIF is accepted (`createTransaction`, `sendBtc`), a `BtcSigner` can
+stand in, and `buyBtcDomain` takes one in place of the Bitcoin private key.
+The key never reaches the SDK. The SDK builds the payment as a PSBT and hands
+it to `signPsbt` with a typed `btc-transaction` request (inputs, outputs with
+the change marked, fee, fee rate). It then checks that the returned PSBT is the
+same transaction with every input validly signed by the signer's key, before
+anything is broadcast. Messages (.btc name claims and transfer acceptances) go
+through `signDigest` with a `btc-message` request. `approve(intent)` runs first
+when present.
+
+```typescript
+import { btc } from 'vfx-web-sdk';
+
+const signer: btc.BtcSigner = {
+  address: 'tb1q…',                // P2WPKH address of the key, checked against publicKey
+  publicKey: '02…',                // compressed, hex
+  signPsbt: (psbtBase64, request) => extension.btc_signPsbt(psbtBase64, request), // base64 or hex back
+  signDigest: (digestHex, request) => extension.btc_signDigest(digestHex, request), // DER back; optional
+  approve: (intent) => extension.confirm(intent),                                  // optional
+};
+await new btc.BtcClient('testnet').sendBtc(signer, recipient, 0.001);
+await client.buyBtcDomain(vfxSigner, 'alice.btc', signer);
+await client.signBtcNameTransferAcceptanceWithSigner({ btcSigner: signer, name, newOwner });
+
+btc.btcSignerFromWif(wif, bitcoin.networks.testnet); // a BtcSigner over a local key
 ```
 
 
