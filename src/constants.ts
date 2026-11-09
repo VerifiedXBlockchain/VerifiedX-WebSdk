@@ -105,6 +105,12 @@ export function btcNameSignedMessagesActive(network: Network, latestBlockHeight:
 
 export const VFX_API_BASE_URL_TESTNET = 'https://data-testnet.verifiedx.io/api';
 export const VFX_API_BASE_URL_MAINNET = 'https://data.verifiedx.io/api';
+/**
+ * Spyglass for the devnet. Devnet addresses use the testnet prefix, so a
+ * devnet client is a testnet client pointed here:
+ * `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
+ */
+export const VFX_API_BASE_URL_DEVNET = 'https://data-devnet.verifiedx.io/api';
 
 // Fungible tokens (VFX20)
 

@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Vault extras**: `fundAndRegisterVault(funder, vault, { recoveryAddress })` funds 5 VFX, waits for it, then registers (the Flutter wallet's fund-then-activate); `canCallBackReserveTransaction(tx, vault, { vaultHistory })` (the Flutter call-back rules); `vaultBackupCode` / `vaultKeyFromBackupCode` (a checksummed backup of a vault key alone) and `reserveRestoreCode(vaultKey, recoveryKey)` (the CLI/Flutter restore code). A restore code with more than two parts is read like Core reads it.
+
+### Changed (vault API)
+
+- `unlockHours` below 24 is raised to 24, as the Flutter wallet does, instead of throwing.
+
+- **Spend from every address type of a key.** `BtcClient.createTransaction` / `sendBtc` take `options.addressType`: `'p2wpkh'` (default, unchanged), `'p2pkh'`, `'p2sh-p2wpkh'`, `'p2tr'` (the bech32m address the SDK and Flutter wallet show, whose output key is the untweaked key) and `'p2tr-bip86'` (standard BIP 86). Change returns to the same address. A `BtcSigner` declares its type with `addressType`; `btcSignerFromWif(wif, network, addressType)`. `addressForSpendType` exposes the addresses. `buyBtcDomain` and `signBtcNameTransferAcceptance` accept a WIF as well as a hex key.
+
+- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
+- **`btc.recommendedFeeRates(network)`**: fee tiers as the Flutter wallet shows them, with testnet floors (10/8/5/5/2 sat/vB) and a fixed fallback table marked `isEstimate` when the fee API cannot be reached. `BtcClient.getFeeRates` is unchanged.
+- **`VFX_API_BASE_URL_DEVNET`** (`https://data-devnet.verifiedx.io/api`), plus the mainnet and testnet base URLs as exports. Devnet uses the testnet address prefix, so a devnet client is `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
+- **`transferVbtcOwnership`** hands a vBTC vault (contract and withdrawal rights) to another account with a Type 18 (Core `GetVBTCOwnershipTransferData`): the owner signs the contract id for a beacon upload of the vault's media, a media-less vault falls back to locator "NA" when no beacon answers, and a vault sender waits `unlockHours`. New intent `vbtc-ownership-transfer`, request kind `vbtc-beacon-upload`, helper `vbtcContractHasNoMedia`.
+- **vBTC withdrawal state**: `VbtcWithdrawalRequest` types the watched-vault fields Spyglass returns (`pin_state`, `pin_txid`, `pin_fee_rate`, `releasing`, `expires_at_height`, `closed_because`, `refunded_amount`), all optional. Helpers ported from the Flutter wallet: `isWithdrawalResumable`, `watchedWithdrawalRowState`, `withdrawalRowCanCancel`, `isWithdrawalStale` (Core's 360-block expiry, 90-minute fallback), `resumableWithdrawalsFor`, `liveResumableWithdrawalsFor`, `vbtcMultiWithdrawalMax`, and `VfxClient.getLiveResumableWithdrawals`, which looks up the heights.
+- **FROST withdrawal resume** on `completeWithdrawal`, all opt-in: `resumeJobId` polls an existing signing job without preparing or signing again (`VbtcFrostJobNotFoundError` when the explorer no longer knows it); `onCheckpoint` is awaited at `frost-job-started` (before polling) and `btc-broadcast` (before the Type 28) so an app can persist them; `resignGuard` reads the explorer row first and records only, or refuses with `VbtcWithdrawalAlreadySignedError`, when `signed_at` / `pending_btc` say it was already signed; `frostTimeoutMs` bounds the signing job on its own (Flutter waits 10 minutes). `frostResumeActionFor(row)` exposes the guard. `VbtcWithdrawalRequest.signed_at` is typed.
+- **Reads on `VfxClient`**: `getTransaction(hash)`, `listTransactionsForAddresses(addresses, page, limit)` (`/transaction/addresses/{a,b}/`), `getLatestBlock`, `getLatestBlockHeight`, `getBlock(height)`, `getBlockByHash`, `getCoinPrice(coin)` and `getCoinPriceHistory(coin)` (`/cmc-price/`), and `listListedNftIds(owner)`. Single-item reads return null on a 404 and throw on any other failure. New types `VfxBlock`, `CoinPrice`, `CoinPricePoint`.
+- **Fee before signing.** A transaction's fee is quoted before `approve`, which now receives `fee` and `total` (amount + fee), and the transaction is built with exactly that fee. In `'server'` mode the quote (`/raw/fee`) is made only for signers with `approve`, so the call order is otherwise unchanged. `RawTransactionService.quote()`, `VfxClient.quoteSendCoin` and the offline `VfxClient.estimateTransactionFee` expose it.
+- **`BtcSigner`**, the Bitcoin side of the external-signer seam, so a browser extension, hardware wallet or HSM can sign Bitcoin without handing over the key. `BtcClient.createTransaction` and `sendBtc` take a `BtcSigner` where they took a WIF: the SDK builds the PSBT, the signer gets a typed `btc-transaction` request, and the SDK checks the result is the same transaction, validly signed by the signer's key, before broadcasting. `getSignatureWithSigner`, `buyBtcDomain(…, btcSigner)` and `signBtcNameTransferAcceptanceWithSigner` cover message signing through `signDigest`. `btcSignerFromWif` wraps a local key. Optional `approve(intent)` runs first. Everything is additive: the WIF and private-key paths are unchanged and build the same transaction.
+- **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
+- **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
+- **Legacy vault restore, gated on activity**: `deriveLegacyRecoveryKey` (the Flutter wallet's derivation, unchanged) and `findLegacyRecovery`, which reports whether Spyglass shows the legacy vault or its recovery address in use. `listTransactionsForAddress` takes `{ strict: true }`.
+
+### Changed (breaking)
+
+- `registerReserveAccount(vault, { recoveryAddress })` requires the recovery address and refuses the one the legacy web-wallet scheme derives from the vault key.
+- The derived vault scheme is renamed to `restoreLegacyWebWalletVault`, `restoreLegacyWebWalletVaultFromVaultKey` and `restoreLegacyWebWalletVaultFromDerivationText` (were `reserveKeypairFromPrivateKey`, `reserveKeypairFromReservePrivateKey`, `reserveKeypairFromDerivationText`) and documented as giving no theft protection. `generateReserveKeypair` is removed; use `newVaultKeypair` plus a recovery key.
+
+### Fixed
+
+- Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
+- Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
+- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
+
 ## Unreleased (9.1.0)
 
 ### Added
