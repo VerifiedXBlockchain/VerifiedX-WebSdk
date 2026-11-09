@@ -352,7 +352,11 @@ type CompleteWithdrawalParams = {
   signer?: Signer;
   onProgress?: (event: VbtcProgressEvent) => void;
   pollIntervalMs?: number;
-  /** Deadline for the whole call; default 3 minutes. */
+  /**
+   * How long to wait for the prepare/watched-vault answers, and the default
+   * FROST polling limit; default 3 minutes. Signing, broadcast and the Type 28
+   * are not counted against it.
+   */
   timeoutMs?: number;
   /**
    * Deadline for the FROST signing job alone; defaults to `timeoutMs`. The
@@ -1549,6 +1553,17 @@ export class VfxClient {
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
       throw new Error(`completeWithdrawal frost completed without signed_btc_tx_hex: ${JSON.stringify(frostFinal)}`);
+    }
+    // A job names the withdrawal it signed. One restored from storage for a
+    // different withdrawal would otherwise broadcast that one's Bitcoin and
+    // record it against this one, so a mismatch stops before the broadcast.
+    const jobVault = frostFinal.sc_identifier;
+    const jobRequest = frostFinal.withdrawal_request_hash;
+    if ((jobVault && jobVault !== params.scIdentifier) || (jobRequest && jobRequest !== withdrawalRequestHash)) {
+      throw new Error(
+        `completeWithdrawal: FROST job ${jobId} signed withdrawal ${jobRequest ?? '?'} on ${jobVault ?? '?'}, ` +
+          `not ${withdrawalRequestHash} on ${params.scIdentifier}; nothing was broadcast`,
+      );
     }
 
     onProgress({ phase: 'frost_complete', message: 'FROST signing complete' });

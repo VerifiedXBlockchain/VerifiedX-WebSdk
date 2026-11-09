@@ -171,3 +171,36 @@ describe('frostTimeoutMs', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('a resumed job that signed a different withdrawal is refused before broadcasting', async () => {
+    const { calls } = installFetch(
+      frostMocks({
+        '/btc/vbtc-v2/withdraw/complete/status/': () => ({
+          success: true,
+          status: 'complete',
+          signed_btc_tx_hex: 'DEADBEEF',
+          sc_identifier: 'sc-1',
+          withdrawal_request_hash: 'OTHER_REQUEST',
+        }),
+      }),
+    );
+    await expect(client.completeWithdrawal(params({ resumeJobId: 'JOB_A' }))).rejects.toThrow(/nothing was broadcast/);
+    expect(hit(calls, '/btc/broadcast/')).toBe(false);
+  });
+
+  test('a job naming this withdrawal goes ahead', async () => {
+    installFetch(
+      frostMocks({
+        '/btc/vbtc-v2/withdraw/complete/status/': () => ({
+          success: true,
+          status: 'complete',
+          signed_btc_tx_hex: 'DEADBEEF',
+          sc_identifier: 'sc-1',
+          withdrawal_request_hash: 'WR_HASH',
+        }),
+      }),
+    );
+    expect((await client.completeWithdrawal(params({ resumeJobId: 'JOB_A' }))).btcTransactionHash).toBe('BTC_TXID');
+  });
+});
