@@ -180,8 +180,9 @@ export interface ReserveSendOptions {
 export interface RefusalOptions {
   /**
    * Throw TransactionRefusedError, with the node's reason, when the node
-   * refuses this send, instead of resolving to null. Overrides the client's
-   * `throwOnRefusal` for this call.
+   * refuses this send, and SignerError, with the signer's error, when the
+   * signer refuses to sign it, instead of resolving to null. Overrides the
+   * client's `throwOnRefusal` for this call.
    */
   throwOnRefusal?: boolean;
 }
@@ -390,6 +391,8 @@ export interface VfxClientOptions {
    * It covers the prepared vBTC sends (transfer, create, withdrawal request,
    * cancel, completion record) too: an explicit refusal there throws
    * TransactionRefusedError with the prepared hash, instead of a plain Error.
+   * A signer that throws instead of signing a send (a rejected extension
+   * prompt) then surfaces as SignerError, with the signer's error as `cause`.
    */
   throwOnRefusal?: boolean;
 }
