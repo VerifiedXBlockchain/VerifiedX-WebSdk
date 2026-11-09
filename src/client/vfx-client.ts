@@ -1,5 +1,6 @@
 import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
 import BtcClient from '../btc';
+import { BtcSigner, isBtcSigner } from '../btc/signer';
 import {
   DOMAIN_DELETE_COST,
   DOMAIN_PURCHASE_COST,
@@ -59,11 +60,13 @@ import {
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
 import { frostResumeActionFor } from '../services/frost-resume';
+import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
   TransactionHashMismatchError,
   TxBuildSession,
+  localTransactionFee,
 } from '../services/tx-build-session';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
@@ -83,10 +86,15 @@ import {
   FungibleToken,
   FungibleTokenBalance,
   FungibleTokenDetail,
+  Keypair,
+  LegacyRecoveryLookup,
+  LegacyVaultSource,
   PaginatedResponse,
   ReserveKeypair,
+  VfxBlock,
   TokenVotingTopic,
   Transaction,
+  VaultKeypair,
   VbtcCancelResult,
   VbtcWithdrawalCheckpoint,
   VbtcMultiTransferResult,
@@ -116,6 +124,11 @@ import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
+import { CoinPrice, CoinPricePoint, PriceApiClient, PricedCoin } from './price-api-client';
+import { NftListingApiClient } from './nft-listing-api-client';
+import { NftApiClient, NftListQuery, VfxNft, nftIsMedialess } from './nft-api-client';
+import { MediaApiClient } from './media-api-client';
+import { AuthApiClient } from './auth-api-client';
 import { TransactionApiClient } from './transaction-api.client';
 import {
   BroadcastResponse,
@@ -408,6 +421,50 @@ interface ApprovedFlow {
   flowId: string;
 }
 
+const OWNERSHIP_NONCE_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
+
+/**
+ * Thrown by `mintNfts` when one mint fails. `minted` holds the NFTs minted
+ * before it, in order; `index` is the failed item.
+ */
+export class NftBulkMintError extends Error {
+  readonly index: number;
+  readonly minted: Array<{ transactionHash: string; scIdentifier: string }>;
+  readonly cause: unknown;
+
+  constructor(index: number, minted: Array<{ transactionHash: string; scIdentifier: string }>, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`mintNfts: item ${index} failed after ${minted.length} were minted: ${detail}`);
+    this.name = 'NftBulkMintError';
+    this.index = index;
+    this.minted = minted;
+    this.cause = cause;
+    Object.setPrototypeOf(this, NftBulkMintError.prototype);
+  }
+}
+
+const LEGACY_VAULT_HISTORY_PAGE_SIZE = 50;
+
+/** The larger of an address's available and total balance; 0 when Spyglass has neither. */
+function largestBalance(details: { balance: number; balanceTotal: number } | null): number {
+  const finite = (value: number) => (Number.isFinite(value) ? value : 0);
+  return details ? Math.max(finite(details.balance), finite(details.balanceTotal)) : 0;
+}
+
+/** A transaction's Data as Spyglass returns it (JSON text, an object, or a one-element array). */
+function parseTxData(data: unknown): Record<string, unknown> | null {
+  let value = data;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) value = value[0];
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
@@ -422,6 +479,11 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  private priceApiClient: PriceApiClient;
+  private nftListingApiClient: NftListingApiClient;
+  private nftApiClient: NftApiClient;
+  private mediaApiClient: MediaApiClient;
+  private authApiClient: AuthApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
   /** Clock offset and next-nonce cache shared by every send from this client. */
@@ -451,6 +513,11 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.priceApiClient = new PriceApiClient(networkEnum, this.apiOptions);
+    this.nftListingApiClient = new NftListingApiClient(networkEnum, this.apiOptions);
+    this.nftApiClient = new NftApiClient(networkEnum, this.apiOptions);
+    this.mediaApiClient = new MediaApiClient(networkEnum, this.apiOptions);
+    this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
   }
@@ -503,35 +570,138 @@ export class VfxClient {
     return this.keypairService.addressFromPublic(publicKeyHex);
   };
 
-  // Reserve (Vault) account keys — see KeypairService for the derivation.
+  // Reserve (Vault) account keys — see KeypairService.
+  //
+  // A new vault: `newVaultKeypair()` for the vault key, a recovery key kept
+  // apart from it (`newRecoveryKey()`, `recoveryKeyFromPasskeyPrf()`, or an
+  // address from another wallet), then `registerReserveAccount(vault, {
+  // recoveryAddress })`. The `restoreLegacyWebWallet*` functions exist only to
+  // find vaults the Flutter web wallet made; those vaults have NO theft
+  // protection, because their recovery key is derived from the main key.
 
-  /** The vault the web wallet pairs with this main private key. */
-  public reserveKeypairFromPrivateKey = (mainPrivateKey: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
+  /** A new vault key (xRBX) from the CSPRNG, with no recovery key attached. */
+  public newVaultKeypair = (): VaultKeypair => {
+    return this.keypairService.newVaultKeypair();
+  };
+
+  /** The vault for a vault private key, without inventing a recovery key for it. */
+  public vaultKeypairFromPrivateKey = (vaultPrivateKey: string): VaultKeypair => {
+    return this.keypairService.vaultKeypairFromPrivateKey(vaultPrivateKey);
+  };
+
+  /** A new random recovery key. Store it apart from the wallet; register only its address. */
+  public newRecoveryKey = (): Keypair => {
+    return this.keypairService.newRecoveryKey();
+  };
+
+  /** A recovery key from a dedicated passkey's PRF output (see KeypairService for the rp_id caveat). */
+  public recoveryKeyFromPasskeyPrf = (prfOutput: Uint8Array | ArrayBuffer): Keypair => {
+    return this.keypairService.recoveryKeyFromPasskeyPrf(prfOutput);
   };
 
   /**
-   * The vault the web wallet derives from a key's derivation text (an
+   * LEGACY. The recovery key the Flutter web wallet derived for a vault (from
+   * the main key, the vault key, or an imported key's derivation text). Never
+   * use it for a new vault; it falls with the vault key.
+   */
+  public deriveLegacyRecoveryKey = (source: LegacyVaultSource): Keypair & { vaultAddress: string } => {
+    return this.keypairService.deriveLegacyRecoveryKey(source);
+  };
+
+  /**
+   * LEGACY. Whether an account has a legacy web-wallet vault worth restoring:
+   * derives the legacy vault and recovery address (as the Flutter wallet and
+   * Core do) and asks Spyglass about them. Activity is any of:
+   *
+   *   - a balance or any transaction on the recovery address
+   *     (`/addresses/{address}/`, `/transaction/address/{address}/`);
+   *   - a balance, any transaction, or an activated vault record on the
+   *     vault address (same two endpoints);
+   *   - a `Register()` from the vault naming this recovery address (read from
+   *     the vault's transactions to `Reserve_Base`, every page).
+   *
+   * Lookups are strict: an outage throws rather than reading as "nothing
+   * there". The key is returned only with `includeKey: true`; a wallet
+   * shows "Restore legacy vault" when `hasActivity` is true.
+   */
+  public findLegacyRecovery = async (
+    source: LegacyVaultSource,
+    opts: { includeKey?: boolean } = {},
+  ): Promise<LegacyRecoveryLookup> => {
+    const derived = this.keypairService.deriveLegacyRecoveryKey(source);
+    const [recoveryDetails, vaultDetails, recoveryTxs, vaultTxs] = await Promise.all([
+      this.addressApiClient.getAddressDetails(derived.address, { strict: true }),
+      this.addressApiClient.getAddressDetails(derived.vaultAddress, { strict: true }),
+      this.transactionApiClient.listTransactionsForAddress(derived.address, 1, 1, { strict: true }),
+      this.transactionApiClient.listTransactionsForAddress(derived.vaultAddress, 1, LEGACY_VAULT_HISTORY_PAGE_SIZE, {
+        strict: true,
+      }),
+    ]);
+    const namesThisRecovery = (tx: Transaction) => {
+      if (tx.to_address !== RESERVE_BASE_ADDRESS || tx.from_address !== derived.vaultAddress) return false;
+      const data = parseTxData(tx.data);
+      return data?.Function === 'Register()' && data?.RecoveryAddress === derived.address;
+    };
+    // The Register() is usually the vault's oldest transaction, so older
+    // pages are read until it turns up or the history ends.
+    let registeredWithThisRecovery = (vaultTxs?.results ?? []).some(namesThisRecovery);
+    for (let page = 2; !registeredWithThisRecovery && page <= (vaultTxs?.num_pages ?? 1); page++) {
+      const older = await this.transactionApiClient.listTransactionsForAddress(
+        derived.vaultAddress,
+        page,
+        LEGACY_VAULT_HISTORY_PAGE_SIZE,
+        { strict: true },
+      );
+      registeredWithThisRecovery = (older?.results ?? []).some(namesThisRecovery);
+    }
+    const summary = {
+      recoveryBalance: largestBalance(recoveryDetails),
+      recoveryTransactionCount: recoveryTxs?.count ?? 0,
+      vaultBalance: largestBalance(vaultDetails),
+      vaultTransactionCount: vaultTxs?.count ?? 0,
+      vaultActivated: vaultDetails?.activated === true,
+      registeredWithThisRecovery,
+    };
+    const hasActivity =
+      summary.recoveryBalance > 0 ||
+      summary.recoveryTransactionCount > 0 ||
+      summary.vaultBalance > 0 ||
+      summary.vaultTransactionCount > 0 ||
+      summary.vaultActivated ||
+      registeredWithThisRecovery;
+    return {
+      address: derived.address,
+      vaultAddress: derived.vaultAddress,
+      hasActivity,
+      summary,
+      ...(opts.includeKey && {
+        recoveryKey: { privateKey: derived.privateKey, publicKey: derived.publicKey, address: derived.address },
+      }),
+    };
+  };
+
+  /** LEGACY, NO THEFT PROTECTION: the vault the Flutter web wallet pairs with this main private key. */
+  public restoreLegacyWebWalletVault = (mainPrivateKey: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVault(mainPrivateKey);
+  };
+
+  /**
+   * LEGACY, NO THEFT PROTECTION: the vault the web wallet derives from a key's derivation text (an
    * imported key's historical text forms each give their own vault; see
    * `derivationTextCandidates`).
    */
-  public reserveKeypairFromDerivationText = (derivationText: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromDerivationText(derivationText);
+  public restoreLegacyWebWalletVaultFromDerivationText = (derivationText: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVaultFromDerivationText(derivationText);
   };
 
-  /** A vault from its own private key; the recovery key is derived from it. */
-  public reserveKeypairFromReservePrivateKey = (reservePrivateKey: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  /** LEGACY, NO THEFT PROTECTION: a web-wallet vault from its own key, with the recovery key derived from it. */
+  public restoreLegacyWebWalletVaultFromVaultKey = (reservePrivateKey: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey);
   };
 
   /** Restore a vault from the CLI / web wallet restore code. */
   public reserveKeypairFromRestoreCode = (restoreCode: string): ReserveKeypair => {
     return this.keypairService.reserveKeypairFromRestoreCode(restoreCode);
-  };
-
-  /** A standalone vault on a fresh key, not tied to a main account. */
-  public generateReserveKeypair = (): ReserveKeypair => {
-    return this.keypairService.generateReserveKeypair();
   };
 
   /** The xRBX address for a public key — how an HSM-held vault key's address is obtained. */
@@ -604,6 +774,59 @@ export class VfxClient {
     return await txBuilder.process(this.dryRun);
   };
 
+  /**
+   * The fee and total (amount + fee) `sendCoin` would take with these
+   * arguments, before anything is signed. In 'both' and 'local' hashMode it
+   * is exact: the local formula, which the send then uses, and the same
+   * `fee` and `total` a signer's `approve` receives. In 'server' mode it is
+   * Spyglass's `/raw/fee` for an upper-bound size; the send asks again with
+   * the real nonce (unless the signer has `approve`), so treat it as an
+   * estimate there.
+   */
+  public quoteSendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<{ fee: number; amount: number; total: number }> => {
+    const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'quoteSendCoin');
+    return new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: recipient,
+      amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+    }).quote();
+  };
+
+  /**
+   * An offline upper bound on any transaction's fee from Core's size
+   * formula (the node only checks that a fee is above its floor). For a
+   * send, `quoteSendCoin` gives the exact fee it will carry.
+   */
+  public estimateTransactionFee = (tx: {
+    fromAddress: string;
+    toAddress: string;
+    amount?: number;
+    txType?: number;
+    data?: unknown;
+    unlockTime?: number | null;
+  }): number => {
+    return localTransactionFee({
+      FromAddress: tx.fromAddress,
+      ToAddress: tx.toAddress,
+      Amount: tx.amount ?? 0,
+      TransactionType: tx.txType ?? TxType.RbxTransfer,
+      Data: tx.data ?? null,
+      UnlockTime: tx.unlockTime ?? null,
+      Timestamp: Math.floor(Date.now() / 1000) + 3600,
+      Nonce: 999_999_999_999,
+    });
+  };
+
   public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
     return this.addressApiClient.lookupDomain(domain, opts);
   };
@@ -659,8 +882,9 @@ export class VfxClient {
   };
 
   /**
-   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey`,
-   * managed by the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
+   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey` (a
+   * hex key, or a BtcSigner whose `signDigest` signs the claim), managed by
+   * the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
    * Core's BtcNameSignerOwnsAddressHeight (read against the latest block on
    * Spyglass) over `<unix seconds>:<signer address>:<name>.btc`, below it over
    * the bare timestamp. Throws when the latest block height cannot be read.
@@ -668,7 +892,7 @@ export class VfxClient {
   public buyBtcDomain = async (
     keypair: KeypairOrSigner,
     domain: string,
-    btcPrivateKey: string,
+    btcPrivateKey: string | BtcSigner,
   ): Promise<string | null> => {
     domain = cleanBtcDomain(domain);
 
@@ -703,13 +927,17 @@ export class VfxClient {
       : `${timestamp}`;
     const btcClient = new BtcClient(this.network);
 
-    const signature = btcClient.getSignature(message, btcPrivateKey);
-    const btcAccount = btcClient.addressFromPrivate(btcPrivateKey);
+    const signature = isBtcSigner(btcPrivateKey)
+      ? await btcClient.getSignatureWithSigner(message, btcPrivateKey, 'btc-name-claim')
+      : btcClient.getSignature(message, btcPrivateKey);
+    const btcAddress = isBtcSigner(btcPrivateKey)
+      ? btcPrivateKey.address
+      : btcClient.addressFromPrivate(btcPrivateKey).address;
 
     const data = {
       Function: 'BTCAdnrCreate()',
       Name: domainWithoutSuffix(domain),
-      BTCAddress: btcAccount.address,
+      BTCAddress: btcAddress,
       Message: message,
       Signature: signature,
     };
@@ -860,6 +1088,31 @@ export class VfxClient {
     return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 
+  /**
+   * `signBtcNameTransferAcceptance` with a BtcSigner for the receiving
+   * Bitcoin address instead of its private key. The signer gets a
+   * `btc-message` request with purpose `btc-name-transfer-acceptance`.
+   */
+  public signBtcNameTransferAcceptanceWithSigner = async (params: {
+    btcSigner: BtcSigner;
+    name: string;
+    newOwner: string;
+    /** Unix seconds to sign at; defaults to now. */
+    timestamp?: number;
+  }): Promise<{ message: string; signature: string; code: string }> => {
+    if (!params.btcSigner || !params.name || !params.newOwner) {
+      throw new Error('signBtcNameTransferAcceptanceWithSigner requires btcSigner, name and newOwner');
+    }
+    const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
+    const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
+    const signature = await new BtcClient(this.network).getSignatureWithSigner(
+      message,
+      params.btcSigner,
+      'btc-name-transfer-acceptance',
+    );
+    return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
+  };
+
   /** Release the .btc domain on `btcFromAddress`, managed by the signer. Costs 5 VFX. */
   public deleteBtcDomain = async (
     keypair: KeypairOrSigner,
@@ -890,6 +1143,55 @@ export class VfxClient {
     limit = 10,
   ): Promise<PaginatedResponse<Transaction> | null> => {
     return this.transactionApiClient.listTransactionsForAddress(address, page, limit);
+  };
+
+  /** Transactions to or from any of `addresses`, newest first, in one list. Failures throw. */
+  public listTransactionsForAddresses = async (
+    addresses: string[],
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResponse<Transaction>> => {
+    return this.transactionApiClient.listTransactionsForAddresses(addresses, page, limit);
+  };
+
+  /** One transaction by hash, or null when Spyglass has none. Other failures throw. */
+  public getTransaction = async (hash: string): Promise<Transaction | null> => {
+    return this.transactionApiClient.getTransaction(hash);
+  };
+
+  /** The newest block Spyglass has indexed. */
+  public getLatestBlock = async (): Promise<VfxBlock> => {
+    return this.blockApiClient.getLatestBlock();
+  };
+
+  /** Height of the newest block Spyglass has indexed. */
+  public getLatestBlockHeight = async (): Promise<number> => {
+    return this.blockApiClient.getLatestHeight();
+  };
+
+  /** A block by height, or null when Spyglass has none. */
+  public getBlock = async (height: number): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlock(height);
+  };
+
+  /** A block by hash, or null when Spyglass has none. */
+  public getBlockByHash = async (hash: string): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlockByHash(hash);
+  };
+
+  /** The latest USDT price of VFX or BTC (CoinMarketCap via Spyglass). */
+  public getCoinPrice = async (coin: PricedCoin = 'vfx'): Promise<CoinPrice> => {
+    return this.priceApiClient.getPrice(coin);
+  };
+
+  /** Up to the last 1,000 recorded prices of VFX or BTC, newest first. */
+  public getCoinPriceHistory = async (coin: PricedCoin = 'vfx'): Promise<CoinPricePoint[]> => {
+    return this.priceApiClient.getPriceHistory(coin);
+  };
+
+  /** Identifiers of the NFTs `ownerAddress` has listed for sale on the shop. */
+  public listListedNftIds = async (ownerAddress: string): Promise<string[]> => {
+    return this.nftListingApiClient.listListedNftIds(ownerAddress);
   };
 
   // ---------------------------------------------------------------------------
@@ -2288,6 +2590,316 @@ export class VfxClient {
     return this.sendTokenTx(resolved, ownerAddress, data, params.unlockHours);
   };
 
+  // ---------------------------------------------------------------------------
+  // NFTs (VFX10 smart contracts)
+  //
+  // The node builds every NFT transaction's Data (compile, transfer, evolve,
+  // burn) through Spyglass, and the SDK signs and sends it like any other
+  // transaction, so local hashing and every key source apply. Each method is
+  // one approved action for a signer with `approve`.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Upload a media file to Spyglass for use in `mintNft`. Resolves to the
+   * asset to pass as `asset` or in `additionalAssets`.
+   */
+  public uploadNftAsset = async (file: Blob, fileName: string): Promise<NftAssetInput> => {
+    if (this.dryRun) {
+      throw new Error('uploadNftAsset does not support dryRun mode: Spyglass stores the file for real');
+    }
+    const named = typeof File !== 'undefined' && file instanceof File ? file : new File([file], fileName);
+    const result = await this.mediaApiClient.uploadAsset(named);
+    if (!result?.url) {
+      throw new Error(`uploadNftAsset: Spyglass did not store ${fileName}`);
+    }
+    const dot = fileName.lastIndexOf('.');
+    return {
+      url: result.url,
+      name: fileName,
+      extension: dot > 0 ? fileName.slice(dot + 1) : '',
+      fileSize: file.size,
+    };
+  };
+
+  /** Mint an NFT owned by the signer. Resolves to the mint hash and the new contract id. */
+  public mintNft = async (
+    signer: KeypairOrSigner,
+    params: NftMintParams,
+  ): Promise<{ transactionHash: string; scIdentifier: string } | null> => {
+    const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'mintNft');
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-mint',
+      minterAddress: resolved.address,
+      names: [params.name],
+    });
+    return this.mintOneNft(resolved, params, flowId);
+  };
+
+  /**
+   * Mint several NFTs, one transaction each, in order, under one approval.
+   * Stops at the first one that fails and throws NftBulkMintError carrying
+   * the ones already minted.
+   */
+  public mintNfts = async (
+    signer: KeypairOrSigner,
+    items: NftMintParams[],
+  ): Promise<Array<{ transactionHash: string; scIdentifier: string }>> => {
+    const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'mintNfts');
+    if (items.length === 0) {
+      return [];
+    }
+    // Every payload is checked before anything is approved or sent.
+    for (const item of items) {
+      nftMintPayload({ ...item, minterAddress: resolved.address });
+    }
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-mint',
+      minterAddress: resolved.address,
+      names: items.map((item) => item.name),
+    });
+    const minted: Array<{ transactionHash: string; scIdentifier: string }> = [];
+    for (const [index, item] of items.entries()) {
+      let result: { transactionHash: string; scIdentifier: string } | null;
+      try {
+        result = await this.mintOneNft(resolved, item, flowId);
+      } catch (error) {
+        throw new NftBulkMintError(index, minted, error);
+      }
+      if (!result) {
+        throw new NftBulkMintError(index, minted, new Error('the mint was rejected before it reached the node'));
+      }
+      minted.push(result);
+    }
+    return minted;
+  };
+
+  private async mintOneNft(
+    signer: ResolvedSigner,
+    params: NftMintParams,
+    flowId: string,
+  ): Promise<{ transactionHash: string; scIdentifier: string } | null> {
+    const payload = nftMintPayload({ ...params, minterAddress: signer.address });
+    const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
+    const scIdentifier = data[0].ContractUID as string;
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.NftMint,
+      data,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    const transactionHash = await txBuilder.process(this.dryRun);
+    return transactionHash ? { transactionHash, scIdentifier } : null;
+  }
+
+  /**
+   * Transfer an NFT the signer owns. From a vault (xRBX) the transfer waits
+   * `unlockHours` (24 minimum) and can be called back until then.
+   *
+   * The node hands the media to the recipient through a beacon: the owner
+   * signs the contract id and the node pushes the files. An NFT without
+   * media skips that (locator "NA"). Pass `locator` to use one already
+   * obtained.
+   */
+  public transferNft = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; toAddress: string; locator?: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferNft');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferNft toAddress');
+    const unlockTime = this.unlockTimeFor(resolved, params.unlockHours);
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-transfer',
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress,
+      unlockHours: unlockTime === null ? null : params.unlockHours ?? RESERVE_MIN_UNLOCK_HOURS,
+    });
+
+    let locator = params.locator;
+    if (!locator) {
+      const nft = await this.nftApiClient.getNft(params.scIdentifier);
+      if (nft.owner_address && nft.owner_address !== resolved.address) {
+        throw new Error(
+          `transferNft: ${params.scIdentifier} is owned by ${nft.owner_address}, not ${resolved.address}`,
+        );
+      }
+      if (nftIsMedialess(nft)) {
+        locator = 'NA';
+      } else if (this.dryRun) {
+        // The beacon upload pushes the files to the recipient for real, so a
+        // dry run must not trigger it.
+        throw new Error(
+          'transferNft: a dry run of an NFT with media needs a `locator`; requesting one would push the files',
+        );
+      } else {
+        const beaconSignature = await resolved.sign(params.scIdentifier, {
+          kind: 'nft-beacon-upload',
+          flowId,
+          message: params.scIdentifier,
+          scIdentifier: params.scIdentifier,
+          toAddress,
+        });
+        locator = await this.rawTransactionApiClient.beaconUploadRequest(
+          params.scIdentifier,
+          toAddress,
+          beaconSignature,
+        );
+      }
+    }
+
+    const data = await this.rawTransactionApiClient.getNftTransferData(params.scIdentifier, toAddress, locator);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress,
+      amount: 0,
+      txType: TxType.NftTx,
+      data,
+      unlockTime,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * Move an evolving NFT to `stage` (1 is the first phase; a lower stage
+   * than the current one devolves it). Only the minter can do this, for an
+   * NFT wherever it is held; the transaction goes to the current owner,
+   * read from Spyglass unless `ownerAddress` is given.
+   */
+  public evolveNft = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; stage: number; ownerAddress?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    if (!Number.isInteger(params.stage) || params.stage < 0) {
+      throw new Error('evolveNft: stage must be a whole number, 0 or more');
+    }
+    const ownerAddress = params.ownerAddress ?? (await this.nftApiClient.getNft(params.scIdentifier)).owner_address;
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-evolve',
+      scIdentifier: params.scIdentifier,
+      minterAddress: resolved.address,
+      ownerAddress,
+      stage: params.stage,
+    });
+    const data = await this.rawTransactionApiClient.getNftEvolveData(params.scIdentifier, ownerAddress, params.stage);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: ownerAddress,
+      amount: 0,
+      txType: TxType.NftTx,
+      data,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Burn an NFT the signer owns. */
+  public burnNft = async (signer: KeypairOrSigner, params: { scIdentifier: string }): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-burn',
+      scIdentifier: params.scIdentifier,
+      ownerAddress: resolved.address,
+    });
+    const data = await this.rawTransactionApiClient.getNftBurnData(params.scIdentifier, resolved.address);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: resolved.address,
+      amount: 0,
+      txType: TxType.NftBurn,
+      data,
+      unlockTime: this.unlockTimeFor(resolved),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * A proof that the signer owns `scIdentifier`, in the wallet's format
+   * (`address<>message<>signature<>scIdentifier`), for anyone to check with
+   * `verifyNftOwnership`. The message is a random string and the time.
+   */
+  public proveNftOwnership = async (signer: KeypairOrSigner, scIdentifier: string): Promise<string> => {
+    const resolved = this.resolve(signer);
+    const message = `${generateRandomStringSecure(8, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
+    const signature = await resolved.sign(message, {
+      kind: 'nft-ownership-proof',
+      flowId: newFlowId(),
+      message,
+      scIdentifier,
+    });
+    return nftOwnershipProof(resolved.address, message, signature, scIdentifier);
+  };
+
+  /** Whether the node accepts an ownership proof from `proveNftOwnership` (or the wallet). */
+  public verifyNftOwnership = async (proof: string): Promise<boolean> => {
+    if (proof.split('<>').length !== 4) {
+      throw new Error('verifyNftOwnership: expected address<>message<>signature<>scIdentifier');
+    }
+    return this.nftApiClient.verifyOwnership(proof);
+  };
+
+  /**
+   * Replace the URLs Spyglass serves an NFT's media from, as its owner. The
+   * signer signs a session message for a Spyglass token first.
+   */
+  public associateNftMedia = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; mediaMap: Record<string, string> },
+  ): Promise<void> => {
+    const resolved = this.resolve(signer);
+    if (this.dryRun) {
+      throw new Error("associateNftMedia does not support dryRun mode: it replaces the NFT's live media URLs");
+    }
+    const message = `${generateRandomStringSecure(16, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
+    const signature = await resolved.sign(message, { kind: 'spyglass-auth', flowId: newFlowId(), message });
+    const { token } = await this.authApiClient.signToken(resolved.address, message, signature);
+    await this.mediaApiClient.associateMedia(params.scIdentifier, params.mediaMap, token);
+  };
+
+  /** NFTs by owner and/or minter, newest first, as Spyglass indexes them. */
+  public listNfts = async (query: NftListQuery = {}): Promise<PaginatedResponse<VfxNft>> => {
+    return this.nftApiClient.listNfts(query);
+  };
+
+  /** NFTs owned by any of these addresses (a main account and its vault, say). */
+  public listNftsForAddresses = async (
+    addresses: string[],
+    query: Omit<NftListQuery, 'ownerAddress' | 'minterAddress'> = {},
+  ): Promise<PaginatedResponse<VfxNft>> => {
+    return this.nftApiClient.listNftsForAddresses(addresses, query);
+  };
+
+  public getNft = async (scIdentifier: string): Promise<VfxNft> => {
+    return this.nftApiClient.getNft(scIdentifier);
+  };
+
+  public getNftHistory = async (scIdentifier: string): Promise<unknown> => {
+    return this.nftApiClient.getNftHistory(scIdentifier);
+  };
+
   // -- Internal helpers --------------------------------------------------------
 
   /**
@@ -2335,27 +2947,47 @@ export class VfxClient {
   // unlock time (24 hours minimum) and can be called back until it settles;
   // recoverReserveAccount sweeps pending sends and the balance to the
   // recovery address if the vault key is ever compromised. The node applies
-  // the delay to VFX, vBTC and NFT sends; a fungible-token transfer from a
-  // vault carries the unlock time the node insists on but settles at once.
+  // the delay to VFX, vBTC and NFT sends. It refuses fungible-token
+  // transfers and burns from a vault (LedgerIntegrityRules.ReserveTokenTransfer),
+  // since those would move at once and could not be called back.
   // ---------------------------------------------------------------------------
 
   /**
    * Activate a funded reserve account on the network: a 4 VFX Register()
    * naming the recovery address. The vault must already hold the 4 VFX plus
    * the fee plus the 0.5 VFX floor the node keeps on reserve accounts.
-   * `recoveryAddress` is taken from a ReserveKeypair; a Signer must supply it.
+   *
+   * `recoveryAddress` is always given explicitly and is the address of a key
+   * kept apart from the vault's: `newRecoveryKey()`,
+   * `recoveryKeyFromPasskeyPrf()`, or an account in another wallet. The SDK
+   * never makes the recovery key here. It refuses the recovery address the
+   * Flutter web wallet would have derived from this vault key, since that
+   * key falls with the vault key.
    */
   public registerReserveAccount = async (
     signer: KeypairOrSigner,
-    params: { recoveryAddress?: string } = {},
+    params: { recoveryAddress: string },
   ): Promise<string | null> => {
     const resolved = this.resolveReserve(signer, 'registerReserveAccount');
-    const recoveryAddress = params.recoveryAddress ?? (signer as Partial<ReserveKeypair>).recoveryAddress;
+    const recoveryAddress = params?.recoveryAddress;
     if (!recoveryAddress) {
-      throw new Error('registerReserveAccount requires a recoveryAddress when the signer is not a ReserveKeypair');
+      throw new Error(
+        'registerReserveAccount requires a recoveryAddress: the address of a recovery key kept apart from the vault key',
+      );
     }
     if (recoveryAddress === resolved.address || recoveryAddress.startsWith(RESERVE_ADDRESS_PREFIX)) {
       throw new Error('recoveryAddress must be an ordinary account, not a reserve account');
+    }
+    assertRecipientOnNetwork(recoveryAddress, this.network, 'registerReserveAccount recoveryAddress');
+    const vaultPrivateKey = (signer as Partial<Keypair>).privateKey;
+    if (
+      vaultPrivateKey &&
+      this.keypairService.restoreLegacyWebWalletVaultFromVaultKey(vaultPrivateKey).recoveryAddress === recoveryAddress
+    ) {
+      throw new Error(
+        'recoveryAddress is derived from the vault key (the legacy web-wallet scheme), so it gives no protection ' +
+          'against theft; use newRecoveryKey(), recoveryKeyFromPasskeyPrf() or another wallet',
+      );
     }
     return this.sendReserveTx(
       resolved,
