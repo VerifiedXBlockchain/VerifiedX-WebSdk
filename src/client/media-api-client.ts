@@ -32,4 +32,23 @@ export class MediaApiClient extends BaseApiClient {
       return null;
     }
   };
+
+  /**
+   * Set the URLs Spyglass serves an NFT's media from (`media_map`: file name
+   * -> URL, each on Spyglass's own media origin). The first set needs no
+   * token; replacing one needs `authToken` from `/api/auth/sign-token/`,
+   * signed by the NFT's owner.
+   */
+  public associateMedia = async (
+    scIdentifier: string,
+    mediaMap: Record<string, string>,
+    authToken?: string,
+  ): Promise<void> => {
+    await this.makeJsonRequest(
+      `/associate-media/${encodeURIComponent(scIdentifier)}/`,
+      'POST',
+      { media_map: mediaMap },
+      authToken ? { Authorization: `basic ${authToken}` } : {},
+    );
+  };
 }

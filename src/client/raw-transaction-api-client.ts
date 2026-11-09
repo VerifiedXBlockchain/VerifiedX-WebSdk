@@ -79,10 +79,90 @@ export class RawTransactionApiClient extends BaseApiClient {
     return response;
   }
 
+  /** Transaction Data for an NFT transfer (Core GetNFTTransferData): `[{ Function: 'Transfer()', ... }]`. */
+  async getNftTransferData(
+    scIdentifier: string,
+    toAddress: string,
+    locator: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.nftData(
+      `/nft-transfer-data/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(toAddress)}/${encodeURIComponent(
+        locator,
+      )}/`,
+      'nft-transfer-data',
+    );
+  }
+
+  /** Transaction Data that sets an evolving NFT to `stage` (Core GetNFTEvolveData). */
+  async getNftEvolveData(
+    scIdentifier: string,
+    toAddress: string,
+    stage: number,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.nftData(
+      `/nft-evolve-data/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(toAddress)}/${stage}/`,
+      'nft-evolve-data',
+    );
+  }
+
+  /** Transaction Data for an NFT burn (Core GetNFTBurnData, which wraps it as a JSON string in `Message`). */
+  async getNftBurnData(scIdentifier: string, fromAddress: string): Promise<Array<Record<string, unknown>>> {
+    const response = await this.makeJsonRequest(
+      `/nft-burn-data/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(fromAddress)}/`,
+      'POST',
+    );
+    if (response?.Success !== true || typeof response?.Message !== 'string') {
+      throw new Error(`Unexpected nft-burn-data result: ${JSON.stringify(response)}`);
+    }
+    const data = JSON.parse(response.Message);
+    if (!Array.isArray(data)) {
+      throw new Error(`Unexpected nft-burn-data Message: ${response.Message}`);
+    }
+    return data;
+  }
+
+  private async nftData(path: string, label: string): Promise<Array<Record<string, unknown>>> {
+    const response = await this.makeJsonRequest(path, 'POST');
+    // Core answers a refusal with an object ({ Success: false, Message }).
+    if (!Array.isArray(response)) {
+      throw new Error(`Unexpected ${label} result: ${JSON.stringify(response)}`);
+    }
+    return response;
+  }
+
+  /** The beacon locators last recorded for an NFT's media, or "NA" when it has none. */
+  async getLocators(scIdentifier: string): Promise<string | null> {
+    const response = await this.makeJsonRequest(`/locators/${encodeURIComponent(scIdentifier)}/`);
+    return typeof response?.Locators === 'string' ? response.Locators : null;
+  }
+
+  /**
+   * Ask the node to push an NFT's media to a beacon for `toAddress`, signed by
+   * the owner over the contract id. Resolves to the beacon locator, or throws
+   * with the node's reason.
+   */
+  async beaconUploadRequest(scIdentifier: string, toAddress: string, signature: string): Promise<string> {
+    const response = await this.makeJsonRequest(
+      `/beacon/upload/${encodeURIComponent(scIdentifier)}/${encodeURIComponent(toAddress)}/${encodeURIComponent(
+        signature,
+      )}/`,
+    );
+    if (response?.success !== true || typeof response?.locator !== 'string') {
+      throw new Error(`Beacon upload request failed: ${JSON.stringify(response)}`);
+    }
+    return response.locator;
+  }
+
   async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    return (await this.sendTransactionResult(txData)).sent;
+  }
+
+  /** Send a signed transaction; the node's verdict, with its reason when it refuses. */
+  async sendTransactionResult(txData: Record<string, unknown>): Promise<{ sent: boolean; message: string | null }> {
     const params = { transaction: txData };
     const response = await this.makeJsonRequest('/send/', 'POST', params);
-
-    return response?.Result === 'Success';
+    const sent = response?.Result === 'Success';
+    const message = typeof response?.Message === 'string' && response.Message ? response.Message : null;
+    return { sent, message: sent ? null : message };
   }
 }

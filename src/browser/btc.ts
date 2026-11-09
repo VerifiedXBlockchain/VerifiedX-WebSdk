@@ -48,3 +48,10 @@ export default BrowserBtcClient;
 // Address types a key can spend from
 export { addressForSpendType } from '../btc/address-types';
 export type { BtcSpendType, BitcoinNetworkInput } from '../btc/address-types';
+export {
+  recommendedFeeRates,
+  BTC_FALLBACK_FEE_RATES,
+  BTC_TESTNET_FEE_RATE_FLOORS,
+  DEFAULT_FEE_RATES_TIMEOUT_MS,
+} from '../btc/fee-rates';
+export type { RecommendedFeeRates } from '../btc/fee-rates';
