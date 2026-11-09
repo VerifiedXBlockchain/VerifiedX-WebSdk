@@ -323,6 +323,11 @@ describe('signing requests reach the signer', () => {
     await expect(new VfxClient('testnet').createVbtcToken(createParams(signer))).rejects.toMatchObject({
       name: 'TransactionHashMismatchError',
     });
+    // throwOnRefusal wraps only the signer's own failures in SignerError.
+    installFetch(ceremonyMocks({ HashPreimage: preimage, Hash: 'NOT_THE_HASH' }));
+    await expect(
+      new VfxClient('testnet', { throwOnRefusal: true }).createVbtcToken(createParams(recordingSigner().signer)),
+    ).rejects.toMatchObject({ name: 'TransactionHashMismatchError' });
 
     installFetch(ceremonyMocks({ HashPreimage: preimage, Hash: hashPreimage(preimage) }));
     const { signer: ok, requests } = recordingSigner();
@@ -661,5 +666,55 @@ describe("'local' never reuses a nonce that may be spent", () => {
     const before = nonceCalls(calls);
     await client.sendCoin(keypair, RECIPIENT, 1);
     expect(nonceCalls(calls)).toBe(before + 1);
+  });
+});
+
+describe("'both' and 'local' sends from a vault", () => {
+  /** A fresh vault key: the first random key whose reserve address is xRBX. */
+  const freshVault = () => {
+    const service = new KeypairService(Network.Testnet);
+    for (;;) {
+      const key = service.generatePrivateKey();
+      const vaultAddress = service.reserveAddressFromPrivate(key);
+      if (vaultAddress.startsWith('xRBX')) {
+        return { privateKey: key, publicKey: service.publicFromPrivate(key), address: vaultAddress };
+      }
+    }
+  };
+
+  test('pass the local signature check (a vault signs its own transactions)', async () => {
+    const vaultKeys = freshVault();
+    for (const hashMode of ['both', 'local'] as const) {
+      const { calls } = installRawPipeline();
+      const hash = await new RawTransactionService({
+        network: Network.Testnet,
+        keypair: vaultKeys,
+        toAddress: RECIPIENT,
+        amount: 1,
+        unlockTime: Math.round(Date.now() / 1000) + 24 * 3600,
+        hashMode,
+      }).process();
+      expect(hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(true);
+    }
+  });
+
+  test('a signature from another key is still refused', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const vaultKeys = freshVault();
+    const { calls } = installRawPipeline();
+    const hash = await new RawTransactionService({
+      network: Network.Testnet,
+      signer: {
+        address: vaultKeys.address,
+        publicKey: vaultKeys.publicKey,
+        signDigest: (digestHex: string) => derSign(digestHex), // the test account's key, not the vault's
+      },
+      toAddress: RECIPIENT,
+      amount: 1,
+      unlockTime: Math.round(Date.now() / 1000) + 24 * 3600,
+    }).process();
+    expect(hash).toBeNull();
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
   });
 });

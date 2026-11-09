@@ -23,6 +23,20 @@ export interface VfxAddress {
   deactivated?: boolean;
 }
 
+/** A block as Spyglass indexes it. */
+export interface VfxBlock {
+  height: number;
+  hash: string;
+  previous_hash: string;
+  validator_address: string;
+  validator_signature?: string;
+  chain_ref_id?: string;
+  merkle_root?: string;
+  date_crafted?: string;
+  master_node?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
 export interface Transaction {
   hash: string;
   height: number;
@@ -117,6 +131,25 @@ export interface VbtcWithdrawalRequest {
   btc_address: string;
   amount: string;
   fee_rate: string;
+  /**
+   * On a watched vault, while the request is open: the node's state for it,
+   * `Waiting` (no Bitcoin transaction fixed yet, can still be cancelled) or
+   * `Pinned`. Null once closed, before the node was read, and on vaults the
+   * chain does not watch. Absent from older Spyglass deployments.
+   */
+  pin_state?: string | null;
+  /** The pinned Bitcoin transaction's txid while the request is open and pinned. */
+  pin_txid?: string | null;
+  /** The pinned transaction's fee rate (sat/vB). */
+  pin_fee_rate?: number | null;
+  /** The requester asked to release the pinned withdrawal; the vBTC comes back once it closes. */
+  releasing?: boolean | null;
+  /** The height after which an open watched request expires. */
+  expires_at_height?: number | null;
+  /** Why a cancelled request closed unpaid (Cancelled, Released, Expired or Void). */
+  closed_because?: string | null;
+  /** What a closed request refunded when less than its amount (a release keeps its Bitcoin fee). */
+  refunded_amount?: string | null;
   btc_transaction_hash: string;
   /**
    * See {@link VbtcWithdrawalStatus} for the per-value caveats. `pending_btc`
@@ -128,7 +161,39 @@ export interface VbtcWithdrawalRequest {
   completion_transaction_hash: string | null;
   created_at: string;
   completed_at: string | null;
+  /**
+   * When FROST produced a broadcastable Bitcoin transaction for this request
+   * (the signed hex itself is withheld). Set means signing already ran.
+   * Absent from Spyglass deployments older than the release that added it.
+   */
+  signed_at?: string | null;
 }
+
+/**
+ * A moment in `completeWithdrawal` worth persisting, so a closed tab can
+ * finish the withdrawal later: resume `frost-job-started` with
+ * `resumeJobId`, and finish `btc-broadcast` with `recordWithdrawalCompletion`
+ * (never by signing again).
+ */
+export type VbtcWithdrawalCheckpoint =
+  | {
+      kind: 'frost-job-started';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      amount: number;
+      btcAddress: string;
+    }
+  | {
+      kind: 'btc-broadcast';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      btcTransactionHash: string;
+      signedBtcTxHex: string;
+      amount: number;
+      btcAddress: string;
+    };
 
 export interface VbtcTransfer {
   id: number;
@@ -301,7 +366,9 @@ export type VbtcProgressPhase =
   | 'frost_complete'
   | 'btc_broadcast'
   | 'completion_recorded'
-  | 'watched_polling';
+  | 'watched_polling'
+  /** An `onCheckpoint` hook threw; the withdrawal carries on. */
+  | 'checkpoint_failed';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;
@@ -409,9 +476,105 @@ export interface DeployTokenResult {
  * can sweep it. `restoreCode` is `base64("<privateKey>//<recoveryPrivateKey>")`,
  * the format the CLI and web wallet both restore from.
  */
+/**
+ * What a legacy (Flutter web wallet) vault and its derived recovery key are
+ * computed from: the main account key, the vault key itself, or an imported
+ * key's derivation text (see `derivationTextCandidates`).
+ */
+export type LegacyVaultSource = { mainPrivateKey: string } | { vaultPrivateKey: string } | { derivationText: string };
+
+/** What `findLegacyRecovery` found for a legacy vault's derived recovery address. */
+export interface LegacyRecoveryLookup {
+  /** The derived recovery address. */
+  address: string;
+  /** The legacy vault (xRBX) address it belongs to. */
+  vaultAddress: string;
+  /** True when Spyglass shows anything for the recovery address or the vault that uses it. */
+  hasActivity: boolean;
+  /** What was seen; `hasActivity` is true when any of it is. */
+  summary: {
+    recoveryHasBalance: boolean;
+    recoveryHasTransactions: boolean;
+    vaultHasBalance: boolean;
+    vaultHasTransactions: boolean;
+    vaultActivated: boolean;
+    /** A Register() from the vault names this recovery address. */
+    registeredWithThisRecovery: boolean;
+  };
+  /**
+   * How Spyglass was read: its `/addresses/activity/` route in one request,
+   * or, on a Spyglass that predates it, the address details and histories.
+   */
+  lookedUpWith: 'activity-route' | 'history';
+  /** The derived recovery key, only when asked for with `includeKey: true`. */
+  recoveryKey?: Keypair;
+}
+
+/** A vault (xRBX) key on its own. Its recovery key lives elsewhere; only the recovery address is registered. */
+export type VaultKeypair = Keypair;
+
+/**
+ * A vault together with its recovery key, as a restore code or the legacy
+ * web-wallet derivation yields it.
+ */
 export interface ReserveKeypair extends Keypair {
   recoveryPrivateKey: string;
   recoveryPublicKey: string;
   recoveryAddress: string;
   restoreCode: string;
+}
+
+// Spyglass wallet day-1 reads (Spyglass PR 78). Each is opt-in: an older
+// Spyglass answers 404, and the SDK method resolves to null.
+
+/** Whether an address was ever used, from `/addresses/activity/`. */
+export interface AddressActivity {
+  address: string;
+  /** A transaction to or from it is indexed. */
+  hasTransactions: boolean;
+  /** Its indexed available balance is above zero. */
+  hasBalance: boolean;
+  /** It sent a Register(): it is an activated vault. */
+  vaultActivated: boolean;
+  /** The RecoveryAddress of each Register() it sent, oldest first. */
+  registerRecoveryAddresses: string[];
+}
+
+/** One page of `listAddressActivity`, newest first. */
+export interface AddressActivityPage {
+  results: Transaction[];
+  /** Pass as `before` for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** `/adnr/available/<domain>/`: whether a name can be bought, as of `indexedHeight`. */
+export interface DomainAvailability {
+  domain: string;
+  available: boolean;
+  indexedHeight: number;
+}
+
+/** The NFT of a vBTC V2 token in the `view: 'wallet'` shape: only what a wallet lists. */
+export interface VbtcV2WalletNft {
+  identifier: string;
+  name: string;
+  minted_at: string;
+  mint_transaction: unknown;
+}
+
+/** vBTC V2 reads: `view: 'wallet'` trims each token's `nft` to VbtcV2WalletNft. */
+export interface VbtcV2ReadOptions {
+  view?: 'wallet';
+}
+
+/**
+ * The relay's `block_addresses` socket event (notifications[-testnet]
+ * .verifiedx.io), sent after each `new_block` near the tip: every address
+ * the block touched, sorted. A wallet refetches only when one of its own is
+ * listed. Best effort: an address can be missing; keep a slow poll.
+ */
+export interface BlockAddressesEvent {
+  type: 'block_addresses';
+  data: { height: number; hash: string; affected_addresses: string[] };
+  message: string;
 }

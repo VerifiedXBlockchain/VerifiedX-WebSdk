@@ -1,5 +1,5 @@
 import { Network } from '../constants';
-import { FungibleTokenBalance, VfxAddress } from '../types';
+import { AddressActivity, FungibleTokenBalance, VfxAddress } from '../types';
 import { addressWithoutActivity, cleanAdnrName } from '../utils';
 import { BaseApiClient, VfxApiError } from './base-api-client';
 
@@ -7,6 +7,9 @@ export interface IApiClientOptions {
   baseUrl?: string;
   timeoutMs?: number;
 }
+
+/** Spyglass's cap on addresses per activity request. */
+export const ADDRESS_ACTIVITY_MAX = 20;
 
 function isNotFound(e: unknown): boolean {
   return e instanceof VfxApiError && e.status === 404;
@@ -88,6 +91,42 @@ export class AddressApiClient extends BaseApiClient {
       }
       throw e;
     }
+  };
+
+  /**
+   * Whether each address was ever used (`/addresses/activity/`), in the
+   * order given, duplicates removed. At most 20 addresses. Resolves to null
+   * when Spyglass predates the route (404); any other failure throws, never
+   * reads as "no activity".
+   */
+  public getAddressesActivity = async (addresses: string[]): Promise<AddressActivity[] | null> => {
+    const unique = [...new Set(addresses)];
+    if (unique.length === 0 || unique.length > ADDRESS_ACTIVITY_MAX) {
+      throw new Error(`getAddressesActivity takes 1 to ${ADDRESS_ACTIVITY_MAX} addresses, got ${unique.length}`);
+    }
+    let response: { results?: Array<Record<string, unknown>> };
+    try {
+      response = await this.makeJsonRequest('/activity/', 'GET', { addresses: unique.join(',') });
+    } catch (e) {
+      if (isNotFound(e)) return null;
+      throw e;
+    }
+    const byAddress = new Map((response?.results ?? []).map((row) => [row.address as string, row]));
+    return unique.map((address) => {
+      const row = byAddress.get(address);
+      if (!row) {
+        throw new Error(`getAddressesActivity: Spyglass sent no row for ${address}`);
+      }
+      return {
+        address,
+        hasTransactions: row.has_transactions === true,
+        hasBalance: row.has_balance === true,
+        vaultActivated: row.vault_activated === true,
+        registerRecoveryAddresses: Array.isArray(row.register_recovery_addresses)
+          ? (row.register_recovery_addresses as string[])
+          : [],
+      };
+    });
   };
 
   /** The address holding `domain`, normalised as in domainAvailable, or null. */

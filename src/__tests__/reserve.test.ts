@@ -11,7 +11,10 @@ const main = {
   publicKey: keypairService.publicFromPrivate(mainPrivateKey),
   address: keypairService.addressFromPrivate(mainPrivateKey),
 };
-const vault = keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
+const vault = keypairService.restoreLegacyWebWalletVault(mainPrivateKey);
+// An independent recovery key, as a new vault must have.
+const recoveryPrivateKey = '9c4ad2b1e2d3c4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f80910a1b';
+const recoveryAddress = keypairService.addressFromPrivate(recoveryPrivateKey);
 const RECIPIENT = 'xRecipient00000000000000000000000';
 const SC = 'abc123:1700000000';
 
@@ -64,19 +67,22 @@ afterEach(() => {
 
 describe('reserve keypair helpers on the client', () => {
   test('derive the same vault as KeypairService and expose the xRBX address', () => {
-    expect(client.reserveKeypairFromPrivateKey(mainPrivateKey)).toEqual(vault);
+    expect(client.restoreLegacyWebWalletVault(mainPrivateKey)).toEqual(vault);
     expect(vault.address.startsWith('xRBX')).toBe(true);
     expect(client.reserveKeypairFromRestoreCode(vault.restoreCode)).toEqual(vault);
-    expect(client.reserveKeypairFromReservePrivateKey(vault.privateKey)).toEqual(vault);
+    expect(client.restoreLegacyWebWalletVaultFromVaultKey(vault.privateKey)).toEqual(vault);
     expect(client.reserveAddressFromPublic(vault.publicKey)).toBe(vault.address);
-    expect(client.generateReserveKeypair().address.startsWith('xRBX')).toBe(true);
+    const fresh = client.newVaultKeypair();
+    expect(fresh.address.startsWith('xRBX')).toBe(true);
+    expect(Object.keys(fresh).sort()).toEqual(['address', 'privateKey', 'publicKey']);
+    expect(client.vaultKeypairFromPrivateKey(fresh.privateKey)).toEqual(fresh);
   });
 });
 
 describe('registerReserveAccount', () => {
   test('sends 4 VFX to Reserve_Base from the vault naming its recovery address', async () => {
     const { calls } = installPipeline();
-    const hash = await client.registerReserveAccount(vault);
+    const hash = await client.registerReserveAccount(vault, { recoveryAddress });
     expect(hash).toBe('TX_HASH_ABC');
 
     // Nonce and signature validation are against the xRBX address.
@@ -89,13 +95,13 @@ describe('registerReserveAccount', () => {
     expect(tx.FromAddress).toBe(vault.address);
     expect(tx.Amount).toBe(RESERVE_ACTIVATION_COST);
     expect(tx.UnlockTime).toBeNull();
-    expect(tx.Data).toEqual({ Function: 'Register()', RecoveryAddress: vault.recoveryAddress });
+    expect(tx.Data).toEqual({ Function: 'Register()', RecoveryAddress: recoveryAddress });
     expect(tx.Signature).toBe(keypairService.getSignature('TX_HASH_ABC', vault.privateKey));
   });
 
   test('an external vault signer works with an explicit recovery address', async () => {
     const { calls } = installPipeline();
-    await client.registerReserveAccount(vaultSigner(), { recoveryAddress: vault.recoveryAddress });
+    await client.registerReserveAccount(vaultSigner(), { recoveryAddress });
     const tx = sentTransaction(calls);
     expect(tx.FromAddress).toBe(vault.address);
     expect(tx.Signature).toBe(keypairService.getSignature('TX_HASH_ABC', vault.privateKey));
@@ -104,10 +110,32 @@ describe('registerReserveAccount', () => {
   test('refuses an ordinary account, a missing recovery address, and a reserve recovery address', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
-    await expect(client.registerReserveAccount(main)).rejects.toThrow(/must be signed by a reserve/);
-    await expect(client.registerReserveAccount(vaultSigner())).rejects.toThrow(/requires a recoveryAddress/);
+    await expect(client.registerReserveAccount(main, { recoveryAddress })).rejects.toThrow(
+      /must be signed by a reserve/,
+    );
+    await expect(client.registerReserveAccount(vaultSigner(), {} as { recoveryAddress: string })).rejects.toThrow(
+      /requires a recoveryAddress/,
+    );
+    // A ReserveKeypair's own (derived) recovery address is not taken as a default any more.
+    await expect(client.registerReserveAccount(vault, {} as { recoveryAddress: string })).rejects.toThrow(
+      /requires a recoveryAddress/,
+    );
     await expect(client.registerReserveAccount(vault, { recoveryAddress: vault.address })).rejects.toThrow(
       /ordinary account/,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('refuses the recovery address the legacy scheme derives from the vault key', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(client.registerReserveAccount(vault, { recoveryAddress: vault.recoveryAddress })).rejects.toThrow(
+      /derived from the vault key/,
+    );
+    const fresh = client.newVaultKeypair();
+    const derived = keypairService.restoreLegacyWebWalletVaultFromVaultKey(fresh.privateKey).recoveryAddress;
+    await expect(client.registerReserveAccount(fresh, { recoveryAddress: derived })).rejects.toThrow(
+      /derived from the vault key/,
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -128,13 +156,21 @@ describe('sends from a reserve account carry an unlock time', () => {
     expect(tx.UnlockTime as number).toBeGreaterThanOrEqual(now + 48 * 3600);
   });
 
-  test('a delay under 24 hours, or a delay on an ordinary account, is refused before any request', async () => {
+  test('a delay under 24 hours is raised to 24, as the Flutter wallet does', async () => {
+    const { calls } = installPipeline();
+    await client.sendCoin(vault, RECIPIENT, 1, { unlockHours: 12 });
+    const tx = sentTransaction(calls);
+    expect(tx.UnlockTime as number).toBeGreaterThanOrEqual(now + 24 * 3600);
+    expect(tx.UnlockTime as number).toBeLessThanOrEqual(now + 24 * 3600 + 5);
+  });
+
+  test('a delay on an ordinary account, or a non-numeric one, is refused before any request', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
-    await expect(client.sendCoin(vault, RECIPIENT, 1, { unlockHours: 12 })).rejects.toThrow(/at least 24 hours/);
     await expect(client.sendCoin(main, RECIPIENT, 1, { unlockHours: 24 })).rejects.toThrow(
       /only to sends from a reserve/,
     );
+    await expect(client.sendCoin(vault, RECIPIENT, 1, { unlockHours: NaN })).rejects.toThrow(/must be a number/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
