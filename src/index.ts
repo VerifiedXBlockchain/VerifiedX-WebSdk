@@ -115,6 +115,12 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+export {
+  canCallBackReserveTransaction,
+  vaultBackupCode,
+  vaultKeyFromBackupCode,
+  reserveRestoreCode,
+} from './services/vault-helpers';
 export { vbtcContractHasNoMedia } from './services/vbtc-media';
 export {
   VBTC_WITHDRAWAL_EXPIRY_BLOCKS,
@@ -129,7 +135,7 @@ export {
 } from './services/vbtc-withdrawal-state';
 export type { WatchedWithdrawalRowState } from './services/vbtc-withdrawal-state';
 // NFTs (VFX10)
-export { NftBulkMintError } from './client/vfx-client';
+export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
 export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {

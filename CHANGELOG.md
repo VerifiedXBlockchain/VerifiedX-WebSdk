@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Vault extras**: `fundAndRegisterVault(funder, vault, { recoveryAddress })` funds 5 VFX, waits for it, then registers (the Flutter wallet's fund-then-activate); `canCallBackReserveTransaction(tx, vault, { vaultHistory })` (the Flutter call-back rules); `vaultBackupCode` / `vaultKeyFromBackupCode` (a checksummed backup of a vault key alone) and `reserveRestoreCode(vaultKey, recoveryKey)` (the CLI/Flutter restore code). A restore code with more than two parts is read like Core reads it.
+
+### Changed (vault API)
+
+- `unlockHours` below 24 is raised to 24, as the Flutter wallet does, instead of throwing.
+
 - **Spend from every address type of a key.** `BtcClient.createTransaction` / `sendBtc` take `options.addressType`: `'p2wpkh'` (default, unchanged), `'p2pkh'`, `'p2sh-p2wpkh'`, `'p2tr'` (the bech32m address the SDK and Flutter wallet show, whose output key is the untweaked key) and `'p2tr-bip86'` (standard BIP 86). Change returns to the same address. A `BtcSigner` declares its type with `addressType`; `btcSignerFromWif(wif, network, addressType)`. `addressForSpendType` exposes the addresses. `buyBtcDomain` and `signBtcNameTransferAcceptance` accept a WIF as well as a hex key.
 
 - **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
