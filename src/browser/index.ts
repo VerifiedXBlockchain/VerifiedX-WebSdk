@@ -97,6 +97,7 @@ export {
   withdrawalFeeFloorError,
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
+export { vbtcContractHasNoMedia } from '../services/vbtc-media';
 // Web wallet sign-in derivation (vault and Bitcoin account texts)
 export {
   btcCredentialsFromDerivationText,

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`transferVbtcOwnership`** hands a vBTC vault (contract and withdrawal rights) to another account with a Type 18 (Core `GetVBTCOwnershipTransferData`): the owner signs the contract id for a beacon upload of the vault's media, a media-less vault falls back to locator "NA" when no beacon answers, and a vault sender waits `unlockHours`. New intent `vbtc-ownership-transfer`, request kind `vbtc-beacon-upload`, helper `vbtcContractHasNoMedia`.
+
 ## Unreleased (9.1.0)
 
 ### Added

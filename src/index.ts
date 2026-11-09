@@ -104,6 +104,7 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+export { vbtcContractHasNoMedia } from './services/vbtc-media';
 // Web wallet sign-in derivation (vault and Bitcoin account texts)
 export {
   btcCredentialsFromDerivationText,
