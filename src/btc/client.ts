@@ -3,6 +3,7 @@ import TransactionService from './transaction';
 import AccountService from './account';
 import { BtcSigner, isBtcSigner, signBtcMessage } from './signer';
 import { newFlowId } from '../signer';
+import type { BtcSpendType } from './address-types';
 import * as bitcoin from 'bitcoinjs-lib';
 import type {
   IBtcKeypair,
@@ -114,13 +115,16 @@ export default class BtcClient {
 
   /**
    * Build and sign a payment from `sender`: a WIF, or a BtcSigner that signs
-   * the PSBT itself (see `BtcSigner`).
+   * the PSBT itself (see `BtcSigner`). `options.addressType` picks which of
+   * a WIF's addresses to spend from (default 'p2wpkh'); a BtcSigner says so
+   * with its own `addressType`.
    */
   async createTransaction(
     sender: string | BtcSigner,
     recipientAddress: string,
     amount: number,
     feeRate = 0,
+    options: { addressType?: BtcSpendType } = {},
   ): Promise<ICreateTxResponse> {
     if (this.dryRun) {
       return {
@@ -130,9 +134,16 @@ export default class BtcClient {
       };
     }
     if (isBtcSigner(sender)) {
+      if (options.addressType && options.addressType !== (sender.addressType ?? 'p2wpkh')) {
+        throw new Error(
+          `createTransaction: options.addressType ${options.addressType} differs from the BtcSigner's ${
+            sender.addressType ?? 'p2wpkh'
+          }; set it on the signer`,
+        );
+      }
       return this.transactionService.createTransactionWithSigner(sender, recipientAddress, amount, feeRate);
     }
-    return this.transactionService.createTransaction(sender, recipientAddress, amount, feeRate);
+    return this.transactionService.createTransaction(sender, recipientAddress, amount, feeRate, options);
   }
 
   /**
@@ -165,8 +176,9 @@ export default class BtcClient {
     recipientAddress: string,
     amount: number,
     feeRate = 0,
+    options: { addressType?: BtcSpendType } = {},
   ): Promise<string | null> {
-    const createResult = await this.createTransaction(sender, recipientAddress, amount, feeRate);
+    const createResult = await this.createTransaction(sender, recipientAddress, amount, feeRate, options);
 
     if (!createResult.success || !createResult.result) {
       console.error('Failed to create transaction:', createResult.error);

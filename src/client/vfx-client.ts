@@ -1,4 +1,6 @@
-import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
+import { Transaction as BitcoinTransaction, networks as bitcoinNetworks } from 'bitcoinjs-lib';
+import { ECPairFactory } from 'ecpair';
+import ecc from '@bitcoinerlab/secp256k1';
 import BtcClient from '../btc';
 import { BtcSigner, isBtcSigner } from '../btc/signer';
 import {
@@ -448,6 +450,32 @@ type RecordWithdrawalCompletionParams = {
 /** A user action the signer already approved; its signatures share `flowId`. */
 interface ApprovedFlow {
   flowId: string;
+}
+
+/**
+ * A Bitcoin private key as 64 hex characters, from either that or a WIF for
+ * the client's network. Throws on anything else, before anything is signed.
+ */
+function btcPrivateKeyHex(key: string, network: Network): string {
+  const trimmed = key.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  const btcNetwork = network === Network.Testnet ? bitcoinNetworks.testnet : bitcoinNetworks.bitcoin;
+  let privateKey: Buffer | undefined;
+  try {
+    privateKey = ECPairFactory(ecc).fromWIF(trimmed, btcNetwork).privateKey;
+  } catch (error) {
+    throw new Error(
+      `Bitcoin key is neither 64 hex characters nor a ${network} WIF: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+  if (!privateKey) {
+    throw new Error('Bitcoin WIF holds no private key');
+  }
+  return privateKey.toString('hex');
 }
 
 /** Concurrent transaction lookups in getLiveResumableWithdrawals. */
@@ -931,8 +959,8 @@ export class VfxClient {
 
   /**
    * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey` (a
-   * hex key, or a BtcSigner whose `signDigest` signs the claim), managed by
-   * the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
+   * hex key, a WIF, or a BtcSigner whose `signDigest` signs the claim),
+   * managed by the signer. The address is the key's P2WPKH address. Costs 5 VFX. That Bitcoin key signs the claim: from
    * Core's BtcNameSignerOwnsAddressHeight (read against the latest block on
    * Spyglass) over `<unix seconds>:<signer address>:<name>.btc`, below it over
    * the bare timestamp. Throws when the latest block height cannot be read.
@@ -975,12 +1003,13 @@ export class VfxClient {
       : `${timestamp}`;
     const btcClient = new BtcClient(this.network);
 
-    const signature = isBtcSigner(btcPrivateKey)
-      ? await btcClient.getSignatureWithSigner(message, btcPrivateKey, 'btc-name-claim')
-      : btcClient.getSignature(message, btcPrivateKey);
-    const btcAddress = isBtcSigner(btcPrivateKey)
-      ? btcPrivateKey.address
-      : btcClient.addressFromPrivate(btcPrivateKey).address;
+    const btcKeyHex = isBtcSigner(btcPrivateKey) ? null : btcPrivateKeyHex(btcPrivateKey, this.network);
+    const signature =
+      btcKeyHex === null
+        ? await btcClient.getSignatureWithSigner(message, btcPrivateKey as BtcSigner, 'btc-name-claim')
+        : btcClient.getSignature(message, btcKeyHex);
+    const btcAddress =
+      btcKeyHex === null ? (btcPrivateKey as BtcSigner).address : btcClient.addressFromPrivate(btcKeyHex).address;
 
     const data = {
       Function: 'BTCAdnrCreate()',
@@ -1120,7 +1149,7 @@ export class VfxClient {
    * passes its message and signature to transferBtcDomain. Good for 24 hours.
    */
   public signBtcNameTransferAcceptance = (params: {
-    /** Hex private key of the receiving Bitcoin address. */
+    /** Private key of the receiving Bitcoin address: 64 hex characters or a WIF. */
     btcPrivateKey: string;
     name: string;
     newOwner: string;
@@ -1132,7 +1161,10 @@ export class VfxClient {
     }
     const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
     const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
-    const signature = new BtcClient(this.network).getSignature(message, params.btcPrivateKey);
+    const signature = new BtcClient(this.network).getSignature(
+      message,
+      btcPrivateKeyHex(params.btcPrivateKey, this.network),
+    );
     return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 

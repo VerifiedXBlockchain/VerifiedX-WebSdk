@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Spend from every address type of a key.** `BtcClient.createTransaction` / `sendBtc` take `options.addressType`: `'p2wpkh'` (default, unchanged), `'p2pkh'`, `'p2sh-p2wpkh'`, `'p2tr'` (the bech32m address the SDK and Flutter wallet show, whose output key is the untweaked key) and `'p2tr-bip86'` (standard BIP 86). Change returns to the same address. A `BtcSigner` declares its type with `addressType`; `btcSignerFromWif(wif, network, addressType)`. `addressForSpendType` exposes the addresses. `buyBtcDomain` and `signBtcNameTransferAcceptance` accept a WIF as well as a hex key.
+
 - **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
 - **`btc.recommendedFeeRates(network)`**: fee tiers as the Flutter wallet shows them, with testnet floors (10/8/5/5/2 sat/vB) and a fixed fallback table marked `isEstimate` when the fee API cannot be reached. `BtcClient.getFeeRates` is unchanged.
 - **`VFX_API_BASE_URL_DEVNET`** (`https://data-devnet.verifiedx.io/api`), plus the mainnet and testnet base URLs as exports. Devnet uses the testnet address prefix, so a devnet client is `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
