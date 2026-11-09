@@ -3,7 +3,7 @@ import { VfxClient as OriginalVfxClient, VfxClientOptions } from '../client/vfx-
 import { BrowserKeypairService } from './services/keypair-service';
 import { Network, TxType } from '../constants';
 
-export type { VfxClientOptions, ReserveSendOptions } from '../client/vfx-client';
+export type { VfxClientOptions, ReserveSendOptions, SendCoinOptions } from '../client/vfx-client';
 export { VfxApiError, VfxNetworkError } from '../client/base-api-client';
 export {
   VbtcWithdrawalIncompleteError,
@@ -33,6 +33,7 @@ export {
   PreSignCheckError,
   TransactionDispatchError,
   TransactionRefusedError,
+  SignerError,
 } from '../services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from '../btc/errors';
 

@@ -323,6 +323,11 @@ describe('signing requests reach the signer', () => {
     await expect(new VfxClient('testnet').createVbtcToken(createParams(signer))).rejects.toMatchObject({
       name: 'TransactionHashMismatchError',
     });
+    // throwOnRefusal wraps only the signer's own failures in SignerError.
+    installFetch(ceremonyMocks({ HashPreimage: preimage, Hash: 'NOT_THE_HASH' }));
+    await expect(
+      new VfxClient('testnet', { throwOnRefusal: true }).createVbtcToken(createParams(recordingSigner().signer)),
+    ).rejects.toMatchObject({ name: 'TransactionHashMismatchError' });
 
     installFetch(ceremonyMocks({ HashPreimage: preimage, Hash: hashPreimage(preimage) }));
     const { signer: ok, requests } = recordingSigner();

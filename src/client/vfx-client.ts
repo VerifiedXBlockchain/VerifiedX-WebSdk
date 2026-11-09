@@ -19,6 +19,8 @@ import {
   PreSignCheckError,
   RawTransactionService,
   TransactionDispatchError,
+  TransactionRefusedError,
+  SignerError,
 } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
@@ -162,6 +164,17 @@ export interface ReserveSendOptions {
    * sender can call it back. Setting it from an ordinary account is an error.
    */
   unlockHours?: number;
+}
+
+/** Per-call options for `sendCoin`. */
+export interface SendCoinOptions extends ReserveSendOptions {
+  /**
+   * Throw TransactionRefusedError, with the node's reason, when the node
+   * refuses this send, and SignerError, with the signer's error, when the
+   * signer refuses to sign it, instead of resolving to null. Overrides the
+   * client's `throwOnRefusal` for this call.
+   */
+  throwOnRefusal?: boolean;
 }
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
@@ -352,6 +365,20 @@ export interface VfxClientOptions {
    * refuses a bad transaction with the same reason either way.
    */
   preflight?: boolean;
+  /**
+   * Make every send from this client throw TransactionRefusedError, with the
+   * node's reason, when the node refuses it, instead of resolving to null.
+   * Default false (the historical null). Per call, `sendCoin` takes it too.
+   * Calls that already throw on refusal (multi-vault withdrawals) keep doing so.
+   * It covers the prepared vBTC sends (transfer, create, withdrawal request,
+   * cancel, completion record) too: an explicit refusal there throws
+   * TransactionRefusedError with the prepared hash, instead of a plain Error.
+   * A signer that throws instead of signing a send (a rejected extension
+   * prompt) then surfaces as SignerError, with the signer's error as `cause`,
+   * from every send: the transaction sends, the prepared vBTC sends, and the
+   * ceremony, FROST and recovery signatures of the vBTC and vault flows.
+   */
+  throwOnRefusal?: boolean;
 }
 
 type CompleteWithdrawalParams = {
@@ -492,6 +519,7 @@ export class VfxClient {
   private authApiClient: AuthApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
+  private throwOnRefusal: boolean;
   /** Clock offset and next-nonce cache shared by every send from this client. */
   private txBuildSession = new TxBuildSession();
 
@@ -531,14 +559,22 @@ export class VfxClient {
     this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
   }
 
   /** The transaction-building options every RawTransactionService this client makes shares. */
-  private get txBuildOptions(): { hashMode: HashMode; preflight?: boolean; session: TxBuildSession } {
+  private get txBuildOptions(): {
+    hashMode: HashMode;
+    preflight?: boolean;
+    session: TxBuildSession;
+    throwOnRefusal?: boolean;
+  } {
     return {
       hashMode: this.hashMode,
       session: this.txBuildSession,
       ...(this.preflight !== undefined && { preflight: this.preflight }),
+      // Only ever switched on here, so a call that sets it itself is not overridden.
+      ...(this.throwOnRefusal && { throwOnRefusal: true }),
     };
   }
 
@@ -769,7 +805,7 @@ export class VfxClient {
     keypair: KeypairOrSigner,
     toAddress: string,
     amount: number,
-    options: ReserveSendOptions = {},
+    options: SendCoinOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
@@ -781,6 +817,7 @@ export class VfxClient {
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...(options.throwOnRefusal !== undefined && { throwOnRefusal: options.throwOnRefusal }),
     });
     return await txBuilder.process(this.dryRun);
   };
@@ -1512,26 +1549,28 @@ export class VfxClient {
       sessionId: ceremonyPrep.session_id,
       ownerAddress: params.ownerAddress,
     };
-    const [startSignature, shareSignature] = await signMessages(signer, [
-      {
-        message: ceremonyPrep.messages_to_sign.start_message,
-        request: {
-          ...ceremony,
-          step: 'start',
+    const [startSignature, shareSignature] = await this.signing(() =>
+      signMessages(signer, [
+        {
           message: ceremonyPrep.messages_to_sign.start_message,
-          timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          request: {
+            ...ceremony,
+            step: 'start',
+            message: ceremonyPrep.messages_to_sign.start_message,
+            timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          },
         },
-      },
-      {
-        message: ceremonyPrep.messages_to_sign.share_distribution_message,
-        request: {
-          ...ceremony,
-          step: 'share',
+        {
           message: ceremonyPrep.messages_to_sign.share_distribution_message,
-          timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          request: {
+            ...ceremony,
+            step: 'share',
+            message: ceremonyPrep.messages_to_sign.share_distribution_message,
+            timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          },
         },
-      },
-    ]);
+      ]),
+    );
 
     onProgress({
       phase: 'ceremony_started',
@@ -1574,18 +1613,20 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = await signer.sign(ownershipMessage, {
-      kind: 'vbtc-ownership',
-      flowId,
-      message: ownershipMessage,
-      ownerAddress: params.ownerAddress,
-      name: params.name,
-      description: params.description,
-      ticker: params.ticker,
-      ceremonyId: ceremonyPrep.ceremony_id,
-      timestamp,
-      uniqueId,
-    });
+    const ownerSignature = await this.signing(() =>
+      signer.sign(ownershipMessage, {
+        kind: 'vbtc-ownership',
+        flowId,
+        message: ownershipMessage,
+        ownerAddress: params.ownerAddress,
+        name: params.name,
+        description: params.description,
+        ticker: params.ticker,
+        ceremonyId: ceremonyPrep.ceremony_id,
+        timestamp,
+        uniqueId,
+      }),
+    );
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -1842,32 +1883,34 @@ export class VfxClient {
       sessionId: frostPrep.SessionId,
     };
     const extraInputs = (frostPrep.StartMessages ?? []).filter((entry) => entry.InputIndex > 0);
-    const [frostStartSig, frostShareSig, ...extraSignatures] = await signMessages(signer, [
-      {
-        message: frostPrep.StartMessage,
-        request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
-      },
-      {
-        message: frostPrep.ShareDistributionMessage,
-        request: {
-          ...frost,
-          step: 'share',
+    const [frostStartSig, frostShareSig, ...extraSignatures] = await this.signing(() =>
+      signMessages(signer, [
+        {
+          message: frostPrep.StartMessage,
+          request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
+        },
+        {
           message: frostPrep.ShareDistributionMessage,
-          timestamp: frostPrep.ShareDistributionTimestamp,
+          request: {
+            ...frost,
+            step: 'share',
+            message: frostPrep.ShareDistributionMessage,
+            timestamp: frostPrep.ShareDistributionTimestamp,
+          },
         },
-      },
-      ...extraInputs.map((entry) => ({
-        message: entry.Message,
-        request: {
-          ...frost,
-          step: 'input' as const,
+        ...extraInputs.map((entry) => ({
           message: entry.Message,
-          sessionId: entry.SessionId ?? frostPrep.SessionId,
-          timestamp: entry.Timestamp,
-          inputIndex: entry.InputIndex,
-        },
-      })),
-    ]);
+          request: {
+            ...frost,
+            step: 'input' as const,
+            message: entry.Message,
+            sessionId: entry.SessionId ?? frostPrep.SessionId,
+            timestamp: entry.Timestamp,
+            inputIndex: entry.InputIndex,
+          },
+        })),
+      ]),
+    );
     const extraStartSignatures = extraInputs.map((entry, index) => ({
       input_index: entry.InputIndex,
       signature: extraSignatures[index],
@@ -3195,14 +3238,16 @@ export class VfxClient {
 
     const signatureTime = Math.round(Date.now() / 1000);
     const recoveryMessage = `${signatureTime}${recoveryAddress}`;
-    const recoverySigScript = await recovery.sign(recoveryMessage, {
-      kind: 'reserve-recovery',
-      flowId,
-      message: recoveryMessage,
-      reserveAddress: resolved.address,
-      recoveryAddress,
-      signatureTime,
-    });
+    const recoverySigScript = await this.signing(() =>
+      recovery.sign(recoveryMessage, {
+        kind: 'reserve-recovery',
+        flowId,
+        message: recoveryMessage,
+        reserveAddress: resolved.address,
+        recoveryAddress,
+        signatureTime,
+      }),
+    );
 
     return this.sendReserveTx(
       resolved,
@@ -3542,6 +3587,19 @@ export class VfxClient {
     throw new Error(`${label} requires a privateKey or a signer`);
   }
 
+  /**
+   * Run a signing step of a send. A signer that throws instead of signing
+   * passes its error through unchanged, as before; with throwOnRefusal it
+   * arrives as SignerError, as from every RawTransactionService send.
+   */
+  private async signing<T>(sign: () => Promise<T>): Promise<T> {
+    try {
+      return await sign();
+    } catch (error) {
+      throw this.throwOnRefusal && !(error instanceof SignerError) ? new SignerError(error) : error;
+    }
+  }
+
   private async signAndSend(
     prepared: PreparedTransactionResponse,
     signer: ResolvedSigner,
@@ -3549,7 +3607,10 @@ export class VfxClient {
     flowId: string,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = await signer.sign(hash, this.preparedSigningRequest(prepared, flowId));
+    // Built outside the signing step: a hash mismatch it finds stays a
+    // TransactionHashMismatchError, never a SignerError.
+    const request = this.preparedSigningRequest(prepared, flowId);
+    const signature = await this.signing(() => signer.sign(hash, request));
     // The prepare endpoint chose this transaction's nonce, so the session's
     // cached next nonce for the sender can no longer be trusted, whatever the
     // send's outcome.
@@ -3559,13 +3620,30 @@ export class VfxClient {
     // Spyglass also returns when its own call to the node times out) leaves it
     // unknown whether the transaction was accepted. A plain error here would
     // read as "not sent" and invite a resend, so it carries the hash instead.
-    // An explicit `success: false` body is a definite refusal and is left to
-    // assertSent.
+    // An explicit `success: false` body is a definite refusal: left to
+    // assertSent, or with throwOnRefusal raised here as
+    // TransactionRefusedError carrying the prepared hash and the reason.
+    let sent: SentTransactionResponse;
     try {
-      return await sendFn({ hash, signature, public_key: signer.publicKey });
+      sent = await sendFn({ hash, signature, public_key: signer.publicKey });
     } catch (error) {
+      // Spyglass 78+ answers a send the node refused with a 500 that carries
+      // the node's reason as `node_message` (null when the node did not
+      // answer). With a reason the refusal is definite, not a lost answer.
+      const nodeMessage = this.throwOnRefusal ? nodeMessageOf(error) : null;
+      if (nodeMessage) {
+        throw new TransactionRefusedError(hash, nodeMessage);
+      }
       throw new TransactionDispatchError(hash, error);
     }
+    if (this.throwOnRefusal && sent?.success === false) {
+      const body = sent as unknown as { node_message?: unknown; message?: unknown; Message?: unknown };
+      const reason = [body.node_message, body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as
+        | string
+        | undefined;
+      throw new TransactionRefusedError(hash, reason ?? null);
+    }
+    return sent;
   }
 
   /**
@@ -3685,6 +3763,21 @@ function isTransientReadError(error: unknown): boolean {
   if (error instanceof VbtcNodeUnreachableError) return true;
   if (error instanceof VfxApiError) return error.status === undefined || error.status >= 500;
   return error instanceof TypeError || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
+}
+
+/**
+ * The node's refusal reason in a Spyglass error answer (`node_message`, from
+ * Spyglass 78), or null when there is none: an older Spyglass, the node not
+ * answering, or not an HTTP error at all.
+ */
+function nodeMessageOf(error: unknown): string | null {
+  if (!(error instanceof VfxApiError) || !error.body) return null;
+  try {
+    const message = (JSON.parse(error.body) as { node_message?: unknown })?.node_message;
+    return typeof message === 'string' && message !== '' ? message : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */

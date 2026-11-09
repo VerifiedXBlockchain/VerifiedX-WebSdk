@@ -4,6 +4,7 @@
 
 ### Added
 
+- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
 - **`btc.recommendedFeeRates(network)`**: fee tiers as the Flutter wallet shows them, with testnet floors (10/8/5/5/2 sat/vB) and a fixed fallback table marked `isEstimate` when the fee API cannot be reached. `BtcClient.getFeeRates` is unchanged.
 - **`VFX_API_BASE_URL_DEVNET`** (`https://data-devnet.verifiedx.io/api`), plus the mainnet and testnet base URLs as exports. Devnet uses the testnet address prefix, so a devnet client is `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
 - **`transferVbtcOwnership`** hands a vBTC vault (contract and withdrawal rights) to another account with a Type 18 (Core `GetVBTCOwnershipTransferData`): the owner signs the contract id for a beacon upload of the vault's media, a media-less vault falls back to locator "NA" when no beacon answers, and a vault sender waits `unlockHours`. New intent `vbtc-ownership-transfer`, request kind `vbtc-beacon-upload`, helper `vbtcContractHasNoMedia`.

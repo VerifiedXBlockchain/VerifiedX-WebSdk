@@ -2,7 +2,7 @@ import { VfxClient } from './client/vfx-client';
 
 // Export main VFX client
 export { VfxClient };
-export type { VfxClientOptions, ReserveSendOptions } from './client/vfx-client';
+export type { VfxClientOptions, ReserveSendOptions, SendCoinOptions } from './client/vfx-client';
 
 // Export API error type + media client
 export { VfxApiError, VfxNetworkError } from './client/base-api-client';
@@ -34,6 +34,7 @@ export {
   PreSignCheckError,
   TransactionDispatchError,
   TransactionRefusedError,
+  SignerError,
 } from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';
