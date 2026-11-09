@@ -4,6 +4,11 @@ import { VfxClient } from '../index';
 import { installFetch } from './helpers/mock-fetch';
 import flowVectors from './compat/wallet-flow-vectors.json';
 
+/** A Spyglass older than the activity route: findLegacyRecovery falls back to the history reads. */
+const olderSpyglass = {
+  '/addresses/activity/': () => new Response('{"detail":"Not found."}', { status: 404 }),
+};
+
 const testnet = new KeypairService(Network.Testnet);
 const mainnet = new KeypairService(Network.Mainnet);
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex');
@@ -112,6 +117,7 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
 
   test('no balance, no transactions, no vault record: hasActivity false and no key', async () => {
     const { calls } = installFetch({
+      ...olderSpyglass,
       [`/transaction/address/`]: () => empty,
       [`/addresses/${derived.address}`]: () => details(derived.address),
       [`/addresses/${derived.vaultAddress}`]: () => new Response('{"detail":"Not found."}', { status: 404 }),
@@ -124,16 +130,18 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
       vaultAddress: derived.vaultAddress,
       hasActivity: false,
       summary: {
-        recoveryBalance: 0,
-        recoveryTransactionCount: 0,
-        vaultBalance: 0,
-        vaultTransactionCount: 0,
+        recoveryHasBalance: false,
+        recoveryHasTransactions: false,
+        vaultHasBalance: false,
+        vaultHasTransactions: false,
         vaultActivated: false,
         registeredWithThisRecovery: false,
       },
+      lookedUpWith: 'history',
     });
     expect(calls.map((c) => c.url.split('/api')[1].split('?')[0]).sort()).toEqual(
       [
+        '/addresses/activity/',
         `/addresses/${derived.address}`,
         `/addresses/${derived.vaultAddress}`,
         `/transaction/address/${derived.address}/`,
@@ -144,6 +152,7 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
 
   test('a Register() from the vault naming the recovery address: hasActivity true, key on request', async () => {
     installFetch({
+      ...olderSpyglass,
       [`/transaction/address/${derived.address}/`]: () => empty,
       [`/transaction/address/${derived.vaultAddress}/`]: () => ({
         count: 1,
@@ -170,8 +179,8 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
     expect(result.summary).toMatchObject({
       vaultActivated: true,
       registeredWithThisRecovery: true,
-      vaultBalance: 1.5,
-      vaultTransactionCount: 1,
+      vaultHasBalance: true,
+      vaultHasTransactions: true,
     });
     expect(result.recoveryKey).toEqual({
       privateKey: derived.privateKey,
@@ -182,6 +191,7 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
 
   test('only a balance on the recovery address still counts', async () => {
     installFetch({
+      ...olderSpyglass,
       [`/transaction/address/`]: () => empty,
       [`/addresses/${derived.address}`]: () => details(derived.address, { balance_total: '0.25' }),
       [`/addresses/${derived.vaultAddress}`]: () => details(derived.vaultAddress),
@@ -190,12 +200,13 @@ describe('legacy recovery (Flutter web wallet vaults)', () => {
       vaultPrivateKey: walletVector.testnet.reserve.privateKey,
     });
     expect(result.hasActivity).toBe(true);
-    expect(result.summary.recoveryBalance).toBe(0.25);
+    expect(result.summary.recoveryHasBalance).toBe(true);
     expect(result).not.toHaveProperty('recoveryKey');
   });
 
   test('a Spyglass outage throws instead of reading as "no activity"', async () => {
     installFetch({
+      ...olderSpyglass,
       [`/transaction/address/`]: () => new Response('down', { status: 502 }),
       [`/addresses/`]: () => details(derived.address),
     });
@@ -220,6 +231,7 @@ describe('findLegacyRecovery reads the whole vault history', () => {
       data: JSON.stringify({ Function: 'Register()', RecoveryAddress: derived.address }),
     };
     const { calls } = installFetch({
+      ...olderSpyglass,
       [`/transaction/address/${derived.address}/`]: () => ({ count: 0, page: 1, num_pages: 1, results: [] }),
       [`/transaction/address/${derived.vaultAddress}/`]: (url) =>
         new URL(url).searchParams.get('page') === '3'
@@ -235,5 +247,75 @@ describe('findLegacyRecovery reads the whole vault history', () => {
       .filter((c) => c.url.includes(`/transaction/address/${derived.vaultAddress}/`))
       .map((c) => new URL(c.url).searchParams.get('page'));
     expect(pages).toEqual(['1', '2', '3']);
+  });
+});
+
+describe('findLegacyRecovery on a Spyglass with the activity route', () => {
+  const walletVector = flowVectors.email[0];
+  const derived = testnet.deriveLegacyRecoveryKey({ mainPrivateKey: '00' + walletVector.privateKey });
+  const row = (address: string, overrides: Record<string, unknown> = {}) => ({
+    address,
+    has_transactions: false,
+    has_balance: false,
+    vault_activated: false,
+    register_recovery_addresses: [],
+    ...overrides,
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  test('one request answers it, and a Register() naming the recovery address counts', async () => {
+    const { calls } = installFetch({
+      '/addresses/activity/': () => ({
+        results: [
+          row(derived.address),
+          row(derived.vaultAddress, {
+            has_transactions: true,
+            vault_activated: true,
+            register_recovery_addresses: ['xSomeoneElse', derived.address],
+          }),
+        ],
+      }),
+    });
+    const result = await new VfxClient('testnet').findLegacyRecovery({
+      mainPrivateKey: '00' + walletVector.privateKey,
+    });
+    expect(calls).toHaveLength(1);
+    expect(new URL(calls[0].url).searchParams.get('addresses')).toBe(`${derived.address},${derived.vaultAddress}`);
+    expect(result).toMatchObject({
+      hasActivity: true,
+      lookedUpWith: 'activity-route',
+      summary: { vaultActivated: true, vaultHasTransactions: true, registeredWithThisRecovery: true },
+    });
+  });
+
+  test('nothing anywhere: hasActivity false', async () => {
+    installFetch({
+      '/addresses/activity/': () => ({ results: [row(derived.address), row(derived.vaultAddress)] }),
+    });
+    const result = await new VfxClient('testnet').findLegacyRecovery({
+      mainPrivateKey: '00' + walletVector.privateKey,
+    });
+    expect(result.hasActivity).toBe(false);
+    expect(Object.values(result.summary).every((seen) => seen === false)).toBe(true);
+  });
+
+  test('another vault registered elsewhere does not count as this recovery', async () => {
+    installFetch({
+      '/addresses/activity/': () => ({
+        results: [row(derived.address), row(derived.vaultAddress, { register_recovery_addresses: ['xSomeoneElse'] })],
+      }),
+    });
+    const result = await new VfxClient('testnet').findLegacyRecovery({
+      mainPrivateKey: '00' + walletVector.privateKey,
+    });
+    expect(result.summary.registeredWithThisRecovery).toBe(false);
+  });
+
+  test('a failure of the activity route other than 404 throws, never "no activity"', async () => {
+    installFetch({ '/addresses/activity/': () => new Response('down', { status: 502 }) });
+    await expect(
+      new VfxClient('testnet').findLegacyRecovery({ mainPrivateKey: '00' + walletVector.privateKey }),
+    ).rejects.toMatchObject({ name: 'VfxApiError', status: 502 });
   });
 });

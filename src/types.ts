@@ -424,15 +424,21 @@ export interface LegacyRecoveryLookup {
   vaultAddress: string;
   /** True when Spyglass shows anything for the recovery address or the vault that uses it. */
   hasActivity: boolean;
+  /** What was seen; `hasActivity` is true when any of it is. */
   summary: {
-    recoveryBalance: number;
-    recoveryTransactionCount: number;
-    vaultBalance: number;
-    vaultTransactionCount: number;
+    recoveryHasBalance: boolean;
+    recoveryHasTransactions: boolean;
+    vaultHasBalance: boolean;
+    vaultHasTransactions: boolean;
     vaultActivated: boolean;
     /** A Register() from the vault names this recovery address. */
     registeredWithThisRecovery: boolean;
   };
+  /**
+   * How Spyglass was read: its `/addresses/activity/` route in one request,
+   * or, on a Spyglass that predates it, the address details and histories.
+   */
+  lookedUpWith: 'activity-route' | 'history';
   /** The derived recovery key, only when asked for with `includeKey: true`. */
   recoveryKey?: Keypair;
 }
@@ -449,4 +455,59 @@ export interface ReserveKeypair extends Keypair {
   recoveryPublicKey: string;
   recoveryAddress: string;
   restoreCode: string;
+}
+
+// Spyglass wallet day-1 reads (Spyglass PR 78). Each is opt-in: an older
+// Spyglass answers 404, and the SDK method resolves to null.
+
+/** Whether an address was ever used, from `/addresses/activity/`. */
+export interface AddressActivity {
+  address: string;
+  /** A transaction to or from it is indexed. */
+  hasTransactions: boolean;
+  /** Its indexed available balance is above zero. */
+  hasBalance: boolean;
+  /** It sent a Register(): it is an activated vault. */
+  vaultActivated: boolean;
+  /** The RecoveryAddress of each Register() it sent, oldest first. */
+  registerRecoveryAddresses: string[];
+}
+
+/** One page of `listAddressActivity`, newest first. */
+export interface AddressActivityPage {
+  results: Transaction[];
+  /** Pass as `before` for the next page; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** `/adnr/available/<domain>/`: whether a name can be bought, as of `indexedHeight`. */
+export interface DomainAvailability {
+  domain: string;
+  available: boolean;
+  indexedHeight: number;
+}
+
+/** The NFT of a vBTC V2 token in the `view: 'wallet'` shape: only what a wallet lists. */
+export interface VbtcV2WalletNft {
+  identifier: string;
+  name: string;
+  minted_at: string;
+  mint_transaction: unknown;
+}
+
+/** vBTC V2 reads: `view: 'wallet'` trims each token's `nft` to VbtcV2WalletNft. */
+export interface VbtcV2ReadOptions {
+  view?: 'wallet';
+}
+
+/**
+ * The relay's `block_addresses` socket event (notifications[-testnet]
+ * .verifiedx.io), sent after each `new_block` near the tip: every address
+ * the block touched, sorted. A wallet refetches only when one of its own is
+ * listed. Best effort: an address can be missing; keep a slow poll.
+ */
+export interface BlockAddressesEvent {
+  type: 'block_addresses';
+  data: { height: number; hash: string; affected_addresses: string[] };
+  message: string;
 }

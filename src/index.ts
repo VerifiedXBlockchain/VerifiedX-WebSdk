@@ -107,6 +107,18 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+// Spyglass wallet reads and the relay's block_addresses event
+export { isBlockAddressesEvent, blockAddressesTouching } from './services/socket-events';
+export { ADDRESS_ACTIVITY_MAX } from './client/address-api-client';
+export type {
+  AddressActivity,
+  AddressActivityPage,
+  BlockAddressesEvent,
+  DomainAvailability,
+  VbtcV2ReadOptions,
+  VbtcV2WalletNft,
+} from './types';
+
 // NFTs (VFX10)
 export { NftBulkMintError } from './client/vfx-client';
 export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
