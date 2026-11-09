@@ -142,7 +142,39 @@ export interface VbtcWithdrawalRequest {
   completion_transaction_hash: string | null;
   created_at: string;
   completed_at: string | null;
+  /**
+   * When FROST produced a broadcastable Bitcoin transaction for this request
+   * (the signed hex itself is withheld). Set means signing already ran.
+   * Absent from Spyglass deployments older than the release that added it.
+   */
+  signed_at?: string | null;
 }
+
+/**
+ * A moment in `completeWithdrawal` worth persisting, so a closed tab can
+ * finish the withdrawal later: resume `frost-job-started` with
+ * `resumeJobId`, and finish `btc-broadcast` with `recordWithdrawalCompletion`
+ * (never by signing again).
+ */
+export type VbtcWithdrawalCheckpoint =
+  | {
+      kind: 'frost-job-started';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      amount: number;
+      btcAddress: string;
+    }
+  | {
+      kind: 'btc-broadcast';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      btcTransactionHash: string;
+      signedBtcTxHex: string;
+      amount: number;
+      btcAddress: string;
+    };
 
 export interface VbtcTransfer {
   id: number;
@@ -315,7 +347,9 @@ export type VbtcProgressPhase =
   | 'frost_complete'
   | 'btc_broadcast'
   | 'completion_recorded'
-  | 'watched_polling';
+  | 'watched_polling'
+  /** An `onCheckpoint` hook threw; the withdrawal carries on. */
+  | 'checkpoint_failed';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;
