@@ -162,3 +162,52 @@ describe('throwOnRefusal and a signer that refuses to sign', () => {
     expect(calls.some((c) => c.url.includes('/transfer/send/'))).toBe(false);
   });
 });
+
+describe('node_message on prepared vBTC sends (Spyglass 78)', () => {
+  const transfer = { scIdentifier: 'sc-1', fromAddress: keypair.address, toAddress: RECIPIENT, amount: 1, privateKey };
+  const refusedBy = (nodeMessage: string | null) =>
+    new Response(JSON.stringify({ success: false, message: 'Failed to send', raw: null, node_message: nodeMessage }), {
+      status: 500,
+    });
+
+  test('with throwOnRefusal, a 500 carrying the node reason is a definite TransactionRefusedError', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy('Insufficient vBTC balance'),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionRefusedError',
+      hash: 'PREPARED_HASH',
+      reason: 'Insufficient vBTC balance',
+    });
+  });
+
+  test('no node reason (the node did not answer), or no throwOnRefusal: still TransactionDispatchError', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy(null),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionDispatchError',
+      hash: 'PREPARED_HASH',
+    });
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => refusedBy('Insufficient vBTC balance'),
+    });
+    await expect(new VfxClient('testnet').transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionDispatchError',
+    });
+  });
+
+  test('a success: false body prefers node_message as the reason', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: false, message: 'Failed', node_message: 'Bad nonce' }),
+    });
+    await expect(new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc(transfer)).rejects.toMatchObject({
+      name: 'TransactionRefusedError',
+      reason: 'Bad nonce',
+    });
+  });
+});
