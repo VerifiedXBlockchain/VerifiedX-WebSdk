@@ -33,6 +33,32 @@ describe('recommendedFeeRates', () => {
   });
 });
 
+describe('Greptile review fixes', () => {
+  test('a stalled fee API yields the fallback after the timeout', async () => {
+    // A server that accepts the request and never answers: fetch only ends
+    // when the SDK aborts it.
+    global.fetch = jest.fn(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))),
+    ) as unknown as typeof fetch;
+    const started = Date.now();
+    const rates = await btc.recommendedFeeRates('mainnet', { timeoutMs: 50 });
+    expect(rates.isEstimate).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  test('a complete table with a negative or zero tier is refused', async () => {
+    installFetch({
+      '/v1/fees/recommended': () => ({ fastestFee: 3, halfHourFee: 2, hourFee: 1, economyFee: -1, minimumFee: 1 }),
+    });
+    expect(await btc.recommendedFeeRates('mainnet')).toEqual({ ...btc.BTC_FALLBACK_FEE_RATES, isEstimate: true });
+    installFetch({
+      '/v1/fees/recommended': () => ({ fastestFee: 3, halfHourFee: 2, hourFee: 1, economyFee: 1, minimumFee: 0 }),
+    });
+    expect((await btc.recommendedFeeRates('mainnet')).isEstimate).toBe(true);
+  });
+});
+
 describe('devnet', () => {
   test('a testnet client pointed at the devnet Spyglass reads from it', async () => {
     const { calls } = installFetch({ '/addresses/': () => ({ address: 'xA', balance: 0, balance_total: 0 }) });

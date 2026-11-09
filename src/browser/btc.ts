@@ -43,5 +43,10 @@ export class BrowserBtcClient extends OriginalBtcClient {
 export { BrowserBtcClient as BtcClient };
 export default BrowserBtcClient;
 
-export { recommendedFeeRates, BTC_FALLBACK_FEE_RATES, BTC_TESTNET_FEE_RATE_FLOORS } from '../btc/fee-rates';
+export {
+  recommendedFeeRates,
+  BTC_FALLBACK_FEE_RATES,
+  BTC_TESTNET_FEE_RATE_FLOORS,
+  DEFAULT_FEE_RATES_TIMEOUT_MS,
+} from '../btc/fee-rates';
 export type { RecommendedFeeRates } from '../btc/fee-rates';
