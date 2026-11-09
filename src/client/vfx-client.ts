@@ -335,6 +335,9 @@ interface ApprovedFlow {
   flowId: string;
 }
 
+/** Concurrent transaction lookups in getLiveResumableWithdrawals. */
+const WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY = 4;
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
@@ -850,13 +853,17 @@ export class VfxClient {
     const currentBlockHeight = await this.blockApiClient.getLatestHeight().catch(() => null);
     const requestBlockHeights: Record<string, number> = {};
     if (currentBlockHeight !== null) {
-      for (const request of candidates) {
-        const hash = request.request_transaction_hash;
-        if (!hash) continue;
-        const tx = await this.transactionHeightApiClient
-          .makeJsonRequest(`/${encodeURIComponent(hash)}/`)
-          .catch(() => null);
-        if (typeof tx?.height === 'number') requestBlockHeights[hash] = tx.height;
+      // A few lookups at a time, so one slow request does not hold up the rest.
+      const hashes = candidates.map((request) => request.request_transaction_hash).filter((hash) => !!hash);
+      for (let i = 0; i < hashes.length; i += WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY) {
+        await Promise.all(
+          hashes.slice(i, i + WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY).map(async (hash) => {
+            const tx = await this.transactionHeightApiClient
+              .makeJsonRequest(`/${encodeURIComponent(hash)}/`)
+              .catch(() => null);
+            if (typeof tx?.height === 'number') requestBlockHeights[hash] = tx.height;
+          }),
+        );
       }
     }
     return liveResumableWithdrawalsFor(token, address, { currentBlockHeight, requestBlockHeights });

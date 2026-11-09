@@ -101,3 +101,25 @@ describe('getLiveResumableWithdrawals', () => {
     expect(live.map((r) => r.request_transaction_hash)).toEqual(['FRESH', 'UNKNOWN']);
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('height lookups run concurrently, so one slow lookup does not delay the others', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(NOW);
+    const rows = ['A', 'B', 'C'].map((hash) => row({ request_transaction_hash: hash }));
+    let inFlight = 0;
+    let peak = 0;
+    installFetch({
+      '/blocks/': () => ({ count: 1, page: 1, num_pages: 1, results: [{ height: 2000 }] }),
+      '/transaction/': async (url: string) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inFlight -= 1;
+        return { hash: url, height: 1990 };
+      },
+    } as never);
+    const live = await new VfxClient('testnet').getLiveResumableWithdrawals(token(rows), 'xMe');
+    expect(live).toHaveLength(3);
+    expect(peak).toBe(3);
+  });
+});
