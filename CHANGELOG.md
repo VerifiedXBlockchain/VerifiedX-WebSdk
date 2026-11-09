@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Reads on `VfxClient`**: `getTransaction(hash)`, `listTransactionsForAddresses(addresses, page, limit)` (`/transaction/addresses/{a,b}/`), `getLatestBlock`, `getLatestBlockHeight`, `getBlock(height)`, `getBlockByHash`, `getCoinPrice(coin)` and `getCoinPriceHistory(coin)` (`/cmc-price/`), and `listListedNftIds(owner)`. Single-item reads return null on a 404 and throw on any other failure. New types `VfxBlock`, `CoinPrice`, `CoinPricePoint`.
+
 ## Unreleased (9.1.0)
 
 ### Added

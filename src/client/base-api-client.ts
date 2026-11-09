@@ -61,6 +61,18 @@ export interface IBaseApiClientOptions {
   timeoutMs?: number;
 }
 
+/** The result of `request`, or null when it failed with HTTP 404. Any other failure is rethrown. */
+export async function orNullOn404<T>(request: () => Promise<T>): Promise<T | null> {
+  try {
+    return await request();
+  } catch (error) {
+    if (error instanceof VfxApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export class BaseApiClient {
   private network: Network;
   private basePath: string;

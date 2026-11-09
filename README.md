@@ -358,6 +358,16 @@ await client.recoverReserveAccount(vaultSigner, { recoverySigner });
 Pass the `ReserveKeypair` object itself when signing: its private key on its
 own resolves to the key's ordinary address, not the vault.
 
+#### Chain and price reads
+
+```typescript
+await client.getTransaction(hash);                              // null when Spyglass has none
+await client.listTransactionsForAddresses([main, vault], 1, 25); // one list for several addresses
+await client.getLatestBlock();  await client.getBlock(height);  await client.getBlockByHash(hash);
+await client.getCoinPrice('vfx');  await client.getCoinPriceHistory('btc'); // USDT, newest first
+await client.listListedNftIds(ownerAddress);                    // NFTs listed on the shop
+```
+
 #### Address Operations
 
 ```typescript
