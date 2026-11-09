@@ -30,8 +30,10 @@ async function check(label, sdk) {
     const sealed = await sdk.encryptVfxShh(client.publicFromPrivate(KEY), 'smoke');
     if ((await sdk.decryptVfxShh(sealed, KEY)) !== 'smoke') throw new Error(`${label}: VFX-SHH round trip failed`);
   }
-  if (sdk.BtcClient) {
-    new sdk.BtcClient('testnet');
+  // The Node entry exports the Bitcoin client under `btc`.
+  const btcAddress = new sdk.btc.BtcClient('testnet').addressFromPrivate(KEY).address;
+  if (typeof btcAddress !== 'string' || !btcAddress.startsWith('tb1')) {
+    throw new Error(`${label}: btc.BtcClient derived ${btcAddress}, expected a tb1 address`);
   }
   console.log(`${label}: ok`);
 }
