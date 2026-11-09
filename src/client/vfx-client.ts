@@ -3861,7 +3861,10 @@ export class VfxClient {
     flowId: string,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = await this.signing(() => signer.sign(hash, this.preparedSigningRequest(prepared, flowId)));
+    // Built outside the signing step: a hash mismatch it finds stays a
+    // TransactionHashMismatchError, never a SignerError.
+    const request = this.preparedSigningRequest(prepared, flowId);
+    const signature = await this.signing(() => signer.sign(hash, request));
     // The prepare endpoint chose this transaction's nonce, so the session's
     // cached next nonce for the sender can no longer be trusted, whatever the
     // send's outcome.
