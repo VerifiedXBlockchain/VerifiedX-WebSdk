@@ -1,7 +1,8 @@
 import dotenv from 'dotenv';
 import { VfxClient } from '../../index';
 import { Network } from '../../constants';
-import { nftCurrentStage, nftIsMedialess } from '../../client/nft-api-client';
+import { nftCurrentStage, nftEvolveRefusal, nftEvolveStages, nftIsMedialess } from '../../client/nft-api-client';
+import { encryptVfxShh, formatVfxShhMessage } from '../../services/vfx-shh';
 
 dotenv.config({ path: 'test.env' });
 
@@ -109,5 +110,43 @@ async function waitFor<T>(label: string, read: () => Promise<T>, done: (value: T
     )) as { results: Array<{ data: string; height: number }> };
     const functions = history.results.sort((a, b) => a.height - b.height).map((tx) => JSON.parse(tx.data)[0].Function);
     expect(functions).toEqual(['Mint()', 'ChangeEvolveStateSpecific()', 'Transfer()', 'Burn()']);
+  });
+
+  test('time evolve + VFX-SHH message: the chain keeps the dates, the recipient reads the message', async () => {
+    const minter = account(privateKey as string);
+    const reader = account(client.generatePrivateKey());
+    const secret = `gm from the SDK ${Date.now()}`;
+    const sealed = formatVfxShhMessage(reader.address, await encryptVfxShh(reader.publicKey, secret));
+    const later = new Date(Date.now() + 7 * 24 * 3600_000);
+    const muchLater = new Date(Date.now() + 14 * 24 * 3600_000);
+    const minted = await client.mintNft(minter, {
+      name: `SDK time evolve ${Date.now()}`,
+      description: `A sealed note\n${sealed}`,
+      minterName: 'vfx-web-sdk',
+      evolve: {
+        type: 'time',
+        phases: [
+          { name: 'Week one', description: 'one', evolveDate: later },
+          { name: 'Week two', description: 'two', evolveDate: muchLater },
+        ],
+      },
+    });
+    const scIdentifier = minted?.scIdentifier as string;
+    const nft = await waitFor(
+      'the mint on Spyglass',
+      () => client.getNft(scIdentifier),
+      (n) => n.owner_address === minter.address,
+    );
+    const stages = nftEvolveStages(nft);
+    expect(stages.map((stage) => [stage.EvolutionState, Date.parse(String(stage.EvolveDate))])).toEqual([
+      [1, later.getTime()],
+      [2, muchLater.getTime()],
+    ]);
+    expect(nftEvolveRefusal(nft, minter.address, 2)).toBeNull();
+    expect(nftEvolveRefusal(nft, reader.address, 1)).toMatch(/Only the minter/);
+    expect(await client.decryptNftMessage(reader, nft)).toEqual({ recipientAddress: reader.address, message: secret });
+    await expect(client.decryptNftMessage(minter, nft)).rejects.toThrow(/for /);
+    // Never transferred, so no beacon holds anything for it.
+    expect((await client.pullNftBeaconAssets(minter, scIdentifier)).pulled).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { Network } from '../constants';
+import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import { PaginatedResponse } from '../types';
 import { IApiClientOptions } from './address-api-client';
 import { BaseApiClient } from './base-api-client';
@@ -145,4 +145,43 @@ export function nftIsMedialess(
     return !!stageAsset && !(stageAsset.Name === 'default' && Number(stageAsset.FileSize ?? 0) === 0);
   });
   return name === 'default' && size === 0 && !hasMoreMedia && !stageHasMedia;
+}
+
+/**
+ * Why the node would refuse `address` moving `nft` to `stage` with
+ * evolveNft, or null when Core's rules pass. Mirrors Core (testnet ecd8b34a,
+ * main e814c14b):
+ * - TransactionValidatorService.cs, case "ChangeEvolveStateSpecific()": the
+ *   sender is not a reserve (xRBX) account and is the contract's minter (the
+ *   owner cannot evolve it), and the transaction goes to the current owner.
+ * - LedgerIntegrityRules.EvolutionNeedsAnEvolvingContract (from
+ *   EvolveRulesHeight 7,575,250): the contract has the Evolving feature.
+ * - EvolveSourceGenerator.cs ChangeEvolveStateSpecific: 0 <= stage <= the
+ *   number of stages.
+ * The node also refuses a contract that is locked (mid-sale, or a vault
+ * transfer still waiting); Spyglass does not report the lock, so this check
+ * cannot see it.
+ */
+export function nftEvolveRefusal(
+  nft: Pick<VfxNft, 'smart_contract_data' | 'minter_address' | 'is_burned'>,
+  address: string,
+  stage?: number,
+): string | null {
+  if (nft.is_burned) {
+    return 'The NFT is burned.';
+  }
+  if (address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+    return 'A reserve account may not evolve or devolve a smart contract.';
+  }
+  if (address !== nft.minter_address) {
+    return `Only the minter (${nft.minter_address}) can evolve or devolve this NFT.`;
+  }
+  const stages = nftEvolveStages(nft);
+  if (stages.length === 0) {
+    return 'Only a contract with the Evolving feature can be evolved or devolved.';
+  }
+  if (stage !== undefined && !(Number.isInteger(stage) && stage >= 0 && stage <= stages.length)) {
+    return `Stage ${stage} is out of range: 0 (the base) to ${stages.length}.`;
+  }
+  return null;
 }

@@ -135,8 +135,16 @@ export {
 } from './services/vbtc-withdrawal-state';
 export type { WatchedWithdrawalRowState } from './services/vbtc-withdrawal-state';
 // NFTs (VFX10)
+export {
+  nftContract,
+  nftEvolveStages,
+  nftCurrentStage,
+  nftIsMedialess,
+  nftEvolveRefusal,
+} from './client/nft-api-client';
+export { parseVfxShhMessage, formatVfxShhMessage, decryptVfxShh, encryptVfxShh } from './services/vfx-shh';
+export type { VfxShhMessage } from './services/vfx-shh';
 export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
-export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {
   nftMintPayload,
