@@ -13,6 +13,7 @@ import {
 import {
   bytesToHex,
   hexToBytes,
+  hmacSha256,
   publicKeyFromPrivate,
   ripemd160,
   sha256,
@@ -37,12 +38,7 @@ function utf8Bytes(text: string): Uint8Array {
   return Uint8Array.from(Buffer.from(text, 'utf-8'));
 }
 
-function hmacSha256(key: Uint8Array, data: Uint8Array): Uint8Array {
-  const mac = CryptoJS.HmacSHA256(byteArrayToWordArray(data), byteArrayToWordArray(key));
-  return Uint8Array.from(wordArrayToByteArray(mac));
-}
-
-/** RFC 5869 HKDF with SHA-256 (crypto-js, so it runs in every build). */
+/** RFC 5869 HKDF with SHA-256 (@noble/hashes' HMAC, so it runs in every build). */
 export function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Uint8Array {
   const prk = hmacSha256(salt.length > 0 ? salt : new Uint8Array(32), ikm);
   const out: number[] = [];
@@ -305,7 +301,7 @@ export class KeypairService {
     for (let counter = 0; counter < 16; counter++) {
       const info = counter === 0 ? PASSKEY_RECOVERY_INFO : `${PASSKEY_RECOVERY_INFO}/${counter}`;
       const okm = hkdfSha256(ikm, utf8Bytes(PASSKEY_RECOVERY_SALT), utf8Bytes(info), 32);
-      if (isValidPrivateKey(byteArrayToWordArray(okm))) {
+      if (isValidPrivateKey(okm)) {
         const hex = Buffer.from(okm).toString('hex');
         return {
           privateKey: '00' + hex,
