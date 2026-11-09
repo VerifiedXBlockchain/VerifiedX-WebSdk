@@ -143,4 +143,22 @@ describe('throwOnRefusal and a signer that refuses to sign', () => {
     ).rejects.toBeInstanceOf(SignerError);
     expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
   });
+
+  test('prepared vBTC sends: the signer error unchanged by default, SignerError with throwOnRefusal', async () => {
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: true, hash: 'PREPARED_HASH' }),
+    });
+    const transfer = { scIdentifier: 'sc-1', fromAddress: keypair.address, toAddress: RECIPIENT, amount: 1 };
+    await expect(new VfxClient('testnet').transferVbtc({ ...transfer, signer: refusingSigner })).rejects.toBe(
+      rejection,
+    );
+    const wrapped = new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc({
+      ...transfer,
+      signer: refusingSigner,
+    });
+    await expect(wrapped).rejects.toBeInstanceOf(SignerError);
+    await expect(wrapped).rejects.toMatchObject({ cause: rejection });
+    expect(calls.some((c) => c.url.includes('/transfer/send/'))).toBe(false);
+  });
 });

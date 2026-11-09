@@ -19,6 +19,7 @@ import {
   RawTransactionService,
   TransactionDispatchError,
   TransactionRefusedError,
+  SignerError,
 } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
@@ -318,7 +319,9 @@ export interface VfxClientOptions {
    * cancel, completion record) too: an explicit refusal there throws
    * TransactionRefusedError with the prepared hash, instead of a plain Error.
    * A signer that throws instead of signing a send (a rejected extension
-   * prompt) then surfaces as SignerError, with the signer's error as `cause`.
+   * prompt) then surfaces as SignerError, with the signer's error as `cause`,
+   * from every send: the transaction sends, the prepared vBTC sends, and the
+   * ceremony, FROST and recovery signatures of the vBTC and vault flows.
    */
   throwOnRefusal?: boolean;
 }
@@ -1033,26 +1036,28 @@ export class VfxClient {
       sessionId: ceremonyPrep.session_id,
       ownerAddress: params.ownerAddress,
     };
-    const [startSignature, shareSignature] = await signMessages(signer, [
-      {
-        message: ceremonyPrep.messages_to_sign.start_message,
-        request: {
-          ...ceremony,
-          step: 'start',
+    const [startSignature, shareSignature] = await this.signing(() =>
+      signMessages(signer, [
+        {
           message: ceremonyPrep.messages_to_sign.start_message,
-          timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          request: {
+            ...ceremony,
+            step: 'start',
+            message: ceremonyPrep.messages_to_sign.start_message,
+            timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          },
         },
-      },
-      {
-        message: ceremonyPrep.messages_to_sign.share_distribution_message,
-        request: {
-          ...ceremony,
-          step: 'share',
+        {
           message: ceremonyPrep.messages_to_sign.share_distribution_message,
-          timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          request: {
+            ...ceremony,
+            step: 'share',
+            message: ceremonyPrep.messages_to_sign.share_distribution_message,
+            timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          },
         },
-      },
-    ]);
+      ]),
+    );
 
     onProgress({
       phase: 'ceremony_started',
@@ -1095,18 +1100,20 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = await signer.sign(ownershipMessage, {
-      kind: 'vbtc-ownership',
-      flowId,
-      message: ownershipMessage,
-      ownerAddress: params.ownerAddress,
-      name: params.name,
-      description: params.description,
-      ticker: params.ticker,
-      ceremonyId: ceremonyPrep.ceremony_id,
-      timestamp,
-      uniqueId,
-    });
+    const ownerSignature = await this.signing(() =>
+      signer.sign(ownershipMessage, {
+        kind: 'vbtc-ownership',
+        flowId,
+        message: ownershipMessage,
+        ownerAddress: params.ownerAddress,
+        name: params.name,
+        description: params.description,
+        ticker: params.ticker,
+        ceremonyId: ceremonyPrep.ceremony_id,
+        timestamp,
+        uniqueId,
+      }),
+    );
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -1323,32 +1330,34 @@ export class VfxClient {
       sessionId: frostPrep.SessionId,
     };
     const extraInputs = (frostPrep.StartMessages ?? []).filter((entry) => entry.InputIndex > 0);
-    const [frostStartSig, frostShareSig, ...extraSignatures] = await signMessages(signer, [
-      {
-        message: frostPrep.StartMessage,
-        request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
-      },
-      {
-        message: frostPrep.ShareDistributionMessage,
-        request: {
-          ...frost,
-          step: 'share',
+    const [frostStartSig, frostShareSig, ...extraSignatures] = await this.signing(() =>
+      signMessages(signer, [
+        {
+          message: frostPrep.StartMessage,
+          request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
+        },
+        {
           message: frostPrep.ShareDistributionMessage,
-          timestamp: frostPrep.ShareDistributionTimestamp,
+          request: {
+            ...frost,
+            step: 'share',
+            message: frostPrep.ShareDistributionMessage,
+            timestamp: frostPrep.ShareDistributionTimestamp,
+          },
         },
-      },
-      ...extraInputs.map((entry) => ({
-        message: entry.Message,
-        request: {
-          ...frost,
-          step: 'input' as const,
+        ...extraInputs.map((entry) => ({
           message: entry.Message,
-          sessionId: entry.SessionId ?? frostPrep.SessionId,
-          timestamp: entry.Timestamp,
-          inputIndex: entry.InputIndex,
-        },
-      })),
-    ]);
+          request: {
+            ...frost,
+            step: 'input' as const,
+            message: entry.Message,
+            sessionId: entry.SessionId ?? frostPrep.SessionId,
+            timestamp: entry.Timestamp,
+            inputIndex: entry.InputIndex,
+          },
+        })),
+      ]),
+    );
     const extraStartSignatures = extraInputs.map((entry, index) => ({
       input_index: entry.InputIndex,
       signature: extraSignatures[index],
@@ -2279,14 +2288,16 @@ export class VfxClient {
 
     const signatureTime = Math.round(Date.now() / 1000);
     const recoveryMessage = `${signatureTime}${recoveryAddress}`;
-    const recoverySigScript = await recovery.sign(recoveryMessage, {
-      kind: 'reserve-recovery',
-      flowId,
-      message: recoveryMessage,
-      reserveAddress: resolved.address,
-      recoveryAddress,
-      signatureTime,
-    });
+    const recoverySigScript = await this.signing(() =>
+      recovery.sign(recoveryMessage, {
+        kind: 'reserve-recovery',
+        flowId,
+        message: recoveryMessage,
+        reserveAddress: resolved.address,
+        recoveryAddress,
+        signatureTime,
+      }),
+    );
 
     return this.sendReserveTx(
       resolved,
@@ -2626,6 +2637,19 @@ export class VfxClient {
     throw new Error(`${label} requires a privateKey or a signer`);
   }
 
+  /**
+   * Run a signing step of a send. A signer that throws instead of signing
+   * passes its error through unchanged, as before; with throwOnRefusal it
+   * arrives as SignerError, as from every RawTransactionService send.
+   */
+  private async signing<T>(sign: () => Promise<T>): Promise<T> {
+    try {
+      return await sign();
+    } catch (error) {
+      throw this.throwOnRefusal && !(error instanceof SignerError) ? new SignerError(error) : error;
+    }
+  }
+
   private async signAndSend(
     prepared: PreparedTransactionResponse,
     signer: ResolvedSigner,
@@ -2633,7 +2657,7 @@ export class VfxClient {
     flowId: string,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = await signer.sign(hash, this.preparedSigningRequest(prepared, flowId));
+    const signature = await this.signing(() => signer.sign(hash, this.preparedSigningRequest(prepared, flowId)));
     // The prepare endpoint chose this transaction's nonce, so the session's
     // cached next nonce for the sender can no longer be trusted, whatever the
     // send's outcome.
