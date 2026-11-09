@@ -114,7 +114,7 @@ export {
   reserveRestoreCode,
 } from './services/vault-helpers';
 // NFTs (VFX10)
-export { NftBulkMintError } from './client/vfx-client';
+export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
 export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {

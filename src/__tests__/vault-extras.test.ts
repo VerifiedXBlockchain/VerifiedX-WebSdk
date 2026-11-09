@@ -6,6 +6,7 @@ import {
   vaultKeyFromBackupCode,
 } from '../index';
 import KeypairService from '../services/keypair-service';
+import { TransactionDispatchError } from '../services/raw-transaction-service';
 import { Network } from '../constants';
 import { HashableTransaction, transactionHash } from '../services/transaction-hash';
 import { CapturedCall, installFetch, textResponse } from './helpers/mock-fetch';
@@ -178,9 +179,28 @@ describe('fundAndRegisterVault', () => {
     const client = new VfxClient('testnet');
     const register = jest.fn().mockRejectedValue(new Error('node said no'));
     client.registerReserveAccount = register;
-    const funding = client.fundAndRegisterVault(funder, vault, { recoveryAddress: recovery.address, pollIntervalMs: 1 });
+    const funding = client.fundAndRegisterVault(funder, vault, {
+      recoveryAddress: recovery.address,
+      pollIntervalMs: 1,
+    });
     await expect(funding).rejects.toThrow(/funding [0-9a-f]+ landed but the registration failed.*node said no/);
+    await expect(funding).rejects.toMatchObject({ name: 'VaultRegistrationError', fundingHash: sends(calls)[0].Hash });
     expect(register).toHaveBeenCalledTimes(1);
+  });
+
+  test('a registration that may have reached the node stays a TransactionDispatchError with its hash', async () => {
+    const { calls } = install([5]);
+    const client = new VfxClient('testnet');
+    client.registerReserveAccount = jest
+      .fn()
+      .mockRejectedValue(new TransactionDispatchError('ab'.repeat(32), 'timeout'));
+    const funding = client.fundAndRegisterVault(funder, vault, {
+      recoveryAddress: recovery.address,
+      pollIntervalMs: 1,
+    });
+    await expect(funding).rejects.toBeInstanceOf(TransactionDispatchError);
+    await expect(funding).rejects.toMatchObject({ hash: 'ab'.repeat(32) });
+    await expect(funding).rejects.toThrow(/funding [0-9a-f]+ landed; registration: Transaction abab/);
     expect(sends(calls)).toHaveLength(1);
   });
 });
