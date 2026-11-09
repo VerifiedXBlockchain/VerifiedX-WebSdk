@@ -69,10 +69,12 @@ export type {
   DeployTokenParams,
   DeployTokenResult,
   ReserveKeypair,
+  VfxBlock,
   VaultKeypair,
   LegacyVaultSource,
   LegacyRecoveryLookup,
 } from './types';
+export type { CoinPrice, CoinPricePoint, PricedCoin } from './client/price-api-client';
 
 // External signing (HSM / MPC)
 export type {
