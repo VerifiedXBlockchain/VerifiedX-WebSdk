@@ -1,17 +1,15 @@
 # Changelog
 
-## Unreleased
+## 9.1.0 (unreleased)
 
 ### Added
 
-- **Vault extras**: `fundAndRegisterVault(funder, vault, { recoveryAddress })` funds 5 VFX, waits for it, then registers (the Flutter wallet's fund-then-activate); `canCallBackReserveTransaction(tx, vault, { vaultHistory })` (the Flutter call-back rules); `vaultBackupCode` / `vaultKeyFromBackupCode` (a checksummed backup of a vault key alone) and `reserveRestoreCode(vaultKey, recoveryKey)` (the CLI/Flutter restore code). A restore code with more than two parts is read like Core reads it.
-
-### Changed (vault API)
-
-- `unlockHours` below 24 is raised to 24, as the Flutter wallet does, instead of throwing.
-
+- **Signing context for external signers.** `Signer.signDigest(digestHex, request?)` now receives a typed `SigningRequest` (`transaction`, `vbtc-ceremony`, `vbtc-ownership`, `frost-withdrawal`, `reserve-recovery`, `message`) with the exact signed `message` and a `flowId` per user action. Optional `signBatch(items)` signs one action's messages together; optional `approve(intent)` runs before anything time-sensitive is built and cancels the action when it throws. One-argument signers are unchanged.
+- **Client-side transaction building.** `VfxClient` and `RawTransactionService` take `hashMode: 'server' | 'both' | 'local'` and `preflight`. `transactionHash`, `transactionHashPreimage`, `hashPreimage` and `localTransactionFee` port Core's hash and fee; pinned against the live testnet `/raw/hash` (81 vectors).
+- **Sign in with a Bitcoin key**: `privateKeyFromBtcKey(hexOrWif)` gives the VFX key the Flutter web wallet signs in with for an imported Bitcoin key (first and last 16 characters of the key text, as typed, seeding `privateKeyFromSeedString`), on `KeypairService`, `VfxClient` and the browser build, which also gain `privateKeyFromSeedString`. Pinned against the wallet's keygen-v3.js (6 vectors).
+- **`client.signMessage(signerOrKeypair, message)`**, the signer form of `getSignature`.
+- **Web wallet sign-in helpers**: `normalizeRecoveryPhrase`, `canonicalPrivateKeyHex`, `derivationTextCandidates`, `walletDerivationText`, `btcCredentialsFromDerivationText`, `btcKeypairFromDerivationText` and `reserveKeypairFromDerivationText`, pinned against the Flutter wallet's own code (151 vectors).
 - **Spend from every address type of a key.** `BtcClient.createTransaction` / `sendBtc` take `options.addressType`: `'p2wpkh'` (default, unchanged), `'p2pkh'`, `'p2sh-p2wpkh'`, `'p2tr'` (the bech32m address the SDK and Flutter wallet show, whose output key is the untweaked key) and `'p2tr-bip86'` (standard BIP 86). Change returns to the same address. A `BtcSigner` declares its type with `addressType`; `btcSignerFromWif(wif, network, addressType)`. `addressForSpendType` exposes the addresses. `buyBtcDomain` and `signBtcNameTransferAcceptance` accept a WIF as well as a hex key.
-
 - **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
 - **`btc.recommendedFeeRates(network)`**: fee tiers as the Flutter wallet shows them, with testnet floors (10/8/5/5/2 sat/vB) and a fixed fallback table marked `isEstimate` when the fee API cannot be reached. `BtcClient.getFeeRates` is unchanged.
 - **`VFX_API_BASE_URL_DEVNET`** (`https://data-devnet.verifiedx.io/api`), plus the mainnet and testnet base URLs as exports. Devnet uses the testnet address prefix, so a devnet client is `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
@@ -24,8 +22,18 @@
 - **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
 - **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
 - **Legacy vault restore, gated on activity**: `deriveLegacyRecoveryKey` (the Flutter wallet's derivation, unchanged) and `findLegacyRecovery`, which reports whether Spyglass shows the legacy vault or its recovery address in use. `listTransactionsForAddress` takes `{ strict: true }`.
+- **Vault extras**: `fundAndRegisterVault(funder, vault, { recoveryAddress })` funds 5 VFX, waits for it, then registers (the Flutter wallet's fund-then-activate); `canCallBackReserveTransaction(tx, vault, { vaultHistory })` (the Flutter call-back rules); `vaultBackupCode` / `vaultKeyFromBackupCode` (a checksummed backup of a vault key alone) and `reserveRestoreCode(vaultKey, recoveryKey)` (the CLI/Flutter restore code). A restore code with more than two parts is read like Core reads it.
 
-### Changed (breaking)
+- **Spyglass wallet reads** (opt-in, need Spyglass PR 78): `view=wallet`, cursor-paged address activity, `addressHasActivity`, name availability, a lean name lookup, and the relay's `block_addresses` event (`parseBlockAddressesEvent`, `blockAddressesTouching`).
+- `npm run pack:prerelease` packs a branch build under a prerelease version of its own.
+
+### Changed
+
+- **Default `hashMode` is `'both'`**: sends are built in the SDK and checked against `/raw/hash`, throwing `TransactionHashMismatchError` (nothing signed) on a difference. A send no longer calls `/raw/timestamp` more than once per client, `/raw/fee` or `/raw/validate-signature`. Pass `hashMode: 'server'` for the previous pipeline.
+- Prepared vBTC transactions that carry `HashPreimage` are checked against it before signing, unless `hashMode` is `'server'`.
+- `unlockHours` below 24 is raised to 24, as the Flutter wallet does, instead of throwing.
+
+### Changed (breaking, vault API only)
 
 - `registerReserveAccount(vault, { recoveryAddress })` requires the recovery address and refuses the one the legacy web-wallet scheme derives from the vault key.
 - The derived vault scheme is renamed to `restoreLegacyWebWalletVault`, `restoreLegacyWebWalletVaultFromVaultKey` and `restoreLegacyWebWalletVaultFromDerivationText` (were `reserveKeypairFromPrivateKey`, `reserveKeypairFromReservePrivateKey`, `reserveKeypairFromDerivationText`) and documented as giving no theft protection. `generateReserveKeypair` is removed; use `newVaultKeypair` plus a recovery key.
@@ -34,22 +42,7 @@
 
 - Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
 - Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
-- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
-
-## Unreleased (9.1.0)
-
-### Added
-
-- **Signing context for external signers.** `Signer.signDigest(digestHex, request?)` now receives a typed `SigningRequest` (`transaction`, `vbtc-ceremony`, `vbtc-ownership`, `frost-withdrawal`, `reserve-recovery`, `message`) with the exact signed `message` and a `flowId` per user action. Optional `signBatch(items)` signs one action's messages together; optional `approve(intent)` runs before anything time-sensitive is built and cancels the action when it throws. One-argument signers are unchanged.
-- **Client-side transaction building.** `VfxClient` and `RawTransactionService` take `hashMode: 'server' | 'both' | 'local'` and `preflight`. `transactionHash`, `transactionHashPreimage`, `hashPreimage` and `localTransactionFee` port Core's hash and fee; pinned against the live testnet `/raw/hash` (81 vectors).
-- **Sign in with a Bitcoin key**: `privateKeyFromBtcKey(hexOrWif)` gives the VFX key the Flutter web wallet signs in with for an imported Bitcoin key (first and last 16 characters of the key text, as typed, seeding `privateKeyFromSeedString`), on `KeypairService`, `VfxClient` and the browser build, which also gain `privateKeyFromSeedString`. Pinned against the wallet's keygen-v3.js (6 vectors).
-- **`client.signMessage(signerOrKeypair, message)`**, the signer form of `getSignature`.
-- **Web wallet sign-in helpers**: `normalizeRecoveryPhrase`, `canonicalPrivateKeyHex`, `derivationTextCandidates`, `walletDerivationText`, `btcCredentialsFromDerivationText`, `btcKeypairFromDerivationText` and `reserveKeypairFromDerivationText`, pinned against the Flutter wallet's own code (151 vectors).
-
-### Changed
-
-- **Default `hashMode` is `'both'`**: sends are built in the SDK and checked against `/raw/hash`, throwing `TransactionHashMismatchError` (nothing signed) on a difference. A send no longer calls `/raw/timestamp` more than once per client, `/raw/fee` or `/raw/validate-signature`. Pass `hashMode: 'server'` for the previous pipeline.
-- Prepared vBTC transactions that carry `HashPreimage` are checked against it before signing, unless `hashMode` is `'server'`.
+- A prepared vBTC withdrawal request is addressed to its requestor when Core omits `ToAddress`.
 
 ### Known
 
