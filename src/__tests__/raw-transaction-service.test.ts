@@ -29,6 +29,7 @@ function installPipeline(overrides: Record<string, (url: string, init?: RequestI
 
 function buildService(): RawTransactionService {
   return new RawTransactionService({
+    hashMode: 'server',
     network: Network.Testnet,
     keypair,
     toAddress: 'xRecipient00000000000000000000000',
@@ -106,6 +107,7 @@ describe('RawTransactionService.process', () => {
   test('throwOnRefusal surfaces the refusal as TransactionRefusedError instead of null', async () => {
     installPipeline({ '/raw/verify/': () => ({ Result: 'Failure', Message: 'bad tx' }) });
     const service = new RawTransactionService({
+      hashMode: 'server',
       network: Network.Testnet,
       keypair,
       toAddress: 'xRecipient00000000000000000000000',
@@ -185,6 +187,7 @@ describe('RawTransactionService with an external signer', () => {
   test('the signer option drives the pipeline and signs what the keypair would have', async () => {
     const { calls } = installPipeline();
     const service = new RawTransactionService({
+      hashMode: 'server',
       network: Network.Testnet,
       signer: externalSigner,
       toAddress: 'xRecipient00000000000000000000000',
@@ -205,6 +208,7 @@ describe('RawTransactionService with an external signer', () => {
     expect(
       () =>
         new RawTransactionService({
+          hashMode: 'server',
           network: Network.Testnet,
           signer: { ...externalSigner, address: 'xSomeoneElse000000000000000000000' },
           toAddress: 'xRecipient00000000000000000000000',
@@ -216,6 +220,7 @@ describe('RawTransactionService with an external signer', () => {
     expect(
       () =>
         new RawTransactionService({
+          hashMode: 'server',
           network: Network.Testnet,
           toAddress: 'xRecipient00000000000000000000000',
         }),

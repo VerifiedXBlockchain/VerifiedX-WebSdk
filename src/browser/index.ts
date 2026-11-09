@@ -66,8 +66,26 @@ export type {
 } from '../types';
 
 // External signing (HSM / MPC)
-export type { Signer, KeypairOrSigner } from '../signer';
+export type {
+  Signer,
+  KeypairOrSigner,
+  SigningRequest,
+  SigningIntent,
+  SigningBatchItem,
+  SigningTransaction,
+} from '../signer';
 export { vfxSignatureFromDer } from '../signer';
+export {
+  CORE_TX_TYPE_NAMES,
+  canHashLocally,
+  coreTxTypeName,
+  hashPreimage,
+  transactionHash,
+  transactionHashPreimage,
+} from '../services/transaction-hash';
+export type { HashableTransaction } from '../services/transaction-hash';
+export { TransactionHashMismatchError, localTransactionFee } from '../services/tx-build-session';
+export type { HashMode } from '../services/tx-build-session';
 export { verifySignature } from '../services/keypair-service';
 export { allocateVbtcInputs, vbtcMultiTransferData, VBTC_MULTI_MAX_INPUTS } from '../services/vbtc-multi';
 export {
@@ -79,6 +97,16 @@ export {
   withdrawalFeeFloorError,
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
+// Web wallet sign-in derivation (vault and Bitcoin account texts)
+export {
+  btcCredentialsFromDerivationText,
+  btcKeypairFromDerivationText,
+  canonicalPrivateKeyHex,
+  derivationTextCandidates,
+  derivationTextFromKeyText,
+  normalizeRecoveryPhrase,
+  walletDerivationText,
+} from '../services/wallet-derivation';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from '../services/vbtc-multi';
 export {
   TOKEN_BASE_ADDRESS,

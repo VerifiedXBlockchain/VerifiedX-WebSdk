@@ -158,7 +158,7 @@ describe.each(vbtcCases)('$name', ({ prepare, send, extra, run }) => {
 
   test('a lost response after the send went out throws TransactionDispatchError with the hash', async () => {
     const { calls } = install(lostResponse);
-    const error = await run(new VfxClient('testnet')).catch((e) => e);
+    const error = await run(new VfxClient('testnet', { hashMode: 'server' })).catch((e) => e);
 
     expect(error).toBeInstanceOf(TransactionDispatchError);
     expect(error).toMatchObject({ name: 'TransactionDispatchError', hash: 'PREPARED_HASH' });
@@ -171,7 +171,7 @@ describe.each(vbtcCases)('$name', ({ prepare, send, extra, run }) => {
 
   test('an error status from the send endpoint is also ambiguous', async () => {
     install(gatewayError);
-    await expect(run(new VfxClient('testnet'))).rejects.toMatchObject({
+    await expect(run(new VfxClient('testnet', { hashMode: 'server' }))).rejects.toMatchObject({
       name: 'TransactionDispatchError',
       hash: 'PREPARED_HASH',
       cause: expect.objectContaining({ name: 'VfxApiError', status: 500 }),
@@ -180,7 +180,7 @@ describe.each(vbtcCases)('$name', ({ prepare, send, extra, run }) => {
 
   test('an explicit refusal in a 200 body stays a plain error', async () => {
     install(() => ({ success: false, message: 'refused' }));
-    const error = await run(new VfxClient('testnet')).catch((e) => e);
+    const error = await run(new VfxClient('testnet', { hashMode: 'server' })).catch((e) => e);
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(TransactionDispatchError);
     expect((error as Error).message).toMatch(/:send failed/);
@@ -191,7 +191,7 @@ describe.each(vbtcCases)('$name', ({ prepare, send, extra, run }) => {
       () => ({ success: true, Hash: 'SENT' }),
       () => jsonResponse({ success: false, message: 'nope' }, 500),
     );
-    const error = await run(new VfxClient('testnet')).catch((e) => e);
+    const error = await run(new VfxClient('testnet', { hashMode: 'server' })).catch((e) => e);
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(TransactionDispatchError);
     expect(calls.some((c) => c.url.includes(send))).toBe(false);
@@ -220,7 +220,7 @@ describe('completeWithdrawal record step', () => {
       '/btc/vbtc-v2/withdraw/complete/tx/send/': lostResponse,
     });
 
-    const error = await new VfxClient('testnet')
+    const error = await new VfxClient('testnet', { hashMode: 'server' })
       .completeWithdrawal({
         scIdentifier: 'sc-1',
         requestorAddress: address,
@@ -270,7 +270,7 @@ describe('completeWithdrawal BTC broadcast', () => {
   }
 
   const withdraw = () =>
-    new VfxClient('testnet')
+    new VfxClient('testnet', { hashMode: 'server' })
       .requestWithdrawal({
         scIdentifier: 'sc-1',
         requestorAddress: address,
@@ -321,7 +321,7 @@ describe('completeWithdrawal BTC broadcast', () => {
       }),
       '/btc/broadcast/': lostResponse,
     });
-    const error = await new VfxClient('testnet')
+    const error = await new VfxClient('testnet', { hashMode: 'server' })
       .completeWithdrawal({
         scIdentifier: 'sc-1',
         requestorAddress: address,
@@ -380,7 +380,7 @@ describe('raw-transaction send paths', () => {
 
   test.each(rawCases)('$name surfaces a lost send response as TransactionDispatchError', async ({ run }) => {
     const { calls } = installFetch({ ...rawPipeline, '/raw/send/': lostResponse });
-    await expect(run(new VfxClient('testnet'))).rejects.toMatchObject({
+    await expect(run(new VfxClient('testnet', { hashMode: 'server' }))).rejects.toMatchObject({
       name: 'TransactionDispatchError',
       hash: 'RAW_HASH',
     });
@@ -389,7 +389,7 @@ describe('raw-transaction send paths', () => {
 
   test('a pre-dispatch failure is still a clean failure for transferVbtcMulti', async () => {
     const { calls } = installFetch({ ...rawPipeline, '/raw/verify/': () => ({ Result: 'Failure' }) });
-    const error = await new VfxClient('testnet')
+    const error = await new VfxClient('testnet', { hashMode: 'server' })
       .transferVbtcMulti({
         toAddress: RECIPIENT,
         totalAmount: 1,

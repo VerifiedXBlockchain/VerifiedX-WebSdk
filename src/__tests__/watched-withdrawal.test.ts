@@ -117,7 +117,7 @@ let privateKey: string;
 let requestorAddress: string;
 
 beforeEach(() => {
-  client = new VfxClient('testnet');
+  client = new VfxClient('testnet', { hashMode: 'server' });
   privateKey = client.generatePrivateKey();
   requestorAddress = client.addressFromPrivate(privateKey);
 });

@@ -67,21 +67,21 @@ afterEach(() => {
 describe('a name recipient is resolved before building', () => {
   test('sendCoin sends to the address the name resolves to', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     expect(await client.sendCoin(keypair, 'someone.vfx', 1)).toBe('TX_HASH_ABC');
     expect(hashedToAddress(calls)).toBe(NAMED);
   });
 
   test('the name is matched case-insensitively', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await client.sendCoin(keypair, 'SomeOne.VFX', 1);
     expect(hashedToAddress(calls)).toBe(NAMED);
   });
 
   test('transferToken carries the resolved address in the transaction and its data', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await client.transferToken(keypair, {
       scIdentifier: 'sc-1',
       toAddress: 'someone.vfx',
@@ -99,7 +99,7 @@ describe('a name recipient is resolved before building', () => {
     const { calls } = installPipeline({
       '/btc/vbtc-v2/transfer/prepare/': () => jsonResponse({ success: false, message: 'stop here' }),
     });
-    const client = new VfxClient('testnet');
+    const client = new VfxClient('testnet', { hashMode: 'server' });
     await expect(
       client.transferVbtc({
         scIdentifier: 'sc-1',
@@ -124,7 +124,7 @@ describe('a name recipient is resolved before building', () => {
         activated: false,
       }),
     });
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.sendCoin(keypair, 'someone.vfx', 1)).rejects.toThrow(
       /resolved to .* whose own record names newname\.vfx; the two disagree/,
     );
@@ -133,7 +133,7 @@ describe('a name recipient is resolved before building', () => {
 
   test('the cross-check reads the resolved address itself', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await client.sendCoin(keypair, 'someone.vfx', 1);
     expect(
       calls.some((call) => call.url.endsWith(`/addresses/${NAMED}`) || call.url.includes(`/addresses/${NAMED}/`)),
@@ -142,20 +142,20 @@ describe('a name recipient is resolved before building', () => {
 
   test('an unregistered name fails without building', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.sendCoin(keypair, 'ghost.vfx', 1)).rejects.toThrow(/no account holds the name ghost\.vfx/);
     expect(calls.some((call) => call.url.includes('/raw/'))).toBe(false);
   });
 
   test('a Spyglass outage fails the call rather than reading as no such name', async () => {
     installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.sendCoin(keypair, 'down.vfx', 1)).rejects.toThrow();
   });
 
   test('an address is used as given, with no lookup', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await client.sendCoin(keypair, NAMED, 1);
     expect(calls.some((call) => call.url.includes('/adnr/'))).toBe(false);
     expect(hashedToAddress(calls)).toBe(NAMED);

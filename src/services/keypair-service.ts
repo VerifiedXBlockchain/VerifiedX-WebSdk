@@ -232,8 +232,18 @@ export class KeypairService {
     if (input.startsWith('00')) {
       input = input.slice(2);
     }
+    return this.reserveKeypairFromDerivationText(input);
+  }
+
+  /**
+   * The vault the web wallet derives from a key's derivation text (see
+   * `wallet-derivation.ts`): the text is used exactly as given, so an
+   * imported key's historical forms (65 characters, unpadded) each give their
+   * own vault, as they do in the wallet.
+   */
+  public reserveKeypairFromDerivationText(derivationText: string): ReserveKeypair {
     for (let append = 0; append < RESERVE_DERIVATION_MAX_ATTEMPTS; append++) {
-      const reservePrivateKey = this.privateKeyFromSeedString(`${input.slice(0, 32)}${append}`);
+      const reservePrivateKey = this.privateKeyFromSeedString(`${derivationText.slice(0, 32)}${append}`);
       if (this.reserveAddressFromPrivate(reservePrivateKey).startsWith(RESERVE_ADDRESS_PREFIX)) {
         return this.reserveKeypairFromReservePrivateKey(reservePrivateKey);
       }

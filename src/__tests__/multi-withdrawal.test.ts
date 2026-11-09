@@ -140,7 +140,7 @@ describe('VfxClient.requestWithdrawalMulti', () => {
   }
 
   beforeEach(() => {
-    client = new VfxClient('testnet');
+    client = new VfxClient('testnet', { hashMode: 'server' });
   });
 
   afterEach(() => {
@@ -297,7 +297,7 @@ describe('VfxClient.requestWithdrawalMulti', () => {
 
   test('refuses a reserve account and dry-run clients', async () => {
     await expect(
-      new VfxClient('testnet', true).requestWithdrawalMulti({
+      new VfxClient('testnet', { dryRun: true, hashMode: 'server' }).requestWithdrawalMulti({
         btcAddress: BTC,
         totalAmount: 1,
         feeRate: 1,
@@ -367,7 +367,7 @@ describe('VfxClient share following', () => {
   }
 
   beforeEach(() => {
-    client = new VfxClient('testnet');
+    client = new VfxClient('testnet', { hashMode: 'server' });
   });
 
   afterEach(() => {

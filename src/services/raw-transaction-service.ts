@@ -1,8 +1,23 @@
 import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
 import { Network } from '../constants';
-import { KeypairOrSigner, ResolvedSigner, resolveSigner } from '../signer';
-import KeypairService from './keypair-service';
+import {
+  KeypairOrSigner,
+  ResolvedSigner,
+  SigningTransaction,
+  approveIntent,
+  newFlowId,
+  resolveSigner,
+} from '../signer';
+import KeypairService, { verifySignature } from './keypair-service';
 import { assertRecipientOnNetwork, isNameRecipient } from './recipient';
+import { canHashLocally, transactionHash, transactionHashPreimage } from './transaction-hash';
+import {
+  DEFAULT_HASH_MODE,
+  HashMode,
+  TransactionHashMismatchError,
+  TxBuildSession,
+  localTransactionFee,
+} from './tx-build-session';
 
 export interface IRawTransactionServiceOptions {
   network: Network;
@@ -35,6 +50,20 @@ export interface IRawTransactionServiceOptions {
    * signed or sent, and process() rethrows that error.
    */
   beforeSign?: (tx: Record<string, unknown>) => void;
+  /** Who builds the timestamp, fee and hash; see HashMode. Default 'both'. */
+  hashMode?: HashMode;
+  /**
+   * Ask the node to verify the transaction (`/raw/verify`) before sending.
+   * Default true for 'server' and 'both', false for 'local'. In a dry run
+   * the transaction is always verified.
+   */
+  preflight?: boolean;
+  /** Clock offset and next-nonce cache shared across sends (VfxClient passes its own). */
+  session?: TxBuildSession;
+  /** Id of the user action this transaction belongs to, passed to the signer. */
+  flowId?: string;
+  /** The signer already approved this action (`Signer.approve`); do not ask again. */
+  approved?: boolean;
 }
 
 export class RawTransactionService {
@@ -49,12 +78,18 @@ export class RawTransactionService {
   private apiOptions: { baseUrl?: string; timeoutMs?: number };
   private throwOnRefusal: boolean;
   private beforeSign: ((tx: Record<string, unknown>) => void) | null;
+  private hashMode: HashMode;
+  private preflight: boolean;
+  private session: TxBuildSession;
+  private flowId: string;
+  private approved: boolean;
 
   private hash: string | null = null;
   private nonce: number | null = null;
   private fee: number | null = null;
   private timestamp: number | null = null;
   private signature: string | null = null;
+  private hashPreimage: string | null = null;
 
   constructor(options: IRawTransactionServiceOptions) {
     this.network = options.network;
@@ -84,6 +119,59 @@ export class RawTransactionService {
     this.apiOptions = options.apiOptions ?? {};
     this.throwOnRefusal = options.throwOnRefusal ?? false;
     this.beforeSign = options.beforeSign ?? null;
+    // Privacy types hash a height-dependent preimage that is not ported.
+    this.hashMode = canHashLocally(this.txType) ? options.hashMode ?? DEFAULT_HASH_MODE : 'server';
+    this.preflight = options.preflight ?? this.hashMode !== 'local';
+    this.session = options.session ?? new TxBuildSession();
+    this.flowId = options.flowId ?? newFlowId();
+    this.approved = options.approved ?? false;
+  }
+
+  private signingTransaction(): SigningTransaction {
+    return {
+      Hash: this.hash ?? '',
+      FromAddress: this.fromAddress,
+      ToAddress: this.toAddress,
+      TransactionType: this.txType,
+      Amount: this.amount,
+      Fee: this.fee ?? 0,
+      Nonce: this.nonce ?? 0,
+      Timestamp: this.timestamp ?? 0,
+      Data: this.data,
+      UnlockTime: this.unlockTime,
+    };
+  }
+
+  /**
+   * Timestamp, nonce, fee and hash. 'server' asks Spyglass for each, as
+   * before 9.1. Otherwise they are built here: the timestamp from the
+   * session's server-clock offset, the fee from the size formula, the hash
+   * from Core's preimage; the nonce still comes from the server unless
+   * 'local' has one cached from this session's last send. 'both' also asks
+   * `/raw/hash` and refuses to go on when the answers differ.
+   */
+  private async build(client: RawTransactionApiClient): Promise<void> {
+    if (this.hashMode === 'server') {
+      this.timestamp = await client.getTimestamp();
+      this.nonce = await client.getNonce(this.fromAddress);
+      this.fee = await client.getFee(this.updateTransactionData());
+      this.hash = await client.getHash(this.updateTransactionData());
+      return;
+    }
+
+    this.timestamp = await this.session.timestamp(client);
+    const cached = this.hashMode === 'local' ? this.session.cachedNonce(this.fromAddress) : undefined;
+    this.nonce = cached ?? this.session.reconcileNonce(this.fromAddress, await client.getNonce(this.fromAddress));
+    this.fee = localTransactionFee(this.signingTransaction());
+    const fields = this.signingTransaction();
+    this.hashPreimage = transactionHashPreimage(fields);
+    this.hash = transactionHash(fields);
+    if (this.hashMode === 'both') {
+      const serverHash = await client.getHash(this.updateTransactionData());
+      if (serverHash !== this.hash) {
+        throw new TransactionHashMismatchError(this.hash, serverHash, this.hashPreimage);
+      }
+    }
   }
 
   private updateTransactionData(): Record<string, unknown> {
@@ -106,43 +194,65 @@ export class RawTransactionService {
   async process(dryRun = false): Promise<string | null> {
     const client = new RawTransactionApiClient(this.network, this.apiOptions);
 
+    // Before anything is built, so the timestamp is taken after the person
+    // approved. A signer that throws here cancels: the error reaches the
+    // caller, and nothing was built, signed or sent.
+    if (!this.approved) {
+      await approveIntent(this.signer, {
+        action: 'transaction',
+        flowId: this.flowId,
+        fromAddress: this.fromAddress,
+        toAddress: this.toAddress,
+        amount: this.amount,
+        txType: this.txType,
+        data: this.data,
+        unlockTime: this.unlockTime,
+      });
+      this.approved = true;
+    }
+
     try {
-      this.timestamp = await client.getTimestamp();
-      this.nonce = await client.getNonce(this.fromAddress);
-
-      let txData = this.updateTransactionData();
-
-      this.fee = await client.getFee(txData);
-      txData = this.updateTransactionData();
-
-      this.hash = await client.getHash(txData);
+      await this.build(client);
       this.beforeSign?.(this.updateTransactionData());
 
-      this.signature = await this.signer.sign(this.hash);
+      const hash = this.hash as string;
+      this.signature = await this.signer.sign(hash, {
+        kind: 'transaction',
+        flowId: this.flowId,
+        message: hash,
+        transaction: this.signingTransaction(),
+        hashSource: this.hashMode === 'server' ? 'server' : 'local',
+        ...(this.hashPreimage !== null && { hashPreimage: this.hashPreimage }),
+      });
 
       if (!this.signature) {
         throw new Error('Signature was null');
       }
 
-      const signatureIsValid = await client.validateSignature(this.hash, this.fromAddress, this.signature);
+      const signatureIsValid =
+        this.hashMode === 'server'
+          ? await client.validateSignature(hash, this.fromAddress, this.signature)
+          : verifySignature(hash, this.signature, this.fromAddress);
 
       if (!signatureIsValid) {
         throw new Error('Invalid Signature');
       }
 
-      txData = this.updateTransactionData();
+      const txData = this.updateTransactionData();
 
-      const verdict = await client.verifyTransactionResult(txData);
+      if (this.preflight || dryRun) {
+        const verdict = await client.verifyTransactionResult(txData);
 
-      if (!verdict.valid) {
-        if (this.throwOnRefusal) {
-          throw new TransactionRefusedError(this.hash ?? '', verdict.message);
+        if (!verdict.valid) {
+          if (this.throwOnRefusal) {
+            throw new TransactionRefusedError(hash, verdict.message);
+          }
+          throw new Error(verdict.message ? `Invalid Transaction: ${verdict.message}` : 'Invalid Transaction');
         }
-        throw new Error(verdict.message ? `Invalid Transaction: ${verdict.message}` : 'Invalid Transaction');
       }
 
       if (dryRun) {
-        return this.hash;
+        return hash;
       }
 
       // Everything above this line fails before the transaction reaches the
@@ -154,19 +264,24 @@ export class RawTransactionService {
       try {
         success = await client.sendTransaction(txData);
       } catch (error) {
-        throw new TransactionDispatchError(this.hash, error);
+        throw new TransactionDispatchError(hash, error);
       }
 
       if (!success) {
         throw new Error('Transaction failed to send');
       }
 
-      return this.hash;
+      this.session.recordSent(this.fromAddress, this.nonce as number);
+      return hash;
     } catch (error) {
+      // Whatever went wrong, the cached next nonce is no longer known to be
+      // right: a dispatch whose answer was lost may have consumed it.
+      this.session.forgetNonce(this.fromAddress);
       if (
         error instanceof TransactionDispatchError ||
         error instanceof TransactionRefusedError ||
-        error instanceof PreSignCheckError
+        error instanceof PreSignCheckError ||
+        error instanceof TransactionHashMismatchError
       ) {
         throw error;
       }

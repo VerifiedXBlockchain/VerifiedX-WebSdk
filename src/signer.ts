@@ -3,10 +3,181 @@ import CryptoJS from 'crypto-js';
 import { RESERVE_ADDRESS_PREFIX } from './constants';
 import KeypairService from './services/keypair-service';
 import { Keypair } from './types';
+import { getSecureRandomBytes } from './utils';
+
+/**
+ * The fields of a VFX transaction as they are signed. `Hash` is the digest
+ * input (`signDigest` receives SHA-256 of it); a signer that wants to refuse
+ * blind signing recomputes it from these fields with `transactionHash`, or
+ * from `hashPreimage` with `hashPreimage()`.
+ */
+export interface SigningTransaction {
+  Hash: string;
+  FromAddress: string;
+  ToAddress: string;
+  TransactionType: number;
+  Amount: number;
+  Fee: number;
+  Nonce: number;
+  Timestamp: number;
+  Data: unknown;
+  UnlockTime: number | null;
+}
+
+interface SigningRequestBase {
+  /**
+   * The exact string the SDK signs. `signDigest` receives SHA-256 of it, so a
+   * signer can check `sha256(message) === digestHex` before signing.
+   */
+  message: string;
+  /**
+   * Shared by every signature one user action needs (a vault creation signs
+   * three messages, a multi-input withdrawal two plus one per input), so a
+   * signer can approve the action once and sign its steps together.
+   */
+  flowId: string;
+}
+
+/**
+ * What a signature is for, passed as the second argument of `signDigest`.
+ * Signers that ignore it keep working: the digest is the same either way.
+ */
+export type SigningRequest =
+  | (SigningRequestBase & {
+      kind: 'transaction';
+      transaction: SigningTransaction;
+      /**
+       * `Transaction.GetHashPreimage()` when the hash was computed or checked
+       * locally; absent for prepared transactions whose builder did not
+       * return one.
+       */
+      hashPreimage?: string;
+      /** Who built the hash: the SDK, the Spyglass `/raw/hash` endpoint, or a prepare endpoint. */
+      hashSource: 'local' | 'server' | 'prepared';
+    })
+  | (SigningRequestBase & {
+      kind: 'vbtc-ceremony';
+      step: 'start' | 'share';
+      ceremonyId: string;
+      sessionId: string;
+      ownerAddress: string;
+      timestamp: number;
+    })
+  | (SigningRequestBase & {
+      kind: 'vbtc-ownership';
+      ownerAddress: string;
+      name: string;
+      description: string;
+      ticker: string;
+      ceremonyId: string;
+      timestamp: number;
+      uniqueId: string;
+    })
+  | (SigningRequestBase & {
+      kind: 'frost-withdrawal';
+      /** `input` is one per vault UTXO after the first (multi-input withdrawals). */
+      step: 'start' | 'share' | 'input';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      ownerAddress: string;
+      sessionId: string;
+      timestamp: number;
+      inputIndex?: number;
+    })
+  | (SigningRequestBase & {
+      kind: 'reserve-recovery';
+      reserveAddress: string;
+      recoveryAddress: string;
+      signatureTime: number;
+    })
+  | (SigningRequestBase & {
+      kind: 'message';
+    });
+
+/**
+ * One user action, shown to a person before anything time-sensitive is
+ * built (ceremony and FROST messages carry timestamps, and a transaction
+ * carries one too). Throwing from `approve` cancels the action; nothing is
+ * signed or sent.
+ */
+export type SigningIntent =
+  | {
+      action: 'transaction';
+      flowId: string;
+      fromAddress: string;
+      toAddress: string;
+      amount: number;
+      txType: number;
+      data: unknown;
+      unlockTime: number | null;
+    }
+  | {
+      action: 'vbtc-create';
+      flowId: string;
+      ownerAddress: string;
+      name: string;
+      description: string;
+      ticker: string;
+    }
+  | {
+      action: 'vbtc-withdrawal-complete';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
+      withdrawalRequestHash: string;
+    }
+  | {
+      action: 'vbtc-transfer';
+      flowId: string;
+      scIdentifier: string;
+      fromAddress: string;
+      toAddress: string;
+      amount: number;
+    }
+  | {
+      /** A Type 27 request; the completion that follows (FROST and the Type 28 record) shares its flow. */
+      action: 'vbtc-withdrawal-request';
+      flowId: string;
+      ownerAddress: string;
+      btcAddress: string;
+      amount: number;
+      feeRate: number;
+      inputs: Array<{ scIdentifier: string; amount: number }>;
+    }
+  | {
+      action: 'vbtc-withdrawal-cancel';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
+      withdrawalRequestHash: string;
+    }
+  | {
+      /** Recording (Type 28) a withdrawal whose Bitcoin transaction was already broadcast. */
+      action: 'vbtc-withdrawal-record';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
+      withdrawalRequestHash: string;
+      btcTransactionHash: string;
+      amount: number;
+      btcDestination: string;
+    }
+  | {
+      action: 'reserve-recovery';
+      flowId: string;
+      reserveAddress: string;
+      recoveryAddress: string;
+    };
+
+export interface SigningBatchItem {
+  digestHex: string;
+  request: SigningRequest;
+}
 
 /**
  * An external signing authority — an HSM, an MPC service, a hardware wallet,
- * or any process that holds the private key and must never hand it to the SDK.
+ * a browser extension, or any process that holds the private key and must
+ * never hand it to the SDK.
  *
  * Every message the SDK needs signed (a transaction hash, a ceremony message)
  * is hashed with SHA-256 exactly as `KeypairService.getSignature` does, and the
@@ -17,6 +188,9 @@ import { Keypair } from './types';
  *
  * High-s signatures are normalised to low-s before use, so a signer that does
  * not canonicalise (AWS KMS, for one) works unchanged.
+ *
+ * Everything past `signDigest(digestHex)` is optional: a signer written for
+ * the one-argument form keeps compiling and behaving exactly as before.
  */
 export interface Signer {
   /** The VFX address the signature will be verified against. */
@@ -26,8 +200,21 @@ export interface Signer {
   /**
    * Sign the SHA-256 digest of a message. `digestHex` is the 32-byte digest as
    * 64 hex characters. Return the DER signature as bytes, hex, or base64.
+   * `request` says what is being signed; see `SigningRequest`.
    */
-  signDigest(digestHex: string): Promise<Uint8Array | string> | Uint8Array | string;
+  signDigest(digestHex: string, request?: SigningRequest): Promise<Uint8Array | string> | Uint8Array | string;
+  /**
+   * Sign several digests that belong to one user action, in order. Used for
+   * multi-signature flows when present; otherwise `signDigest` is called once
+   * per item. Return one DER signature per item, in the same order.
+   */
+  signBatch?(items: SigningBatchItem[]): Promise<Array<Uint8Array | string>>;
+  /**
+   * Called once per user action before anything time-sensitive is built, so a
+   * person can approve first and the signing that follows needs no second
+   * prompt. Throw to cancel.
+   */
+  approve?(intent: SigningIntent): Promise<void> | void;
 }
 
 /**
@@ -46,7 +233,42 @@ export type KeypairOrSigner = Keypair | Signer;
 export interface ResolvedSigner {
   address: string;
   publicKey: string;
-  sign(message: string): Promise<string>;
+  sign(message: string, request?: SigningRequest): Promise<string>;
+  /** Present when the underlying signer batches; use `signMessages` rather than calling it directly. */
+  signBatch?(items: Array<{ message: string; request: SigningRequest }>): Promise<string[]>;
+  approve?(intent: SigningIntent): Promise<void> | void;
+}
+
+/**
+ * Sign the messages of one user action: in one `signBatch` call when the
+ * signer has it, else one `sign` call each, in order.
+ */
+export async function signMessages(
+  signer: ResolvedSigner,
+  items: Array<{ message: string; request: SigningRequest }>,
+): Promise<string[]> {
+  if (signer.signBatch) {
+    const signatures = await signer.signBatch(items);
+    if (signatures.length !== items.length) {
+      throw new Error(`Signer returned ${signatures.length} signatures for ${items.length} messages`);
+    }
+    return signatures;
+  }
+  const signatures: string[] = [];
+  for (const item of items) {
+    signatures.push(await signer.sign(item.message, item.request));
+  }
+  return signatures;
+}
+
+/** Ask the signer to approve a user action, when it wants to. */
+export async function approveIntent(signer: ResolvedSigner, intent: SigningIntent): Promise<void> {
+  await signer.approve?.(intent);
+}
+
+/** A fresh id for one user action's signatures. */
+export function newFlowId(): string {
+  return Buffer.from(getSecureRandomBytes(12)).toString('hex');
 }
 
 const SECP256K1_N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
@@ -239,13 +461,30 @@ export function resolveSigner(
       );
     }
     const signDigest = input.signDigest.bind(input);
+    const signBatch = input.signBatch?.bind(input);
+    const approve = input.approve?.bind(input);
     return {
       address: derivedAddress,
       publicKey,
-      sign: async (message: string): Promise<string> => {
-        const raw = await signDigest(sha256Hex(message));
+      // A request is passed only when there is one, so a signer that counts
+      // its arguments sees exactly the call it saw before requests existed.
+      sign: async (message: string, request?: SigningRequest): Promise<string> => {
+        const digest = sha256Hex(message);
+        const raw = await (request === undefined ? signDigest(digest) : signDigest(digest, request));
         return vfxSignatureFromDer(raw, publicKey);
       },
+      ...(signBatch && {
+        signBatch: async (items: Array<{ message: string; request: SigningRequest }>): Promise<string[]> => {
+          const raws = await signBatch(
+            items.map((item) => ({ digestHex: sha256Hex(item.message), request: item.request })),
+          );
+          if (!Array.isArray(raws) || raws.length !== items.length) {
+            throw new Error(`Signer.signBatch returned ${raws?.length} signatures for ${items.length} digests`);
+          }
+          return raws.map((raw) => vfxSignatureFromDer(raw, publicKey));
+        },
+      }),
+      ...(approve && { approve }),
     };
   }
 

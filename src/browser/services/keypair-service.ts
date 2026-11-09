@@ -149,6 +149,10 @@ export class BrowserKeypairService {
     return this.inner.reserveKeypairFromPrivateKey(mainPrivateKey);
   }
 
+  public reserveKeypairFromDerivationText(derivationText: string): ReserveKeypair {
+    return this.inner.reserveKeypairFromDerivationText(derivationText);
+  }
+
   public reserveKeypairFromReservePrivateKey(reservePrivateKey: string): ReserveKeypair {
     return this.inner.reserveKeypairFromReservePrivateKey(reservePrivateKey);
   }

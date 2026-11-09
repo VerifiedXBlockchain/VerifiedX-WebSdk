@@ -77,6 +77,53 @@ mainnet client fails immediately rather than at the node. Flows that take
 `privateKey` in an options object take `signer` in its place; passing both is
 an error.
 
+#### What is being signed (9.1)
+
+`signDigest` also receives a second argument, a typed `SigningRequest` that
+says what the digest is for, so a signer that shows the user what they approve
+(a browser extension, a hardware wallet) never signs a bare hash. Every
+request carries `message` (the exact text whose SHA-256 is the digest) and a
+`flowId` shared by every signature of one user action. Its `kind` is one of
+`transaction` (the full transaction fields, plus `hashPreimage` when the hash
+was built or checked locally), `vbtc-ceremony` (start or share), `vbtc-ownership`,
+`frost-withdrawal` (start, share, or one per extra input), `reserve-recovery`
+or `message`. Two optional methods go with it:
+
+- `signBatch(items)` signs the messages of one action together (a vault
+  creation's ceremony pair, a withdrawal's start, share and per-input
+  messages). Without it the SDK calls `signDigest` once per message.
+- `approve(intent)` is called once per action before anything time-sensitive
+  is built, so the person approves first. Throw from it to cancel; nothing is
+  signed or sent.
+
+A signer written for the one-argument `signDigest(digestHex)` keeps working
+unchanged. `client.signMessage(signerOrKeypair, message)` is the signer form of
+`getSignature`.
+
+### Transaction building (9.1)
+
+`hashMode` sets who builds a transaction's timestamp, fee and hash:
+
+```typescript
+new VfxClient('mainnet', { hashMode: 'both' }); // default
+```
+
+- `'both'` (default): built in the SDK, then checked against Spyglass
+  `/raw/hash`; any difference throws `TransactionHashMismatchError` before
+  anything is signed. Use this to gain confidence in the local build.
+- `'local'`: built in the SDK alone. A send makes two calls (nonce, send), or
+  one when the client sent from that address before and has its next nonce.
+- `'server'`: Spyglass builds everything, exactly as before 9.1.
+
+In `'both'` and `'local'` the timestamp comes from the device clock corrected
+by one server-time read per client, the fee from Core's size formula with a
+margin (the node only checks the floor), and the signature is checked locally
+instead of through `/raw/validate-signature`. `preflight` (default on, off in
+`'local'`) asks the node to verify the transaction before the send.
+Privacy transaction types always use the server hash. Prepared vBTC
+transactions are checked against their `HashPreimage` before signing unless
+`hashMode` is `'server'`.
+
 ## Quick Start
 
 ### VFX Operations

@@ -80,6 +80,7 @@ describe('send paths refuse a foreign recipient before any request', () => {
     expect(
       () =>
         new RawTransactionService({
+          hashMode: 'server',
           network: Network.Mainnet,
           keypair: mainnetKeypair,
           toAddress: TESTNET_ADDRESS,
@@ -90,14 +91,14 @@ describe('send paths refuse a foreign recipient before any request', () => {
 
   test('sendCoin', async () => {
     const { calls } = installFetch({});
-    const client = new VfxClient('mainnet');
+    const client = new VfxClient('mainnet', { hashMode: 'server' });
     await expect(client.sendCoin(mainnetKeypair, TESTNET_ADDRESS, 1)).rejects.toThrow(/not a mainnet address/);
     expect(calls).toHaveLength(0);
   });
 
   test('transferToken', async () => {
     const { calls } = installFetch({});
-    const client = new VfxClient('mainnet');
+    const client = new VfxClient('mainnet', { hashMode: 'server' });
     await expect(
       client.transferToken(mainnetKeypair, {
         scIdentifier: 'sc-1',
@@ -112,7 +113,7 @@ describe('send paths refuse a foreign recipient before any request', () => {
 
   test('transferVbtc refuses before asking Spyglass to prepare', async () => {
     const { calls } = installFetch({});
-    const client = new VfxClient('mainnet');
+    const client = new VfxClient('mainnet', { hashMode: 'server' });
     await expect(
       client.transferVbtc({
         scIdentifier: 'sc-1',
@@ -134,7 +135,7 @@ describe('send paths refuse a foreign recipient before any request', () => {
       '/raw/validate-signature/': () => textResponse('true'),
       '/raw/verify/': () => ({ Result: 'Success' }),
     });
-    const client = new VfxClient('mainnet', { dryRun: true });
+    const client = new VfxClient('mainnet', { dryRun: true, hashMode: 'server' });
     const other = mainnetKeys.addressFromPrivate('11'.repeat(32));
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(await client.sendCoin(mainnetKeypair, other, 1)).toBe('TX_HASH_ABC');

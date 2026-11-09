@@ -70,7 +70,7 @@ describe('acceptance message and code', () => {
 
 describe('signBtcNameTransferAcceptance', () => {
   test("signs with the receiving Bitcoin key in Core's format", () => {
-    const client = new VfxClient('testnet');
+    const client = new VfxClient('testnet', { hashMode: 'server' });
     const accepted = client.signBtcNameTransferAcceptance({
       btcPrivateKey: BTC_PRIVATE_KEY,
       name: 'Alice',
@@ -120,7 +120,7 @@ describe('transferBtcDomain with an acceptance', () => {
 
   test('carries BTCToMessage and BTCToSignature when given', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     const accepted = client.signBtcNameTransferAcceptance({
       btcPrivateKey: BTC_PRIVATE_KEY,
       name: 'alice',
@@ -144,7 +144,7 @@ describe('transferBtcDomain with an acceptance', () => {
 
   test('without an acceptance the payload is unchanged', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await client.transferBtcDomain(keypair, base);
     expect(hashedData(calls)).toEqual({
       Function: 'BTCAdnrTransfer()',
@@ -155,13 +155,13 @@ describe('transferBtcDomain with an acceptance', () => {
 
   test('refuses one half of the pair', async () => {
     installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(client.transferBtcDomain(keypair, { ...base, btcToMessage: 'm' })).rejects.toThrow(/together/);
   });
 
   test('refuses an acceptance whose name lacks .btc, which Core refuses', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     await expect(
       client.transferBtcDomain(keypair, {
         ...base,
@@ -174,7 +174,7 @@ describe('transferBtcDomain with an acceptance', () => {
 
   test('refuses an acceptance for another owner, or one over 24 hours old, before building', async () => {
     const { calls } = installPipeline();
-    const client = new VfxClient('testnet', { dryRun: true });
+    const client = new VfxClient('testnet', { dryRun: true, hashMode: 'server' });
     const now = Math.floor(Date.now() / 1000);
     await expect(
       client.transferBtcDomain(keypair, {
