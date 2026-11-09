@@ -114,22 +114,22 @@ for (const [name, v] of Object.entries(reserveVectors)) {
   if (!v.mainPrivateKey) continue;
   checkVault(
     `reserve ${name} test`,
-    svcTest.reserveKeypairFromPrivateKey(v.mainPrivateKey),
+    svcTest.restoreLegacyWebWalletVault(v.mainPrivateKey),
     walletVaultFromMain(v.mainPrivateKey, true),
   );
   checkVault(
     `reserve ${name} main`,
-    svcMain.reserveKeypairFromPrivateKey(v.mainPrivateKey),
+    svcMain.restoreLegacyWebWalletVault(v.mainPrivateKey),
     walletVaultFromMain(v.mainPrivateKey, false),
   );
 }
 for (let i = 0; i < 50; i++) {
   const pk = crypto.randomBytes(32).toString('hex');
-  checkVault(`reserve fuzz${i} test`, svcTest.reserveKeypairFromPrivateKey(pk), walletVaultFromMain(pk, true));
+  checkVault(`reserve fuzz${i} test`, svcTest.restoreLegacyWebWalletVault(pk), walletVaultFromMain(pk, true));
   // Direct reserve-key path (restore-from-key), both networks for the recovery address.
   const direct = window.generateReserveAccountRestoreCode(pk, false).split('|');
   if (direct[0].startsWith('xRBX')) {
-    const sdk = svcMain.reserveKeypairFromReservePrivateKey(pk);
+    const sdk = svcMain.restoreLegacyWebWalletVaultFromVaultKey(pk);
     check(`reserve fuzz${i} direct address`, sdk.address, direct[0].split(':')[0]);
     check(`reserve fuzz${i} direct recovery`, sdk.recoveryAddress, direct[1].split(':')[0]);
     check(`reserve fuzz${i} direct code`, sdk.restoreCode, direct[2]);

@@ -69,6 +69,9 @@ export type {
   DeployTokenParams,
   DeployTokenResult,
   ReserveKeypair,
+  VaultKeypair,
+  LegacyVaultSource,
+  LegacyRecoveryLookup,
 } from './types';
 
 // External signing (HSM / MPC)
@@ -104,6 +107,18 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+// NFTs (VFX10)
+export { NftBulkMintError } from './client/vfx-client';
+export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
+export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
+export {
+  nftMintPayload,
+  nftOwnershipProof,
+  NFT_FEATURE_EVOLVE,
+  NFT_FEATURE_ROYALTY,
+  NFT_FEATURE_MULTI_ASSET,
+} from './services/nft-data';
+export type { NftAssetInput, NftMintParams, NftEvolvePhaseInput } from './services/nft-data';
 // Web wallet sign-in derivation (vault and Bitcoin account texts)
 export {
   btcCredentialsFromDerivationText,

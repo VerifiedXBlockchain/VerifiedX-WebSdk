@@ -28,7 +28,7 @@ describe('compat: reserve keypair from main private key', () => {
     for (const network of ['testnet', 'mainnet'] as const) {
       test(`${name} on ${network} derives the wallet's vault`, () => {
         const expected = vector[network].vaultFromMain;
-        const reserve = services[network].reserveKeypairFromPrivateKey(vector.mainPrivateKey);
+        const reserve = services[network].restoreLegacyWebWalletVault(vector.mainPrivateKey);
 
         expect(reserve.address).toBe(expected.reserve.address);
         expect(reserve.address.startsWith('xRBX')).toBe(true);
@@ -51,19 +51,19 @@ describe('compat: reserve keypair from the reserve key itself', () => {
   const v = vectors.directFromReserveKey;
 
   test('recovery key and restore code match the wallet', () => {
-    const reserve = services.testnet.reserveKeypairFromReservePrivateKey(v.reservePrivateKey);
+    const reserve = services.testnet.restoreLegacyWebWalletVaultFromVaultKey(v.reservePrivateKey);
     expect(reserve.address).toBe(v.reserveAddress);
     expect(reserve.recoveryPrivateKey).toBe('00' + v.recoveryPrivateKey);
     expect(reserve.recoveryAddress).toBe(v.recoveryAddressTestnet);
     expect(reserve.restoreCode).toBe(v.restoreCode);
-    expect(services.mainnet.reserveKeypairFromReservePrivateKey(v.reservePrivateKey).recoveryAddress).toBe(
+    expect(services.mainnet.restoreLegacyWebWalletVaultFromVaultKey(v.reservePrivateKey).recoveryAddress).toBe(
       v.recoveryAddressMainnet,
     );
   });
 
   test('a 00-prefixed key derives the same vault as the bare key', () => {
-    const bare = services.testnet.reserveKeypairFromReservePrivateKey(v.reservePrivateKey);
-    const prefixed = services.testnet.reserveKeypairFromReservePrivateKey('00' + v.reservePrivateKey);
+    const bare = services.testnet.restoreLegacyWebWalletVaultFromVaultKey(v.reservePrivateKey);
+    const prefixed = services.testnet.restoreLegacyWebWalletVaultFromVaultKey('00' + v.reservePrivateKey);
     expect(prefixed).toEqual(bare);
   });
 
@@ -96,12 +96,12 @@ describe('compat: reserve keypair from the reserve key itself', () => {
   });
 });
 
-describe('generateReserveKeypair', () => {
-  test('produces an xRBX vault whose restore code re-derives itself', () => {
-    const reserve = services.testnet.generateReserveKeypair();
-    expect(reserve.address.startsWith('xRBX')).toBe(true);
+describe('legacy restore of a fresh vault key', () => {
+  test('the derived recovery key re-derives from the restore code and the vault key alone', () => {
+    const fresh = services.testnet.newVaultKeypair();
+    const reserve = services.testnet.restoreLegacyWebWalletVaultFromVaultKey(fresh.privateKey);
+    expect(reserve.address).toBe(fresh.address);
     expect(reserve.recoveryAddress.startsWith('x')).toBe(true);
     expect(services.testnet.reserveKeypairFromRestoreCode(reserve.restoreCode)).toEqual(reserve);
-    expect(services.testnet.reserveKeypairFromReservePrivateKey(reserve.privateKey)).toEqual(reserve);
   });
 });

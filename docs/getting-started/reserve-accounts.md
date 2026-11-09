@@ -15,9 +15,9 @@ A reserve account (also called a vault) is an `xRBX…` address whose outgoing s
 - **Recovery.** The recovery key signs a `Recover()` that sweeps the vault's balance to the recovery address and permanently deactivates the vault.
 - **Scope.** The delay applies to VFX, vBTC and NFT sends. A fungible-token transfer from a vault carries the unlock time but settles immediately, so a vault protects treasury, not fund tokens. Domain operations, token deployment and multi-contract vBTC transfers are refused from a vault.
 
-## Step 1: Derive the Vault Keys
+## Step 1: Create the Vault Keys
 
-The vault the VerifiedX web wallet pairs with an account is derived from that account's main key, so the SDK produces the same vault address and recovery key as the wallet.
+This creates a **new** vault: a random vault key and a separate, random recovery key. Neither comes from the main key, so a stolen main key or vault key cannot also give away the recovery key. To restore a vault that already exists, skip this step and use the restore helpers under "Other ways to get a vault" below: a vault key or restore code you kept, or `restoreLegacyWebWalletVault` / `findLegacyRecovery` for a vault the Flutter web wallet derived from the main key.
 
 ```typescript
 import { VfxClient, Network } from 'vfx-web-sdk';
@@ -31,29 +31,33 @@ const main = {
   address: client.addressFromPrivate(mainPrivateKey),
 };
 
-const vault = client.reserveKeypairFromPrivateKey(mainPrivateKey);
-console.log(vault.address);         // xRBX...
-console.log(vault.recoveryAddress); // ordinary x... address that receives a recovery sweep
-console.log(vault.restoreCode);     // back this up: it restores both keys
+const vault = client.newVaultKeypair();
+const recovery = client.newRecoveryKey(); // or recoveryKeyFromPasskeyPrf(prf), or another wallet's address
+console.log(vault.address);    // xRBX...
+console.log(recovery.address); // ordinary x... address that receives a recovery sweep
 ```
+
+Keep the recovery key apart from the vault key and the main key: it is what
+recovers the vault after the vault key is stolen, so it must not be stored or
+derived alongside it.
 
 Other ways to get a vault:
 
 ```typescript
-client.reserveKeypairFromRestoreCode(code);          // a CLI or wallet restore code
-client.reserveKeypairFromReservePrivateKey(key);     // from the vault key alone
-client.generateReserveKeypair();                     // a standalone vault
+client.vaultKeypairFromPrivateKey(key);              // an existing vault key
+client.reserveKeypairFromRestoreCode(code);          // a CLI or wallet restore code (both keys)
 client.reserveAddressFromPublic(publicKeyHex);       // the xRBX address of an HSM-held key
+client.restoreLegacyWebWalletVault(mainPrivateKey);  // LEGACY: a Flutter web-wallet vault, no theft protection
 ```
 
-Always pass the `ReserveKeypair` object itself when signing. Its private key on its own resolves to that key's ordinary `x…` address, not the vault.
+Always pass the vault keypair object itself when signing. Its private key on its own resolves to that key's ordinary `x…` address, not the vault.
 
 ## Step 2: Fund and Register
 
 ```typescript
 await client.sendCoin(main, vault.address, 5);   // fund the vault
 // wait for it to confirm, then:
-await client.registerReserveAccount(vault);      // 4 VFX Register()
+await client.registerReserveAccount(vault, { recoveryAddress: recovery.address }); // 4 VFX Register()
 ```
 
 Confirm activation before sending from the vault:
@@ -91,12 +95,12 @@ await client.callBackReserveTransaction(vault, { hash });
 If the vault key is exposed, the recovery key moves everything to the recovery address and deactivates the vault for good:
 
 ```typescript
-await client.recoverReserveAccount(vault);
+await client.recoverReserveAccount(vault, { recoverySigner: recovery });
 // vault: { balance: 0, activated: true, deactivated: true }
 // recovery address: receives the vault's full balance
 ```
 
-A `ReserveKeypair` carries its recovery key, so the call needs nothing else. The recovery signature is time-stamped and valid for 10 minutes, so send it promptly after building it.
+The recovery key signs for the recovery address; pass it (a keypair or a `Signer`) as `recoverySigner`. A `ReserveKeypair` from a restore code or the legacy derivation carries its recovery key, so for one of those the call needs nothing else. The recovery signature is time-stamped and valid for 10 minutes, so send it promptly after building it.
 
 ## Keys in an HSM
 
