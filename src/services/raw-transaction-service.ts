@@ -1,5 +1,5 @@
 import { RawTransactionApiClient } from '../client/raw-transaction-api-client';
-import { Network } from '../constants';
+import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import {
   KeypairOrSigner,
   ResolvedSigner,
@@ -10,6 +10,7 @@ import {
 } from '../signer';
 import KeypairService, { verifySignature } from './keypair-service';
 import { assertRecipientOnNetwork, isNameRecipient } from './recipient';
+import { parseVfxSignature } from './vfx-signature';
 import { canHashLocally, transactionHash, transactionHashPreimage } from './transaction-hash';
 import {
   DEFAULT_HASH_MODE,
@@ -137,6 +138,28 @@ export class RawTransactionService {
     this.session = options.session ?? new TxBuildSession();
     this.flowId = options.flowId ?? newFlowId();
     this.approved = options.approved ?? false;
+  }
+
+  /**
+   * The node's check, done locally. `verifySignature` refuses a vault (xRBX)
+   * address on purpose (it verifies messages, where a vault never signs), but
+   * a vault does sign its own transactions with its key, so for a vault
+   * sender the key is checked against the vault address and the signature
+   * against that key's ordinary address.
+   */
+  private signatureIsLocallyValid(hash: string, signature: string): boolean {
+    if (!this.fromAddress.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      return verifySignature(hash, signature, this.fromAddress);
+    }
+    const parsed = parseVfxSignature(signature);
+    if (!parsed) {
+      return false;
+    }
+    const keypairService = new KeypairService(this.network);
+    return (
+      keypairService.reserveAddressFromPublic(parsed.publicKey) === this.fromAddress &&
+      verifySignature(hash, signature, keypairService.addressFromPublic(parsed.publicKey))
+    );
   }
 
   private signingTransaction(): SigningTransaction {
@@ -302,7 +325,7 @@ export class RawTransactionService {
       const signatureIsValid =
         this.hashMode === 'server'
           ? await client.validateSignature(hash, this.fromAddress, this.signature)
-          : verifySignature(hash, this.signature, this.fromAddress);
+          : this.signatureIsLocallyValid(hash, this.signature);
 
       if (!signatureIsValid) {
         throw new Error('Invalid Signature');

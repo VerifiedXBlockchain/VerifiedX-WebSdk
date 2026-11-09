@@ -16,7 +16,7 @@ import {
   wordArrayToByteArray,
 } from '../utils';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
-import { ReserveKeypair } from '../types';
+import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../types';
 import { parseVfxSignature } from './vfx-signature';
 
 // Curve context construction is the expensive part of elliptic — build once.
@@ -27,6 +27,31 @@ const secp256k1Curve = new EC.ec('secp256k1');
 // base58-encodes to the usual 34 characters — that is why it starts "xRBX".
 const RESERVE_ADDRESS_PREFIX_BYTES = [0x89, 0xb9, 0x21];
 const RESERVE_ADDRESS_HASH_TRUNCATION = 2;
+/** HKDF salt and info for `recoveryKeyFromPasskeyPrf`. Changing either changes every passkey recovery key. */
+const PASSKEY_RECOVERY_SALT = 'VerifiedX vault recovery key';
+const PASSKEY_RECOVERY_INFO = 'vfx-vault-recovery-key-v1';
+
+function utf8Bytes(text: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(text, 'utf-8'));
+}
+
+function hmacSha256(key: Uint8Array, data: Uint8Array): Uint8Array {
+  const mac = CryptoJS.HmacSHA256(byteArrayToWordArray(data), byteArrayToWordArray(key));
+  return Uint8Array.from(wordArrayToByteArray(mac));
+}
+
+/** RFC 5869 HKDF with SHA-256 (crypto-js, so it runs in every build). */
+export function hkdfSha256(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Uint8Array {
+  const prk = hmacSha256(salt.length > 0 ? salt : new Uint8Array(32), ikm);
+  const out: number[] = [];
+  let previous = new Uint8Array(0);
+  for (let block = 1; out.length < length; block++) {
+    previous = hmacSha256(prk, Uint8Array.from([...previous, ...info, block]));
+    out.push(...previous);
+  }
+  return Uint8Array.from(out.slice(0, length));
+}
+
 /** How many derivation attempts before giving up on finding an xRBX address. */
 const RESERVE_DERIVATION_MAX_ATTEMPTS = 1000;
 
@@ -199,14 +224,119 @@ export class KeypairService {
     return '00' + child.privateKey.toString('hex');
   }
 
+  // -- Vaults ---------------------------------------------------------------
+  //
+  // A vault's protection against theft is its recovery key: if the vault key
+  // is stolen, the recovery key sweeps everything to the recovery address.
+  // That only works when the recovery key cannot be computed from the keys a
+  // thief would take. New vaults therefore get a vault key on its own
+  // (`newVaultKeypair`) and a recovery key from somewhere else
+  // (`newRecoveryKey`, `recoveryKeyFromPasskeyPrf`, or another wallet's
+  // address), and `registerReserveAccount` takes only the recovery ADDRESS.
+  //
+  // The Flutter web wallet derived both from the main key. The
+  // `restoreLegacyWebWallet*` functions reproduce that, byte for byte, only
+  // so existing web-wallet vaults can be found and used. A vault made that
+  // way has NO theft protection: whoever holds the main key or the vault key
+  // holds the recovery key too.
+
+  /** A new vault key (xRBX address) from the CSPRNG, with no recovery key attached. */
+  public newVaultKeypair(): VaultKeypair {
+    for (let attempt = 0; attempt < RESERVE_DERIVATION_MAX_ATTEMPTS; attempt++) {
+      const privateKey = this.generatePrivateKey();
+      if (this.reserveAddressFromPrivate(privateKey).startsWith(RESERVE_ADDRESS_PREFIX)) {
+        return this.vaultKeypairFromPrivateKey(privateKey);
+      }
+    }
+    throw new Error('Could not generate a reserve address');
+  }
+
+  /** The vault for a vault private key, without inventing a recovery key for it. */
+  public vaultKeypairFromPrivateKey(vaultPrivateKey: string): VaultKeypair {
+    const privateKey = normalizePrivateKey(vaultPrivateKey.toLowerCase());
+    const address = this.reserveAddressFromPrivate(privateKey);
+    if (!address.startsWith(RESERVE_ADDRESS_PREFIX)) {
+      throw new Error(
+        `Not a reserve account key: its reserve address ${address} does not start with ${RESERVE_ADDRESS_PREFIX}`,
+      );
+    }
+    return { privateKey: '00' + privateKey, publicKey: this.publicFromPrivate(privateKey), address };
+  }
+
   /**
-   * Build the full reserve keypair from the reserve account's own private
-   * key. The recovery key is derived from the first 32 hex characters of that
-   * key, exactly as the web wallet does, so it never has to be stored
-   * separately. Throws if the key's reserve address does not start with
+   * A new random recovery key (an ordinary account). Keep it apart from the
+   * wallet's keys, for example as a backup code the user writes down; only
+   * its address goes into `registerReserveAccount`.
+   */
+  public newRecoveryKey(): Keypair {
+    const privateKey = this.generatePrivateKey();
+    return { privateKey, publicKey: this.publicFromPrivate(privateKey), address: this.addressFromPrivate(privateKey) };
+  }
+
+  /**
+   * A recovery key from a WebAuthn passkey's PRF output: HKDF-SHA256 with a
+   * fixed VerifiedX salt and info, retried with a counter in the info in the
+   * (about 2^-128) case that the output is not a valid secp256k1 key. The
+   * same PRF output always gives the same key.
+   *
+   * Use a passkey made only for this, never the one that unlocks the wallet,
+   * ideally on another authenticator (a hardware key, or another platform's
+   * password manager): two passkeys in one synced keychain fall together.
+   * A passkey is bound to its rp_id, so one created on the web wallet's
+   * domain only works on that domain and its related origins; the extension
+   * or desktop app cannot use it unless they share that rp_id. Choose the
+   * rp_id before the first vault is registered. Pass the same PRF salt each
+   * time; changing it changes the key.
+   */
+  public recoveryKeyFromPasskeyPrf(prfOutput: Uint8Array | ArrayBuffer): Keypair {
+    const ikm = prfOutput instanceof Uint8Array ? prfOutput : new Uint8Array(prfOutput);
+    if (ikm.length < 32) {
+      throw new Error(`recoveryKeyFromPasskeyPrf: expected at least 32 bytes of PRF output, got ${ikm.length}`);
+    }
+    for (let counter = 0; counter < 16; counter++) {
+      const info = counter === 0 ? PASSKEY_RECOVERY_INFO : `${PASSKEY_RECOVERY_INFO}/${counter}`;
+      const okm = hkdfSha256(ikm, utf8Bytes(PASSKEY_RECOVERY_SALT), utf8Bytes(info), 32);
+      if (isValidPrivateKey(byteArrayToWordArray(okm))) {
+        const hex = Buffer.from(okm).toString('hex');
+        return {
+          privateKey: '00' + hex,
+          publicKey: this.publicFromPrivate(hex),
+          address: this.addressFromPrivate(hex),
+        };
+      }
+    }
+    throw new Error('recoveryKeyFromPasskeyPrf: could not derive a valid key');
+  }
+
+  /**
+   * LEGACY. The recovery key the Flutter web wallet (and so Core's
+   * restore-from-key path) derives for a vault: `seedToPrivate` of the first
+   * 32 hex characters of the vault key. Anyone holding the vault key holds
+   * this key too, so it protects nothing against theft. Only for restoring
+   * vaults that were registered with it; see `findLegacyRecovery`.
+   */
+  public deriveLegacyRecoveryKey(source: LegacyVaultSource): Keypair & { vaultAddress: string } {
+    const vault =
+      'vaultPrivateKey' in source
+        ? this.restoreLegacyWebWalletVaultFromVaultKey(source.vaultPrivateKey)
+        : 'derivationText' in source
+        ? this.restoreLegacyWebWalletVaultFromDerivationText(source.derivationText)
+        : this.restoreLegacyWebWalletVault(source.mainPrivateKey);
+    return {
+      privateKey: vault.recoveryPrivateKey,
+      publicKey: vault.recoveryPublicKey,
+      address: vault.recoveryAddress,
+      vaultAddress: vault.address,
+    };
+  }
+
+  /**
+   * LEGACY, NO THEFT PROTECTION. The Flutter web wallet's vault for a vault
+   * private key: the recovery key is derived from the first 32 hex characters
+   * of that key. Throws if the key's reserve address does not start with
    * xRBX — such a key cannot be a vault on the network.
    */
-  public reserveKeypairFromReservePrivateKey(reservePrivateKey: string): ReserveKeypair {
+  public restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey: string): ReserveKeypair {
     const privateKey = normalizePrivateKey(reservePrivateKey.toLowerCase());
     const address = this.reserveAddressFromPrivate(privateKey);
     if (!address.startsWith(RESERVE_ADDRESS_PREFIX)) {
@@ -219,11 +349,13 @@ export class KeypairService {
   }
 
   /**
-   * The vault the web wallet pairs with a main account: the reserve private
-   * key is derived from the first 32 hex characters of the main private key
-   * plus a counter, retried until the reserve address starts with xRBX.
+   * LEGACY, NO THEFT PROTECTION. The vault the Flutter web wallet pairs with
+   * a main account: the reserve private key is derived from the first 32 hex
+   * characters of the main private key plus a counter, retried until the
+   * reserve address starts with xRBX, and the recovery key from the vault key.
+   * For restoring existing web-wallet vaults only; never for a new vault.
    */
-  public reserveKeypairFromPrivateKey(mainPrivateKey: string): ReserveKeypair {
+  public restoreLegacyWebWalletVault(mainPrivateKey: string): ReserveKeypair {
     // The wallet strips a leading "00" from the main key before seeding even
     // when the key is already 64 characters (auth_utils.dart), so a key whose
     // first byte is zero seeds from its 3rd character. Reproduced on purpose:
@@ -232,20 +364,20 @@ export class KeypairService {
     if (input.startsWith('00')) {
       input = input.slice(2);
     }
-    return this.reserveKeypairFromDerivationText(input);
+    return this.restoreLegacyWebWalletVaultFromDerivationText(input);
   }
 
   /**
-   * The vault the web wallet derives from a key's derivation text (see
+   * LEGACY, NO THEFT PROTECTION. The vault the web wallet derives from a key's derivation text (see
    * `wallet-derivation.ts`): the text is used exactly as given, so an
    * imported key's historical forms (65 characters, unpadded) each give their
    * own vault, as they do in the wallet.
    */
-  public reserveKeypairFromDerivationText(derivationText: string): ReserveKeypair {
+  public restoreLegacyWebWalletVaultFromDerivationText(derivationText: string): ReserveKeypair {
     for (let append = 0; append < RESERVE_DERIVATION_MAX_ATTEMPTS; append++) {
       const reservePrivateKey = this.privateKeyFromSeedString(`${derivationText.slice(0, 32)}${append}`);
       if (this.reserveAddressFromPrivate(reservePrivateKey).startsWith(RESERVE_ADDRESS_PREFIX)) {
-        return this.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+        return this.restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey);
       }
     }
     throw new Error('Could not derive a reserve address from this key');
@@ -254,7 +386,9 @@ export class KeypairService {
   /**
    * Restore from `base64("<privateKey>//<recoveryPrivateKey>")` — the code the
    * CLI prints and the web wallet backs up. The recovery key is taken from the
-   * code, not re-derived, because the CLI generates it independently.
+   * code, not re-derived, because the CLI generates it independently. (A
+   * restore code carries both keys, so it must be stored away from the vault
+   * key for the recovery key to protect anything.)
    */
   public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
     const decoded = Buffer.from(restoreCode.trim(), 'base64').toString('utf-8');
@@ -272,17 +406,6 @@ export class KeypairService {
       throw new Error(`Invalid restore code: reserve address ${address} does not start with ${RESERVE_ADDRESS_PREFIX}`);
     }
     return this.assembleReserveKeypair(privateKey, '00' + recoveryPrivateKey);
-  }
-
-  /** A standalone vault on a fresh random key, not tied to any main account. */
-  public generateReserveKeypair(): ReserveKeypair {
-    for (let attempt = 0; attempt < RESERVE_DERIVATION_MAX_ATTEMPTS; attempt++) {
-      const privateKey = this.generatePrivateKey();
-      if (this.reserveAddressFromPrivate(privateKey).startsWith(RESERVE_ADDRESS_PREFIX)) {
-        return this.reserveKeypairFromReservePrivateKey(privateKey);
-      }
-    }
-    throw new Error('Could not generate a reserve address');
   }
 
   private assembleReserveKeypair(privateKey64: string, recoveryPrivateKey: string): ReserveKeypair {

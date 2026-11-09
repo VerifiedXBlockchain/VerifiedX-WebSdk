@@ -5,6 +5,20 @@
 ### Added
 
 - **Fee before signing.** A transaction's fee is quoted before `approve`, which now receives `fee` and `total` (amount + fee), and the transaction is built with exactly that fee. In `'server'` mode the quote (`/raw/fee`) is made only for signers with `approve`, so the call order is otherwise unchanged. `RawTransactionService.quote()`, `VfxClient.quoteSendCoin` and the offline `VfxClient.estimateTransactionFee` expose it.
+- **`BtcSigner`**, the Bitcoin side of the external-signer seam, so a browser extension, hardware wallet or HSM can sign Bitcoin without handing over the key. `BtcClient.createTransaction` and `sendBtc` take a `BtcSigner` where they took a WIF: the SDK builds the PSBT, the signer gets a typed `btc-transaction` request, and the SDK checks the result is the same transaction, validly signed by the signer's key, before broadcasting. `getSignatureWithSigner`, `buyBtcDomain(…, btcSigner)` and `signBtcNameTransferAcceptanceWithSigner` cover message signing through `signDigest`. `btcSignerFromWif` wraps a local key. Optional `approve(intent)` runs first. Everything is additive: the WIF and private-key paths are unchanged and build the same transaction.
+- **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
+- **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
+- **Legacy vault restore, gated on activity**: `deriveLegacyRecoveryKey` (the Flutter wallet's derivation, unchanged) and `findLegacyRecovery`, which reports whether Spyglass shows the legacy vault or its recovery address in use. `listTransactionsForAddress` takes `{ strict: true }`.
+
+### Changed (breaking)
+
+- `registerReserveAccount(vault, { recoveryAddress })` requires the recovery address and refuses the one the legacy web-wallet scheme derives from the vault key.
+- The derived vault scheme is renamed to `restoreLegacyWebWalletVault`, `restoreLegacyWebWalletVaultFromVaultKey` and `restoreLegacyWebWalletVaultFromDerivationText` (were `reserveKeypairFromPrivateKey`, `reserveKeypairFromReservePrivateKey`, `reserveKeypairFromDerivationText`) and documented as giving no theft protection. `generateReserveKeypair` is removed; use `newVaultKeypair` plus a recovery key.
+
+### Fixed
+
+- Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
+- Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
 
 ## Unreleased (9.1.0)
 
