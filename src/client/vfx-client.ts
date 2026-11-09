@@ -390,6 +390,13 @@ function parseTxData(data: unknown): Record<string, unknown> | null {
 /** What fundAndRegisterVault sends by default: the Flutter wallet's VAULT_ACTIVATION_AMOUNT. */
 const VAULT_FUND_AND_ACTIVATE_AMOUNT = 5;
 
+/**
+ * Room fundAndRegisterVault leaves for the Register() fee on top of the
+ * activation cost and the balance floor. A Register() transaction is a few
+ * hundred bytes, so its fee is a small fraction of this.
+ */
+const VAULT_REGISTER_FEE_ALLOWANCE = 0.01;
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
@@ -2400,7 +2407,8 @@ export class VfxClient {
       scIdentifier: params.scIdentifier,
       fromAddress: resolved.address,
       toAddress,
-      unlockHours: unlockTime === null ? null : params.unlockHours ?? RESERVE_MIN_UNLOCK_HOURS,
+      unlockHours:
+        unlockTime === null ? null : Math.max(params.unlockHours ?? RESERVE_MIN_UNLOCK_HOURS, RESERVE_MIN_UNLOCK_HOURS),
     });
 
     let locator = params.locator;
@@ -2645,7 +2653,23 @@ export class VfxClient {
     params: { recoveryAddress: string },
   ): Promise<string | null> => {
     const resolved = this.resolveReserve(signer, 'registerReserveAccount');
-    const recoveryAddress = params?.recoveryAddress;
+    const recoveryAddress = this.checkedRecoveryAddress(signer, resolved, params?.recoveryAddress);
+    return this.sendReserveTx(
+      resolved,
+      { Function: 'Register()', RecoveryAddress: recoveryAddress },
+      {
+        amount: RESERVE_ACTIVATION_COST,
+        unlockTime: null,
+      },
+    );
+  };
+
+  /** The recovery address Register() will accept, or a throw saying why not. */
+  private checkedRecoveryAddress(
+    signer: KeypairOrSigner,
+    resolved: ResolvedSigner,
+    recoveryAddress: string | undefined,
+  ): string {
     if (!recoveryAddress) {
       throw new Error(
         'registerReserveAccount requires a recoveryAddress: the address of a recovery key kept apart from the vault key',
@@ -2665,15 +2689,8 @@ export class VfxClient {
           'against theft; use newRecoveryKey(), recoveryKeyFromPasskeyPrf() or another wallet',
       );
     }
-    return this.sendReserveTx(
-      resolved,
-      { Function: 'Register()', RecoveryAddress: recoveryAddress },
-      {
-        amount: RESERVE_ACTIVATION_COST,
-        unlockTime: null,
-      },
-    );
-  };
+    return recoveryAddress;
+  }
 
   /**
    * Fund a new vault and activate it, the Flutter wallet's "fund then
@@ -2682,22 +2699,33 @@ export class VfxClient {
    * Spyglass shows the vault holding it, then the vault registers with
    * `recoveryAddress`. Throws on timeout (default 30 minutes, the wallet's
    * auto-activation window) with the funding hash, so the activation can be
-   * sent later with registerReserveAccount.
+   * sent later with registerReserveAccount; a registration that fails after
+   * funding throws with the funding hash too. The recovery address and the
+   * amount are checked before anything is sent. Not available in dryRun mode.
    */
   public fundAndRegisterVault = async (
     funder: KeypairOrSigner,
     vault: KeypairOrSigner,
     params: { recoveryAddress: string; amount?: number; pollIntervalMs?: number; timeoutMs?: number },
   ): Promise<{ fundingHash: string; registrationHash: string | null }> => {
-    const amount = params.amount ?? VAULT_FUND_AND_ACTIVATE_AMOUNT;
-    if (!(amount >= RESERVE_ACTIVATION_COST + RESERVE_MIN_REMAINING_BALANCE)) {
+    // Everything that can refuse the registration is checked before any
+    // money moves, so a bad setting never leaves a funded, inactive vault.
+    if (this.dryRun) {
       throw new Error(
-        `fundAndRegisterVault: the vault needs at least ${
-          RESERVE_ACTIVATION_COST + RESERVE_MIN_REMAINING_BALANCE
-        } VFX ` + 'plus the fee to register',
+        'fundAndRegisterVault does not support dryRun mode: it waits for the funding to land on chain. ' +
+          'Dry-run sendCoin and registerReserveAccount separately instead',
+      );
+    }
+    const amount = params.amount ?? VAULT_FUND_AND_ACTIVATE_AMOUNT;
+    const minimum = RESERVE_ACTIVATION_COST + RESERVE_MIN_REMAINING_BALANCE + VAULT_REGISTER_FEE_ALLOWANCE;
+    if (!(amount >= minimum)) {
+      throw new Error(
+        `fundAndRegisterVault: the vault needs at least ${minimum} VFX: ${RESERVE_ACTIVATION_COST} to register, ` +
+          `${RESERVE_MIN_REMAINING_BALANCE} left over and ${VAULT_REGISTER_FEE_ALLOWANCE} for the fee`,
       );
     }
     const resolvedVault = this.resolveReserve(vault, 'fundAndRegisterVault');
+    const recoveryAddress = this.checkedRecoveryAddress(vault, resolvedVault, params.recoveryAddress);
     const fundingHash = await this.sendCoin(funder, resolvedVault.address, amount);
     if (!fundingHash) {
       throw new Error('fundAndRegisterVault: the funding send was refused; nothing was sent');
@@ -2715,8 +2743,15 @@ export class VfxClient {
       }
       await sleep(pollIntervalMs);
     }
-    const registrationHash = await this.registerReserveAccount(vault, { recoveryAddress: params.recoveryAddress });
-    return { fundingHash, registrationHash };
+    try {
+      const registrationHash = await this.registerReserveAccount(vault, { recoveryAddress });
+      return { fundingHash, registrationHash };
+    } catch (e) {
+      throw new Error(
+        `fundAndRegisterVault: funding ${fundingHash} landed but the registration failed; ` +
+          `call registerReserveAccount to retry, without funding again: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   };
 
   /**

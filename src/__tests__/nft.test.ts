@@ -273,6 +273,16 @@ describe('VfxClient NFT writes', () => {
       unlockHours: 2,
     });
     expect(sent(short.calls)[0].UnlockTime as number).toBeGreaterThanOrEqual(now + 24 * 3600);
+    // The approval shows the wait that will apply, not the one asked for.
+    installPipeline();
+    const { signer, intents } = recordingSigner(vault.address, vault.privateKey);
+    await new VfxClient('testnet').transferNft(signer, {
+      scIdentifier: SC,
+      toAddress: RECIPIENT,
+      locator: 'NA',
+      unlockHours: 2,
+    });
+    expect(intents[0]).toMatchObject({ action: 'nft-transfer', unlockHours: 24 });
   });
 
   test('evolveNft sends the stage change to the owner; burnNft sends a Type 4 to the owner', async () => {

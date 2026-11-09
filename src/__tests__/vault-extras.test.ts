@@ -143,6 +143,44 @@ describe('fundAndRegisterVault', () => {
   test('refuses an amount that cannot cover the activation', async () => {
     await expect(
       new VfxClient('testnet').fundAndRegisterVault(funder, vault, { recoveryAddress: recovery.address, amount: 4 }),
-    ).rejects.toThrow(/at least 4.5 VFX/);
+    ).rejects.toThrow(/at least 4.51 VFX/);
+  });
+
+  test('refuses 4.5 VFX, which leaves nothing for the registration fee', async () => {
+    const { calls } = install([5]);
+    await expect(
+      new VfxClient('testnet').fundAndRegisterVault(funder, vault, { recoveryAddress: recovery.address, amount: 4.5 }),
+    ).rejects.toThrow(/at least 4.51 VFX/);
+    expect(sends(calls)).toHaveLength(0);
+  });
+
+  test('a recovery address Register() would refuse is caught before any funding is sent', async () => {
+    const { calls } = install([5]);
+    const legacy = service.restoreLegacyWebWalletVaultFromVaultKey(vault.privateKey).recoveryAddress;
+    for (const recoveryAddress of ['', vault.address, legacy]) {
+      await expect(
+        new VfxClient('testnet').fundAndRegisterVault(funder, vault, { recoveryAddress, pollIntervalMs: 1 }),
+      ).rejects.toThrow();
+    }
+    expect(sends(calls)).toHaveLength(0);
+  });
+
+  test('dry run is refused before funding rather than waiting for money never sent', async () => {
+    const { calls } = install([0]);
+    await expect(
+      new VfxClient('testnet', true).fundAndRegisterVault(funder, vault, { recoveryAddress: recovery.address }),
+    ).rejects.toThrow(/dryRun/);
+    expect(calls).toHaveLength(0);
+  });
+
+  test('a registration failure after funding names the funding hash', async () => {
+    const { calls } = install([5]);
+    const client = new VfxClient('testnet');
+    const register = jest.fn().mockRejectedValue(new Error('node said no'));
+    client.registerReserveAccount = register;
+    const funding = client.fundAndRegisterVault(funder, vault, { recoveryAddress: recovery.address, pollIntervalMs: 1 });
+    await expect(funding).rejects.toThrow(/funding [0-9a-f]+ landed but the registration failed.*node said no/);
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(sends(calls)).toHaveLength(1);
   });
 });
