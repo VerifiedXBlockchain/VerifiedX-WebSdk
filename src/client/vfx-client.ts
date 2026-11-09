@@ -59,6 +59,7 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { vbtcContractHasNoMedia } from '../services/vbtc-media';
 import { liveResumableWithdrawalsFor, resumableWithdrawalsFor } from '../services/vbtc-withdrawal-state';
 import { frostResumeActionFor } from '../services/frost-resume';
 import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
@@ -1262,6 +1263,96 @@ export class VfxClient {
 
   public getVbtcWithdrawals = async (scIdentifier: string): Promise<VbtcWithdrawalRequest[]> => {
     return this.vbtcV2ApiClient.getWithdrawals(scIdentifier);
+  };
+
+  /**
+   * Hand a vBTC vault to `toAddress`: its contract, and with it the right to
+   * withdraw its Bitcoin (a Type 18 transaction, Core
+   * `GetVBTCOwnershipTransferData`). The owner signs the contract id so the
+   * node can push the vault's media to a beacon for the recipient; a vault
+   * with no media (the default placeholder) transfers with locator "NA" when
+   * no beacon answers. From a vault (xRBX) the transfer waits `unlockHours`
+   * (24 minimum) and can be called back until then.
+   */
+  public transferVbtcOwnership = async (
+    params: {
+      scIdentifier: string;
+      toAddress: string;
+      /** Local key to sign with. Pass either this or `signer`. */
+      privateKey?: string;
+      /** External signer (HSM, MPC) to sign with instead of a local key. */
+      signer?: Signer;
+    } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    this.assertNotDryRun('transferVbtcOwnership');
+    const signer = this.signerFor(params, 'transferVbtcOwnership');
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtcOwnership');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferVbtcOwnership toAddress');
+    if (toAddress === signer.address) {
+      throw new Error('transferVbtcOwnership requires a recipient other than the owner');
+    }
+    const unlockTime = this.unlockTimeFor(signer, params.unlockHours);
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-ownership-transfer',
+      scIdentifier: params.scIdentifier,
+      fromAddress: signer.address,
+      toAddress,
+    });
+
+    const beaconSignature = await signer.sign(params.scIdentifier, {
+      kind: 'vbtc-beacon-upload',
+      flowId,
+      message: params.scIdentifier,
+      scIdentifier: params.scIdentifier,
+      toAddress,
+    });
+    let locator = await this.vbtcV2ApiClient
+      .beaconUpload(params.scIdentifier, toAddress, beaconSignature)
+      .catch(() => null);
+    if (!locator) {
+      // A vault with no media has nothing to ship, so a dead beacon need not
+      // stop it; the node forces "NA" for such contracts itself. One that has
+      // media must not move without it.
+      const token = await this.vbtcV2ApiClient.getTokenDetail(params.scIdentifier);
+      if (!vbtcContractHasNoMedia(token?.nft)) {
+        throw new Error(
+          `transferVbtcOwnership: the beacon upload for ${params.scIdentifier} failed and the vault has media, ` +
+            'so it was not transferred; try again when a beacon is reachable',
+        );
+      }
+      locator = 'NA';
+    }
+
+    const data = await this.vbtcV2ApiClient.getOwnershipTransferData(params.scIdentifier, toAddress, locator);
+    // The node builds the instruction; the signer approved this vault and this
+    // recipient, so anything else (another contract, another recipient, a
+    // different function, extra entries) is refused before signing.
+    const instruction = data.length === 1 ? data[0] : null;
+    if (
+      !instruction ||
+      instruction.Function !== 'Transfer()' ||
+      instruction.ContractUID !== params.scIdentifier ||
+      instruction.ToAddress !== toAddress
+    ) {
+      throw new Error(
+        `transferVbtcOwnership: the node's transfer data does not match ${params.scIdentifier} to ${toAddress}; ` +
+          `nothing was signed: ${JSON.stringify(data)}`,
+      );
+    }
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: 0,
+      txType: TxType.TokenizationTx,
+      data,
+      unlockTime,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(false);
   };
 
   public transferVbtc = async (params: {
