@@ -447,6 +447,7 @@ generateEmailKeypair(email: string, password: string, index?: number): IBtcKeypa
 // Signing methods
 getSignature(message: string, privateKey: string): string
 getSignatureFromWif(message: string, wif: string): string
+getSignatureWithSigner(message: string, signer: BtcSigner, purpose?): Promise<string> // same format
 
 // Account information
 getAddressInfo(address: string, inSatoshis?: boolean): Promise<IAccountInfo>
@@ -454,13 +455,42 @@ getTransactions(address: string, limit?: number, before?: string | null): Promis
 
 // Transaction operations
 getFeeRates(): Promise<IFeeRates | null>
-createTransaction(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
+createTransaction(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
 broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
-sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
+sendBtc(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
 checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>
 
 // Utility methods
 getRawTransaction(txId: string): Promise<Buffer>
+```
+
+#### Signing Bitcoin with an external key (`BtcSigner`)
+
+Wherever a WIF is accepted (`createTransaction`, `sendBtc`), a `BtcSigner` can
+stand in, and `buyBtcDomain` takes one in place of the Bitcoin private key.
+The key never reaches the SDK. The SDK builds the payment as a PSBT and hands
+it to `signPsbt` with a typed `btc-transaction` request (inputs, outputs with
+the change marked, fee, fee rate). It then checks that the returned PSBT is the
+same transaction with every input validly signed by the signer's key, before
+anything is broadcast. Messages (.btc name claims and transfer acceptances) go
+through `signDigest` with a `btc-message` request. `approve(intent)` runs first
+when present.
+
+```typescript
+import { btc } from 'vfx-web-sdk';
+
+const signer: btc.BtcSigner = {
+  address: 'tb1q…',                // P2WPKH address of the key, checked against publicKey
+  publicKey: '02…',                // compressed, hex
+  signPsbt: (psbtBase64, request) => extension.btc_signPsbt(psbtBase64, request), // base64 or hex back
+  signDigest: (digestHex, request) => extension.btc_signDigest(digestHex, request), // DER back; optional
+  approve: (intent) => extension.confirm(intent),                                  // optional
+};
+await new btc.BtcClient('testnet').sendBtc(signer, recipient, 0.001);
+await client.buyBtcDomain(vfxSigner, 'alice.btc', signer);
+await client.signBtcNameTransferAcceptanceWithSigner({ btcSigner: signer, name, newOwner });
+
+btc.btcSignerFromWif(wif, bitcoin.networks.testnet); // a BtcSigner over a local key
 ```
 
 
