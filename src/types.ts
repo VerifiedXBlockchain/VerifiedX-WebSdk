@@ -23,6 +23,20 @@ export interface VfxAddress {
   deactivated?: boolean;
 }
 
+/** A block as Spyglass indexes it. */
+export interface VfxBlock {
+  height: number;
+  hash: string;
+  previous_hash: string;
+  validator_address: string;
+  validator_signature?: string;
+  chain_ref_id?: string;
+  merkle_root?: string;
+  date_crafted?: string;
+  master_node?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
 export interface Transaction {
   hash: string;
   height: number;
@@ -147,7 +161,39 @@ export interface VbtcWithdrawalRequest {
   completion_transaction_hash: string | null;
   created_at: string;
   completed_at: string | null;
+  /**
+   * When FROST produced a broadcastable Bitcoin transaction for this request
+   * (the signed hex itself is withheld). Set means signing already ran.
+   * Absent from Spyglass deployments older than the release that added it.
+   */
+  signed_at?: string | null;
 }
+
+/**
+ * A moment in `completeWithdrawal` worth persisting, so a closed tab can
+ * finish the withdrawal later: resume `frost-job-started` with
+ * `resumeJobId`, and finish `btc-broadcast` with `recordWithdrawalCompletion`
+ * (never by signing again).
+ */
+export type VbtcWithdrawalCheckpoint =
+  | {
+      kind: 'frost-job-started';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      amount: number;
+      btcAddress: string;
+    }
+  | {
+      kind: 'btc-broadcast';
+      scIdentifier: string;
+      withdrawalRequestHash: string;
+      jobId: string;
+      btcTransactionHash: string;
+      signedBtcTxHex: string;
+      amount: number;
+      btcAddress: string;
+    };
 
 export interface VbtcTransfer {
   id: number;
@@ -320,7 +366,9 @@ export type VbtcProgressPhase =
   | 'frost_complete'
   | 'btc_broadcast'
   | 'completion_recorded'
-  | 'watched_polling';
+  | 'watched_polling'
+  /** An `onCheckpoint` hook threw; the withdrawal carries on. */
+  | 'checkpoint_failed';
 
 export interface VbtcProgressEvent {
   phase: VbtcProgressPhase;
@@ -427,6 +475,41 @@ export interface DeployTokenResult {
  * behind an unlock time and can be called back, plus the recovery key that
  * can sweep it. `restoreCode` is `base64("<privateKey>//<recoveryPrivateKey>")`,
  * the format the CLI and web wallet both restore from.
+ */
+/**
+ * What a legacy (Flutter web wallet) vault and its derived recovery key are
+ * computed from: the main account key, the vault key itself, or an imported
+ * key's derivation text (see `derivationTextCandidates`).
+ */
+export type LegacyVaultSource = { mainPrivateKey: string } | { vaultPrivateKey: string } | { derivationText: string };
+
+/** What `findLegacyRecovery` found for a legacy vault's derived recovery address. */
+export interface LegacyRecoveryLookup {
+  /** The derived recovery address. */
+  address: string;
+  /** The legacy vault (xRBX) address it belongs to. */
+  vaultAddress: string;
+  /** True when Spyglass shows anything for the recovery address or the vault that uses it. */
+  hasActivity: boolean;
+  summary: {
+    recoveryBalance: number;
+    recoveryTransactionCount: number;
+    vaultBalance: number;
+    vaultTransactionCount: number;
+    vaultActivated: boolean;
+    /** A Register() from the vault names this recovery address. */
+    registeredWithThisRecovery: boolean;
+  };
+  /** The derived recovery key, only when asked for with `includeKey: true`. */
+  recoveryKey?: Keypair;
+}
+
+/** A vault (xRBX) key on its own. Its recovery key lives elsewhere; only the recovery address is registered. */
+export type VaultKeypair = Keypair;
+
+/**
+ * A vault together with its recovery key, as a restore code or the legacy
+ * web-wallet derivation yields it.
  */
 export interface ReserveKeypair extends Keypair {
   recoveryPrivateKey: string;

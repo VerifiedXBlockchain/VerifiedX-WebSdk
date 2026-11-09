@@ -1,6 +1,9 @@
 import KeypairService from './keypair';
 import TransactionService from './transaction';
 import AccountService from './account';
+import { BtcSigner, isBtcSigner, signBtcMessage } from './signer';
+import { newFlowId } from '../signer';
+import * as bitcoin from 'bitcoinjs-lib';
 import type {
   IBtcKeypair,
   IAccountInfo,
@@ -71,6 +74,24 @@ export default class BtcClient {
     return this.keypairService.signMessage(wif, message);
   }
 
+  /**
+   * `getSignature` with a BtcSigner: the same `<DER hex>.<public key hex>`
+   * format, signed by the signer's `signDigest` over a `btc-message` request.
+   */
+  async getSignatureWithSigner(
+    message: string,
+    signer: BtcSigner,
+    purpose: 'btc-name-claim' | 'btc-name-transfer-acceptance' | 'message' = 'message',
+  ): Promise<string> {
+    const flowId = newFlowId();
+    await signer.approve?.({ action: 'btc-message', flowId, address: signer.address, message, purpose });
+    return signBtcMessage(signer, message, this.bitcoinNetwork, purpose, flowId);
+  }
+
+  private get bitcoinNetwork(): bitcoin.Network {
+    return this.isTestnet ? bitcoin.networks.testnet : bitcoin.networks.bitcoin;
+  }
+
   // Account and address info
   async getAddressInfo(address: string, inSatoshis = true): Promise<IAccountInfo> {
     return this.accountService.addressInfo(address, inSatoshis);
@@ -91,8 +112,12 @@ export default class BtcClient {
     return this.transactionService.getFeeRates();
   }
 
+  /**
+   * Build and sign a payment from `sender`: a WIF, or a BtcSigner that signs
+   * the PSBT itself (see `BtcSigner`).
+   */
   async createTransaction(
-    senderWif: string,
+    sender: string | BtcSigner,
     recipientAddress: string,
     amount: number,
     feeRate = 0,
@@ -104,7 +129,10 @@ export default class BtcClient {
         error: null,
       };
     }
-    return this.transactionService.createTransaction(senderWif, recipientAddress, amount, feeRate);
+    if (isBtcSigner(sender)) {
+      return this.transactionService.createTransactionWithSigner(sender, recipientAddress, amount, feeRate);
+    }
+    return this.transactionService.createTransaction(sender, recipientAddress, amount, feeRate);
   }
 
   /**
@@ -132,8 +160,13 @@ export default class BtcClient {
    * the payment may be on the network. Do not call sendBtc again for it;
    * resolve it with checkBroadcast and broadcastTransaction(error.signedTxHex).
    */
-  async sendBtc(senderWif: string, recipientAddress: string, amount: number, feeRate = 0): Promise<string | null> {
-    const createResult = await this.createTransaction(senderWif, recipientAddress, amount, feeRate);
+  async sendBtc(
+    sender: string | BtcSigner,
+    recipientAddress: string,
+    amount: number,
+    feeRate = 0,
+  ): Promise<string | null> {
+    const createResult = await this.createTransaction(sender, recipientAddress, amount, feeRate);
 
     if (!createResult.success || !createResult.result) {
       console.error('Failed to create transaction:', createResult.error);
