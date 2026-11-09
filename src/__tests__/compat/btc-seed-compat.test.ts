@@ -8,10 +8,11 @@ import vectors from './btc-seed-vectors.json';
  * Sign in with a Bitcoin key: golden vectors generated from the web
  * wallet's compiled keygen (vfx-gui/assets/js/keygen-v3.js, seedToPrivate
  * and importPrivateKey) by replaying auth_utils.dart
- * handleImportWithBtcPrivateKey in headless Chrome. A failure here means a
- * user who signed in to the Flutter wallet with a Bitcoin key would land on
- * a different VFX account in the SDK. Regenerate btc-seed-vectors.json only
- * from the wallet bundle, never from this code.
+ * handleImportWithBtcPrivateKey; the wallet commit is in the JSON. A failure
+ * here means a user who signed in to the Flutter wallet with a Bitcoin key
+ * would land on a different VFX account in the SDK. Regenerate
+ * btc-seed-vectors.json only from the wallet, with
+ * `node scripts/wallet-compat/gen-btc-seed-vectors.js <vfx-gui checkout>`.
  */
 
 const services = { testnet: new KeypairService(Network.Testnet), mainnet: new KeypairService(Network.Mainnet) };

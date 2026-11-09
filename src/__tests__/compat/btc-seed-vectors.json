@@ -1,5 +1,7 @@
 {
-  "source": "vfx-gui origin/testnet assets/js/keygen-v3.js (seedToPrivate, importPrivateKey), auth_utils.dart handleImportWithBtcPrivateKey",
+  "source": "vfx-gui assets/js/keygen-v3.js (seedToPrivate, importPrivateKey), auth_utils.dart handleImportWithBtcPrivateKey",
+  "walletCommit": "8b25b37050c1116cb4e1cace1330114e70a049ce",
+  "generator": "scripts/wallet-compat/gen-btc-seed-vectors.js",
   "vectors": [
     {
       "name": "hexLower",
