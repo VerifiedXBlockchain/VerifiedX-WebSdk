@@ -1,5 +1,4 @@
 import base58 from 'bs58';
-import EC from 'elliptic';
 import ecc from '@bitcoinerlab/secp256k1';
 import * as bip39 from 'bip39';
 import { BIP32Factory } from 'bip32';
@@ -11,13 +10,19 @@ import {
   isValidPrivateKey,
   normalizePrivateKey,
 } from '../utils';
-import { bytesToHex, hexToBytes, ripemd160, sha256, sha256Hex } from '../crypto';
+import {
+  bytesToHex,
+  hexToBytes,
+  publicKeyFromPrivate,
+  ripemd160,
+  sha256,
+  sha256Hex,
+  signDigestDer,
+  verifyDigest,
+} from '../crypto';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import { ReserveKeypair } from '../types';
 import { parseVfxSignature } from './vfx-signature';
-
-// Curve context construction is the expensive part of elliptic — build once.
-const secp256k1Curve = new EC.ec('secp256k1');
 
 // Address version bytes. A reserve address carries a three-byte prefix and
 // drops the last two bytes of the RIPEMD-160 hash so the whole thing still
@@ -103,17 +108,12 @@ export class KeypairService {
   public publicFromPrivate(privateKey: string): string {
     // Normalize to handle both 64 and 66 char formats
     const normalized = normalizePrivateKey(privateKey.toLowerCase());
-    const buffer = Buffer.from(normalized, 'hex');
-    const keyPair = secp256k1Curve.keyFromPrivate(buffer);
-    return keyPair.getPublic('hex');
+    return bytesToHex(publicKeyFromPrivate(Buffer.from(normalized, 'hex')));
   }
 
   public addressFromPrivate(privateKey: string): string {
     // Normalize to handle both 64 and 66 char formats
-    const normalized = normalizePrivateKey(privateKey.toLowerCase());
-    const buffer = Buffer.from(normalized, 'hex');
-    const keyPair = secp256k1Curve.keyFromPrivate(buffer);
-    return this.addressFromPublic(keyPair.getPublic('hex'));
+    return this.addressFromPublic(this.publicFromPrivate(privateKey));
   }
 
   /**
@@ -302,10 +302,9 @@ export class KeypairService {
     const dataBuffer = Buffer.from(data, 'hex');
 
     // RFC6979 deterministic k + canonical low-s, DER-encoded — byte-identical
-    // to the former native secp256k1 ecdsaSign/signatureExport output
-    // (locked by the compat golden vectors).
-    const keyPair = secp256k1Curve.keyFromPrivate(privateKey);
-    const derEncodedSignature = Buffer.from(keyPair.sign(dataBuffer, { canonical: true }).toDER());
+    // to the former elliptic and native secp256k1 output (locked by the
+    // compat golden vectors).
+    const derEncodedSignature = Buffer.from(signDigestDer(dataBuffer, privateKey));
 
     const signatureBase64 = derEncodedSignature.toString('base64');
 
@@ -359,8 +358,7 @@ export function verifySignature(message: string, signature: string, address: str
       return false;
     }
     const digest = Buffer.from(sha256(message));
-    const publicKey = secp256k1Curve.keyFromPublic('04' + parsed.publicKey, 'hex');
-    return secp256k1Curve.verify(digest, { r: parsed.r.toString(16), s: parsed.s.toString(16) }, publicKey);
+    return verifyDigest(digest, parsed.r, parsed.s, hexToBytes('04' + parsed.publicKey));
   } catch {
     // A message that is not valid UTF-16 (a lone surrogate) cannot be hashed;
     // the platform refuses it the same way.

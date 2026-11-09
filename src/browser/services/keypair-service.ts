@@ -9,9 +9,9 @@ import { ReserveKeypair } from '../../types';
  * Browser-facing keypair service.
  *
  * Key generation, public-key/address derivation and signing delegate to the
- * canonical KeypairService: its dependency chain (elliptic, secp256k1's
- * pure-JS build, crypto-js, bip32) is fully browser-bundleable, and using a
- * single implementation guarantees browser output is byte-identical to
+ * canonical KeypairService: its dependency chain (@noble/curves,
+ * @noble/hashes, bip32) is fully browser-bundleable, and using a single
+ * implementation guarantees browser output is byte-identical to
  * Node/CLI/web-wallet output. The previous @noble/secp256k1-based signing
  * path here broke with noble v3 ("hashes.sha256 not set") and, even when
  * wired, produced a different signature encoding than the rest of the
