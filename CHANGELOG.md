@@ -17,6 +17,7 @@
 
 - Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
 - Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
+- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
 
 ## Unreleased (9.1.0)
 
