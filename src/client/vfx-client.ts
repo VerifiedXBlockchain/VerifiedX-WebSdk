@@ -1,5 +1,8 @@
-import { Transaction as BitcoinTransaction } from 'bitcoinjs-lib';
+import { Transaction as BitcoinTransaction, networks as bitcoinNetworks } from 'bitcoinjs-lib';
+import { ECPairFactory } from 'ecpair';
+import ecc from '@bitcoinerlab/secp256k1';
 import BtcClient from '../btc';
+import { BtcSigner, isBtcSigner } from '../btc/signer';
 import {
   DOMAIN_DELETE_COST,
   DOMAIN_PURCHASE_COST,
@@ -19,6 +22,8 @@ import {
   PreSignCheckError,
   RawTransactionService,
   TransactionDispatchError,
+  TransactionRefusedError,
+  SignerError,
 } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
@@ -59,12 +64,16 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { vbtcContractHasNoMedia } from '../services/vbtc-media';
+import { liveResumableWithdrawalsFor, resumableWithdrawalsFor } from '../services/vbtc-withdrawal-state';
+import { frostResumeActionFor } from '../services/frost-resume';
 import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
   TransactionHashMismatchError,
   TxBuildSession,
+  localTransactionFee,
 } from '../services/tx-build-session';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
@@ -89,10 +98,12 @@ import {
   LegacyVaultSource,
   PaginatedResponse,
   ReserveKeypair,
+  VfxBlock,
   TokenVotingTopic,
   Transaction,
   VaultKeypair,
   VbtcCancelResult,
+  VbtcWithdrawalCheckpoint,
   VbtcMultiTransferResult,
   VbtcMultiWithdrawalResult,
   VbtcWithdrawalShare,
@@ -115,11 +126,13 @@ import {
   isValidVfxDomain,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
-import { VfxApiError } from './base-api-client';
+import { BaseApiClient, VfxApiError } from './base-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
+import { CoinPrice, CoinPricePoint, PriceApiClient, PricedCoin } from './price-api-client';
+import { NftListingApiClient } from './nft-listing-api-client';
 import { NftApiClient, NftListQuery, VfxNft, nftIsMedialess } from './nft-api-client';
 import { MediaApiClient } from './media-api-client';
 import { AuthApiClient } from './auth-api-client';
@@ -154,6 +167,17 @@ export interface ReserveSendOptions {
    * sender can call it back. Setting it from an ordinary account is an error.
    */
   unlockHours?: number;
+}
+
+/** Per-call options for `sendCoin`. */
+export interface SendCoinOptions extends ReserveSendOptions {
+  /**
+   * Throw TransactionRefusedError, with the node's reason, when the node
+   * refuses this send, and SignerError, with the signer's error, when the
+   * signer refuses to sign it, instead of resolving to null. Overrides the
+   * client's `throwOnRefusal` for this call.
+   */
+  throwOnRefusal?: boolean;
 }
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
@@ -270,6 +294,44 @@ export class VbtcWithdrawalClosedError extends Error {
   }
 }
 
+/**
+ * `resumeJobId` named a FROST job the explorer no longer knows. Nothing new
+ * was signed. Clear the stored job and call completeWithdrawal without it
+ * (with `resignGuard`, so a signature that did land is not repeated).
+ */
+export class VbtcFrostJobNotFoundError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly jobId: string;
+
+  constructor(withdrawalRequestHash: string, jobId: string) {
+    super(`FROST job ${jobId} for withdrawal request ${withdrawalRequestHash} is not known to the explorer any more`);
+    this.name = 'VbtcFrostJobNotFoundError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.jobId = jobId;
+    Object.setPrototypeOf(this, VbtcFrostJobNotFoundError.prototype);
+  }
+}
+
+/**
+ * `resignGuard` found that this withdrawal was already signed (`signed_at` or
+ * `pending_btc`) but the explorer names no Bitcoin transaction for it.
+ * Signing again could pay it twice, so nothing was done. Do not retry; find
+ * the broadcast (or wait for the explorer) and use recordWithdrawalCompletion.
+ */
+export class VbtcWithdrawalAlreadySignedError extends Error {
+  readonly withdrawalRequestHash: string;
+
+  constructor(withdrawalRequestHash: string) {
+    super(
+      `Withdrawal request ${withdrawalRequestHash} has already been signed and no Bitcoin transaction is recorded ` +
+        'for it yet. Do not start it again: that could pay it twice.',
+    );
+    this.name = 'VbtcWithdrawalAlreadySignedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    Object.setPrototypeOf(this, VbtcWithdrawalAlreadySignedError.prototype);
+  }
+}
+
 /** Spyglass answered but could not reach the node, so the withdrawal's state is unknown; ask again. */
 export class VbtcNodeUnreachableError extends Error {
   readonly answer: string;
@@ -306,6 +368,20 @@ export interface VfxClientOptions {
    * refuses a bad transaction with the same reason either way.
    */
   preflight?: boolean;
+  /**
+   * Make every send from this client throw TransactionRefusedError, with the
+   * node's reason, when the node refuses it, instead of resolving to null.
+   * Default false (the historical null). Per call, `sendCoin` takes it too.
+   * Calls that already throw on refusal (multi-vault withdrawals) keep doing so.
+   * It covers the prepared vBTC sends (transfer, create, withdrawal request,
+   * cancel, completion record) too: an explicit refusal there throws
+   * TransactionRefusedError with the prepared hash, instead of a plain Error.
+   * A signer that throws instead of signing a send (a rejected extension
+   * prompt) then surfaces as SignerError, with the signer's error as `cause`,
+   * from every send: the transaction sends, the prepared vBTC sends, and the
+   * ceremony, FROST and recovery signatures of the vBTC and vault flows.
+   */
+  throwOnRefusal?: boolean;
 }
 
 type CompleteWithdrawalParams = {
@@ -321,7 +397,41 @@ type CompleteWithdrawalParams = {
   signer?: Signer;
   onProgress?: (event: VbtcProgressEvent) => void;
   pollIntervalMs?: number;
+  /**
+   * How long to wait for the prepare/watched-vault answers, and the default
+   * FROST polling limit; default 3 minutes. Signing, broadcast and the Type 28
+   * are not counted against it.
+   */
   timeoutMs?: number;
+  /**
+   * Deadline for the FROST signing job alone; defaults to `timeoutMs`. The
+   * Flutter wallet waits 10 minutes (real ceremonies have taken over 4).
+   */
+  frostTimeoutMs?: number;
+  /**
+   * Resume an existing FROST job (the `jobId` of a `frost-job-started`
+   * checkpoint) instead of starting a new signing: no prepare, no new
+   * signatures, just polling, broadcast and the Type 28. Throws
+   * VbtcFrostJobNotFoundError when the explorer no longer knows the job.
+   */
+  resumeJobId?: string;
+  /**
+   * Called, and awaited, at the two moments a withdrawal must be persisted
+   * to survive a closed tab: when the FROST job starts (`frost-job-started`,
+   * before polling) and when its Bitcoin transaction is broadcast
+   * (`btc-broadcast`, before the Type 28). A throwing hook does not stop the
+   * withdrawal; the failure is reported through `onProgress`.
+   */
+  onCheckpoint?: (checkpoint: VbtcWithdrawalCheckpoint) => void | Promise<void>;
+  /**
+   * Before signing, read the explorer's row for this request and, if it
+   * shows a signature already exists (`signed_at` set or status
+   * `pending_btc`), record the completion when the row names its Bitcoin
+   * transaction or throw VbtcWithdrawalAlreadySignedError otherwise, rather
+   * than sign a second time. An unreadable row lets signing go ahead, as the
+   * Flutter wallet does. Off by default.
+   */
+  resignGuard?: boolean;
 };
 
 type RecordWithdrawalCompletionParams = {
@@ -343,6 +453,34 @@ interface ApprovedFlow {
   flowId: string;
 }
 
+/**
+ * A Bitcoin private key as 64 hex characters, from either that or a WIF for
+ * the client's network. Throws on anything else, before anything is signed.
+ */
+function btcPrivateKeyHex(key: string, network: Network): string {
+  const trimmed = key.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  const btcNetwork = network === Network.Testnet ? bitcoinNetworks.testnet : bitcoinNetworks.bitcoin;
+  let privateKey: Buffer | undefined;
+  try {
+    privateKey = ECPairFactory(ecc).fromWIF(trimmed, btcNetwork).privateKey;
+  } catch (error) {
+    throw new Error(
+      `Bitcoin key is neither 64 hex characters nor a ${network} WIF: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+  if (!privateKey) {
+    throw new Error('Bitcoin WIF holds no private key');
+  }
+  return privateKey.toString('hex');
+}
+
+/** Concurrent transaction lookups in getLiveResumableWithdrawals. */
+const WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY = 4;
 const OWNERSHIP_NONCE_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
 
 /**
@@ -434,11 +572,16 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  /** `/transaction/{hash}/`, read only for a request's mined height. */
+  private transactionHeightApiClient: BaseApiClient;
+  private priceApiClient: PriceApiClient;
+  private nftListingApiClient: NftListingApiClient;
   private nftApiClient: NftApiClient;
   private mediaApiClient: MediaApiClient;
   private authApiClient: AuthApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
+  private throwOnRefusal: boolean;
   /** Clock offset and next-nonce cache shared by every send from this client. */
   private txBuildSession = new TxBuildSession();
 
@@ -466,19 +609,34 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.transactionHeightApiClient = new BaseApiClient({
+      basePath: '/transaction',
+      network: networkEnum,
+      ...this.apiOptions,
+    });
+    this.priceApiClient = new PriceApiClient(networkEnum, this.apiOptions);
+    this.nftListingApiClient = new NftListingApiClient(networkEnum, this.apiOptions);
     this.nftApiClient = new NftApiClient(networkEnum, this.apiOptions);
     this.mediaApiClient = new MediaApiClient(networkEnum, this.apiOptions);
     this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
   }
 
   /** The transaction-building options every RawTransactionService this client makes shares. */
-  private get txBuildOptions(): { hashMode: HashMode; preflight?: boolean; session: TxBuildSession } {
+  private get txBuildOptions(): {
+    hashMode: HashMode;
+    preflight?: boolean;
+    session: TxBuildSession;
+    throwOnRefusal?: boolean;
+  } {
     return {
       hashMode: this.hashMode,
       session: this.txBuildSession,
       ...(this.preflight !== undefined && { preflight: this.preflight }),
+      // Only ever switched on here, so a call that sets it itself is not overridden.
+      ...(this.throwOnRefusal && { throwOnRefusal: true }),
     };
   }
 
@@ -709,7 +867,7 @@ export class VfxClient {
     keypair: KeypairOrSigner,
     toAddress: string,
     amount: number,
-    options: ReserveSendOptions = {},
+    options: SendCoinOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
@@ -721,8 +879,62 @@ export class VfxClient {
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...(options.throwOnRefusal !== undefined && { throwOnRefusal: options.throwOnRefusal }),
     });
     return await txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * The fee and total (amount + fee) `sendCoin` would take with these
+   * arguments, before anything is signed. In 'both' and 'local' hashMode it
+   * is exact: the local formula, which the send then uses, and the same
+   * `fee` and `total` a signer's `approve` receives. In 'server' mode it is
+   * Spyglass's `/raw/fee` for an upper-bound size; the send asks again with
+   * the real nonce (unless the signer has `approve`), so treat it as an
+   * estimate there.
+   */
+  public quoteSendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<{ fee: number; amount: number; total: number }> => {
+    const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'quoteSendCoin');
+    return new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: recipient,
+      amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+    }).quote();
+  };
+
+  /**
+   * An offline upper bound on any transaction's fee from Core's size
+   * formula (the node only checks that a fee is above its floor). For a
+   * send, `quoteSendCoin` gives the exact fee it will carry.
+   */
+  public estimateTransactionFee = (tx: {
+    fromAddress: string;
+    toAddress: string;
+    amount?: number;
+    txType?: number;
+    data?: unknown;
+    unlockTime?: number | null;
+  }): number => {
+    return localTransactionFee({
+      FromAddress: tx.fromAddress,
+      ToAddress: tx.toAddress,
+      Amount: tx.amount ?? 0,
+      TransactionType: tx.txType ?? TxType.RbxTransfer,
+      Data: tx.data ?? null,
+      UnlockTime: tx.unlockTime ?? null,
+      Timestamp: Math.floor(Date.now() / 1000) + 3600,
+      Nonce: 999_999_999_999,
+    });
   };
 
   public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
@@ -780,8 +992,9 @@ export class VfxClient {
   };
 
   /**
-   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey`,
-   * managed by the signer. Costs 5 VFX. That Bitcoin key signs the claim: from
+   * Register `domain` (.btc) for the Bitcoin address of `btcPrivateKey` (a
+   * hex key, a WIF, or a BtcSigner whose `signDigest` signs the claim),
+   * managed by the signer. The address is the key's P2WPKH address. Costs 5 VFX. That Bitcoin key signs the claim: from
    * Core's BtcNameSignerOwnsAddressHeight (read against the latest block on
    * Spyglass) over `<unix seconds>:<signer address>:<name>.btc`, below it over
    * the bare timestamp. Throws when the latest block height cannot be read.
@@ -789,7 +1002,7 @@ export class VfxClient {
   public buyBtcDomain = async (
     keypair: KeypairOrSigner,
     domain: string,
-    btcPrivateKey: string,
+    btcPrivateKey: string | BtcSigner,
   ): Promise<string | null> => {
     domain = cleanBtcDomain(domain);
 
@@ -824,13 +1037,18 @@ export class VfxClient {
       : `${timestamp}`;
     const btcClient = new BtcClient(this.network);
 
-    const signature = btcClient.getSignature(message, btcPrivateKey);
-    const btcAccount = btcClient.addressFromPrivate(btcPrivateKey);
+    const btcKeyHex = isBtcSigner(btcPrivateKey) ? null : btcPrivateKeyHex(btcPrivateKey, this.network);
+    const signature =
+      btcKeyHex === null
+        ? await btcClient.getSignatureWithSigner(message, btcPrivateKey as BtcSigner, 'btc-name-claim')
+        : btcClient.getSignature(message, btcKeyHex);
+    const btcAddress =
+      btcKeyHex === null ? (btcPrivateKey as BtcSigner).address : btcClient.addressFromPrivate(btcKeyHex).address;
 
     const data = {
       Function: 'BTCAdnrCreate()',
       Name: domainWithoutSuffix(domain),
-      BTCAddress: btcAccount.address,
+      BTCAddress: btcAddress,
       Message: message,
       Signature: signature,
     };
@@ -965,7 +1183,7 @@ export class VfxClient {
    * passes its message and signature to transferBtcDomain. Good for 24 hours.
    */
   public signBtcNameTransferAcceptance = (params: {
-    /** Hex private key of the receiving Bitcoin address. */
+    /** Private key of the receiving Bitcoin address: 64 hex characters or a WIF. */
     btcPrivateKey: string;
     name: string;
     newOwner: string;
@@ -977,7 +1195,35 @@ export class VfxClient {
     }
     const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
     const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
-    const signature = new BtcClient(this.network).getSignature(message, params.btcPrivateKey);
+    const signature = new BtcClient(this.network).getSignature(
+      message,
+      btcPrivateKeyHex(params.btcPrivateKey, this.network),
+    );
+    return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
+  };
+
+  /**
+   * `signBtcNameTransferAcceptance` with a BtcSigner for the receiving
+   * Bitcoin address instead of its private key. The signer gets a
+   * `btc-message` request with purpose `btc-name-transfer-acceptance`.
+   */
+  public signBtcNameTransferAcceptanceWithSigner = async (params: {
+    btcSigner: BtcSigner;
+    name: string;
+    newOwner: string;
+    /** Unix seconds to sign at; defaults to now. */
+    timestamp?: number;
+  }): Promise<{ message: string; signature: string; code: string }> => {
+    if (!params.btcSigner || !params.name || !params.newOwner) {
+      throw new Error('signBtcNameTransferAcceptanceWithSigner requires btcSigner, name and newOwner');
+    }
+    const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
+    const message = btcNameAcceptanceMessage(timestamp, params.newOwner, params.name);
+    const signature = await new BtcClient(this.network).getSignatureWithSigner(
+      message,
+      params.btcSigner,
+      'btc-name-transfer-acceptance',
+    );
     return { message, signature, code: buildBtcNameAcceptanceCode(message, signature) };
   };
 
@@ -1013,9 +1259,94 @@ export class VfxClient {
     return this.transactionApiClient.listTransactionsForAddress(address, page, limit);
   };
 
+  /** Transactions to or from any of `addresses`, newest first, in one list. Failures throw. */
+  public listTransactionsForAddresses = async (
+    addresses: string[],
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResponse<Transaction>> => {
+    return this.transactionApiClient.listTransactionsForAddresses(addresses, page, limit);
+  };
+
+  /** One transaction by hash, or null when Spyglass has none. Other failures throw. */
+  public getTransaction = async (hash: string): Promise<Transaction | null> => {
+    return this.transactionApiClient.getTransaction(hash);
+  };
+
+  /** The newest block Spyglass has indexed. */
+  public getLatestBlock = async (): Promise<VfxBlock> => {
+    return this.blockApiClient.getLatestBlock();
+  };
+
+  /** Height of the newest block Spyglass has indexed. */
+  public getLatestBlockHeight = async (): Promise<number> => {
+    return this.blockApiClient.getLatestHeight();
+  };
+
+  /** A block by height, or null when Spyglass has none. */
+  public getBlock = async (height: number): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlock(height);
+  };
+
+  /** A block by hash, or null when Spyglass has none. */
+  public getBlockByHash = async (hash: string): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlockByHash(hash);
+  };
+
+  /** The latest USDT price of VFX or BTC (CoinMarketCap via Spyglass). */
+  public getCoinPrice = async (coin: PricedCoin = 'vfx'): Promise<CoinPrice> => {
+    return this.priceApiClient.getPrice(coin);
+  };
+
+  /** Up to the last 1,000 recorded prices of VFX or BTC, newest first. */
+  public getCoinPriceHistory = async (coin: PricedCoin = 'vfx'): Promise<CoinPricePoint[]> => {
+    return this.priceApiClient.getPriceHistory(coin);
+  };
+
+  /** Identifiers of the NFTs `ownerAddress` has listed for sale on the shop. */
+  public listListedNftIds = async (ownerAddress: string): Promise<string[]> => {
+    return this.nftListingApiClient.listListedNftIds(ownerAddress);
+  };
+
   // ---------------------------------------------------------------------------
   // vBTC V2
   // ---------------------------------------------------------------------------
+
+  /**
+   * `address`'s withdrawal requests on a vault that the chain still treats as
+   * its active one, so the wallet should resume them rather than start a new
+   * one. Judged by block height (the latest block, and each request
+   * transaction's height), falling back to 90 minutes from `created_at`
+   * for any request whose height cannot be read.
+   */
+  public getLiveResumableWithdrawals = async (
+    tokenOrScIdentifier: VbtcV2Token | string,
+    address: string,
+  ): Promise<VbtcWithdrawalRequest[]> => {
+    const token =
+      typeof tokenOrScIdentifier === 'string'
+        ? await this.vbtcV2ApiClient.getTokenDetail(tokenOrScIdentifier)
+        : tokenOrScIdentifier;
+    const candidates = resumableWithdrawalsFor(token, address);
+    if (candidates.length === 0) return [];
+    const currentBlockHeight = await this.blockApiClient.getLatestHeight().catch(() => null);
+    const requestBlockHeights: Record<string, number> = {};
+    if (currentBlockHeight !== null) {
+      // A few lookups at a time, so one slow request does not hold up the rest.
+      const hashes = candidates.map((request) => request.request_transaction_hash).filter((hash) => !!hash);
+      for (let i = 0; i < hashes.length; i += WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY) {
+        await Promise.all(
+          hashes.slice(i, i + WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY).map(async (hash) => {
+            const tx = await this.transactionHeightApiClient
+              .makeJsonRequest(`/${encodeURIComponent(hash)}/`)
+              .catch(() => null);
+            if (typeof tx?.height === 'number') requestBlockHeights[hash] = tx.height;
+          }),
+        );
+      }
+    }
+    return liveResumableWithdrawalsFor(token, address, { currentBlockHeight, requestBlockHeights });
+  };
 
   public listVbtcTokens = async (): Promise<VbtcV2Token[]> => {
     return this.vbtcV2ApiClient.listAllTokens();
@@ -1035,6 +1366,96 @@ export class VfxClient {
 
   public getVbtcWithdrawals = async (scIdentifier: string): Promise<VbtcWithdrawalRequest[]> => {
     return this.vbtcV2ApiClient.getWithdrawals(scIdentifier);
+  };
+
+  /**
+   * Hand a vBTC vault to `toAddress`: its contract, and with it the right to
+   * withdraw its Bitcoin (a Type 18 transaction, Core
+   * `GetVBTCOwnershipTransferData`). The owner signs the contract id so the
+   * node can push the vault's media to a beacon for the recipient; a vault
+   * with no media (the default placeholder) transfers with locator "NA" when
+   * no beacon answers. From a vault (xRBX) the transfer waits `unlockHours`
+   * (24 minimum) and can be called back until then.
+   */
+  public transferVbtcOwnership = async (
+    params: {
+      scIdentifier: string;
+      toAddress: string;
+      /** Local key to sign with. Pass either this or `signer`. */
+      privateKey?: string;
+      /** External signer (HSM, MPC) to sign with instead of a local key. */
+      signer?: Signer;
+    } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    this.assertNotDryRun('transferVbtcOwnership');
+    const signer = this.signerFor(params, 'transferVbtcOwnership');
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtcOwnership');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferVbtcOwnership toAddress');
+    if (toAddress === signer.address) {
+      throw new Error('transferVbtcOwnership requires a recipient other than the owner');
+    }
+    const unlockTime = this.unlockTimeFor(signer, params.unlockHours);
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-ownership-transfer',
+      scIdentifier: params.scIdentifier,
+      fromAddress: signer.address,
+      toAddress,
+    });
+
+    const beaconSignature = await signer.sign(params.scIdentifier, {
+      kind: 'vbtc-beacon-upload',
+      flowId,
+      message: params.scIdentifier,
+      scIdentifier: params.scIdentifier,
+      toAddress,
+    });
+    let locator = await this.vbtcV2ApiClient
+      .beaconUpload(params.scIdentifier, toAddress, beaconSignature)
+      .catch(() => null);
+    if (!locator) {
+      // A vault with no media has nothing to ship, so a dead beacon need not
+      // stop it; the node forces "NA" for such contracts itself. One that has
+      // media must not move without it.
+      const token = await this.vbtcV2ApiClient.getTokenDetail(params.scIdentifier);
+      if (!vbtcContractHasNoMedia(token?.nft)) {
+        throw new Error(
+          `transferVbtcOwnership: the beacon upload for ${params.scIdentifier} failed and the vault has media, ` +
+            'so it was not transferred; try again when a beacon is reachable',
+        );
+      }
+      locator = 'NA';
+    }
+
+    const data = await this.vbtcV2ApiClient.getOwnershipTransferData(params.scIdentifier, toAddress, locator);
+    // The node builds the instruction; the signer approved this vault and this
+    // recipient, so anything else (another contract, another recipient, a
+    // different function, extra entries) is refused before signing.
+    const instruction = data.length === 1 ? data[0] : null;
+    if (
+      !instruction ||
+      instruction.Function !== 'Transfer()' ||
+      instruction.ContractUID !== params.scIdentifier ||
+      instruction.ToAddress !== toAddress
+    ) {
+      throw new Error(
+        `transferVbtcOwnership: the node's transfer data does not match ${params.scIdentifier} to ${toAddress}; ` +
+          `nothing was signed: ${JSON.stringify(data)}`,
+      );
+    }
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress,
+      amount: 0,
+      txType: TxType.TokenizationTx,
+      data,
+      unlockTime,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(false);
   };
 
   public transferVbtc = async (params: {
@@ -1194,26 +1615,28 @@ export class VfxClient {
       sessionId: ceremonyPrep.session_id,
       ownerAddress: params.ownerAddress,
     };
-    const [startSignature, shareSignature] = await signMessages(signer, [
-      {
-        message: ceremonyPrep.messages_to_sign.start_message,
-        request: {
-          ...ceremony,
-          step: 'start',
+    const [startSignature, shareSignature] = await this.signing(() =>
+      signMessages(signer, [
+        {
           message: ceremonyPrep.messages_to_sign.start_message,
-          timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          request: {
+            ...ceremony,
+            step: 'start',
+            message: ceremonyPrep.messages_to_sign.start_message,
+            timestamp: ceremonyPrep.messages_to_sign.start_timestamp,
+          },
         },
-      },
-      {
-        message: ceremonyPrep.messages_to_sign.share_distribution_message,
-        request: {
-          ...ceremony,
-          step: 'share',
+        {
           message: ceremonyPrep.messages_to_sign.share_distribution_message,
-          timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          request: {
+            ...ceremony,
+            step: 'share',
+            message: ceremonyPrep.messages_to_sign.share_distribution_message,
+            timestamp: ceremonyPrep.messages_to_sign.share_distribution_timestamp,
+          },
         },
-      },
-    ]);
+      ]),
+    );
 
     onProgress({
       phase: 'ceremony_started',
@@ -1256,18 +1679,20 @@ export class VfxClient {
     const timestamp = Math.round(Date.now() / 1000);
     const uniqueId = generateRandomStringSecure(16, VBTC_UNIQUE_ID_CHARSET);
     const ownershipMessage = `${params.ownerAddress}${params.name}${params.description}${params.ticker}${ceremonyPrep.ceremony_id}${timestamp}${uniqueId}`;
-    const ownerSignature = await signer.sign(ownershipMessage, {
-      kind: 'vbtc-ownership',
-      flowId,
-      message: ownershipMessage,
-      ownerAddress: params.ownerAddress,
-      name: params.name,
-      description: params.description,
-      ticker: params.ticker,
-      ceremonyId: ceremonyPrep.ceremony_id,
-      timestamp,
-      uniqueId,
-    });
+    const ownerSignature = await this.signing(() =>
+      signer.sign(ownershipMessage, {
+        kind: 'vbtc-ownership',
+        flowId,
+        message: ownershipMessage,
+        ownerAddress: params.ownerAddress,
+        name: params.name,
+        description: params.description,
+        ticker: params.ticker,
+        ceremonyId: ceremonyPrep.ceremony_id,
+        timestamp,
+        uniqueId,
+      }),
+    );
 
     onProgress({ phase: 'contract_preparing', message: 'Preparing contract create transaction' });
 
@@ -1416,6 +1841,7 @@ export class VfxClient {
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
+    const frostTimeoutMs = params.frostTimeoutMs ?? timeoutMs;
     const withdrawalRequestHash = params.withdrawalRequestHash;
     // Approved before FROST is prepared: its start and share messages carry timestamps.
     const flowId = await this.approveFlow(
@@ -1428,6 +1854,18 @@ export class VfxClient {
       },
       flow,
     );
+
+    if (params.resumeJobId) {
+      // A job is only resumed while the explorer still knows it; "Job not
+      // found" means it is gone and a fresh call (without resumeJobId) is the
+      // way on. Any other answer, or a transient error, resumes polling.
+      const probe = await this.vbtcV2ApiClient.getWithdrawCompleteStatus(params.resumeJobId).catch(() => undefined);
+      if ((probe as { success?: boolean; message?: string } | undefined)?.message === 'Job not found') {
+        throw new VbtcFrostJobNotFoundError(withdrawalRequestHash, params.resumeJobId);
+      }
+      onProgress({ phase: 'frost_polling', message: `Resuming FROST job ${params.resumeJobId}` });
+      return this.finishFrostJob(params, params.resumeJobId, { flowId, frostTimeoutMs, pollIntervalMs });
+    }
 
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
@@ -1468,6 +1906,33 @@ export class VfxClient {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
     }
 
+    if (params.resignGuard) {
+      const row = await this.vbtcV2ApiClient
+        .getWithdrawals(params.scIdentifier)
+        .then((rows) => rows.find((r) => r.request_transaction_hash === withdrawalRequestHash) ?? null)
+        .catch(() => null);
+      const action = frostResumeActionFor(row);
+      if (action === 'completion-only' && row) {
+        return this.recordWithdrawalCompletionInFlow(
+          {
+            scIdentifier: params.scIdentifier,
+            requestorAddress: params.requestorAddress,
+            withdrawalRequestHash,
+            btcTransactionHash: row.btc_transaction_hash,
+            amount: params.amount,
+            btcDestination: params.btcAddress,
+            privateKey: params.privateKey,
+            signer: params.signer,
+            onProgress,
+          },
+          { flowId },
+        );
+      }
+      if (action === 'refuse') {
+        throw new VbtcWithdrawalAlreadySignedError(withdrawalRequestHash);
+      }
+    }
+
     // Multi-input withdrawals (caster-upgrade nodes) return one start message
     // per vault UTXO. StartMessages[0] is byte-identical to the legacy
     // StartMessage and is already covered by the start signature; every later
@@ -1484,32 +1949,34 @@ export class VfxClient {
       sessionId: frostPrep.SessionId,
     };
     const extraInputs = (frostPrep.StartMessages ?? []).filter((entry) => entry.InputIndex > 0);
-    const [frostStartSig, frostShareSig, ...extraSignatures] = await signMessages(signer, [
-      {
-        message: frostPrep.StartMessage,
-        request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
-      },
-      {
-        message: frostPrep.ShareDistributionMessage,
-        request: {
-          ...frost,
-          step: 'share',
+    const [frostStartSig, frostShareSig, ...extraSignatures] = await this.signing(() =>
+      signMessages(signer, [
+        {
+          message: frostPrep.StartMessage,
+          request: { ...frost, step: 'start', message: frostPrep.StartMessage, timestamp: frostPrep.StartTimestamp },
+        },
+        {
           message: frostPrep.ShareDistributionMessage,
-          timestamp: frostPrep.ShareDistributionTimestamp,
+          request: {
+            ...frost,
+            step: 'share',
+            message: frostPrep.ShareDistributionMessage,
+            timestamp: frostPrep.ShareDistributionTimestamp,
+          },
         },
-      },
-      ...extraInputs.map((entry) => ({
-        message: entry.Message,
-        request: {
-          ...frost,
-          step: 'input' as const,
+        ...extraInputs.map((entry) => ({
           message: entry.Message,
-          sessionId: entry.SessionId ?? frostPrep.SessionId,
-          timestamp: entry.Timestamp,
-          inputIndex: entry.InputIndex,
-        },
-      })),
-    ]);
+          request: {
+            ...frost,
+            step: 'input' as const,
+            message: entry.Message,
+            sessionId: entry.SessionId ?? frostPrep.SessionId,
+            timestamp: entry.Timestamp,
+            inputIndex: entry.InputIndex,
+          },
+        })),
+      ]),
+    );
     const extraStartSignatures = extraInputs.map((entry, index) => ({
       input_index: entry.InputIndex,
       signature: extraSignatures[index],
@@ -1543,6 +2010,50 @@ export class VfxClient {
     if (!frostExec?.success || !frostExec.job_id) {
       throw new Error(`completeWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);
     }
+    await this.reportWithdrawalCheckpoint(params, {
+      kind: 'frost-job-started',
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash,
+      jobId: frostExec.job_id,
+      amount: params.amount,
+      btcAddress: params.btcAddress,
+    });
+
+    return this.finishFrostJob(params, frostExec.job_id, { flowId, frostTimeoutMs, pollIntervalMs });
+  };
+
+  private async reportWithdrawalCheckpoint(
+    params: CompleteWithdrawalParams,
+    checkpoint: VbtcWithdrawalCheckpoint,
+  ): Promise<void> {
+    if (!params.onCheckpoint) return;
+    try {
+      await params.onCheckpoint(checkpoint);
+    } catch (error) {
+      params.onProgress?.({
+        phase: 'checkpoint_failed',
+        message: `Could not save the ${checkpoint.kind} checkpoint: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        data: checkpoint,
+      });
+    }
+  }
+
+  /**
+   * Poll a FROST signing job to its signed Bitcoin transaction, broadcast it,
+   * and record the completion (Type 28). Shared by a fresh withdrawal and a
+   * resumed `resumeJobId`.
+   */
+  private async finishFrostJob(
+    params: CompleteWithdrawalParams,
+    jobId: string,
+    opts: { flowId: string; frostTimeoutMs: number; pollIntervalMs: number },
+  ): Promise<VbtcWithdrawalResult> {
+    const { flowId, pollIntervalMs } = opts;
+    const timeoutMs = opts.frostTimeoutMs;
+    const onProgress = params.onProgress ?? (() => undefined);
+    const withdrawalRequestHash = params.withdrawalRequestHash;
 
     // The failed-status diagnostics (failure_code, retryable, ...) ride on
     // the polled status object; captured here so the thrown error can say
@@ -1552,7 +2063,7 @@ export class VfxClient {
     let frostFinal;
     try {
       frostFinal = await this.pollUntilDone({
-        getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(frostExec.job_id),
+        getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(jobId),
         isDone: (s) => s?.success === true && (s as { status?: string }).status === 'complete',
         isFailed: (s) => {
           const failed = s?.success === false || (s as { status?: string }).status === 'failed';
@@ -1590,6 +2101,17 @@ export class VfxClient {
 
     if (!('signed_btc_tx_hex' in frostFinal) || !frostFinal.signed_btc_tx_hex) {
       throw new Error(`completeWithdrawal frost completed without signed_btc_tx_hex: ${JSON.stringify(frostFinal)}`);
+    }
+    // A job names the withdrawal it signed. One restored from storage for a
+    // different withdrawal would otherwise broadcast that one's Bitcoin and
+    // record it against this one, so a mismatch stops before the broadcast.
+    const jobVault = frostFinal.sc_identifier;
+    const jobRequest = frostFinal.withdrawal_request_hash;
+    if ((jobVault && jobVault !== params.scIdentifier) || (jobRequest && jobRequest !== withdrawalRequestHash)) {
+      throw new Error(
+        `completeWithdrawal: FROST job ${jobId} signed withdrawal ${jobRequest ?? '?'} on ${jobVault ?? '?'}, ` +
+          `not ${withdrawalRequestHash} on ${params.scIdentifier}; nothing was broadcast`,
+      );
     }
 
     onProgress({ phase: 'frost_complete', message: 'FROST signing complete' });
@@ -1630,6 +2152,18 @@ export class VfxClient {
       message: 'BTC transaction broadcast',
       data: { txid: broadcast.txid },
     });
+    // Recorded before the Type 28 is attempted: from here the Bitcoin has
+    // left the vault, and what finishes the withdrawal is this txid alone.
+    await this.reportWithdrawalCheckpoint(params, {
+      kind: 'btc-broadcast',
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash,
+      jobId,
+      btcTransactionHash: broadcast.txid,
+      signedBtcTxHex,
+      amount: params.amount,
+      btcAddress: params.btcAddress,
+    });
 
     // Step 4: Record completion (Type 28).
     //
@@ -1656,7 +2190,7 @@ export class VfxClient {
     } catch (error) {
       throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
     }
-  };
+  }
 
   /**
    * Where a withdrawal from a vault the chain watches stands: its pinned
@@ -2316,6 +2850,9 @@ export class VfxClient {
    * asset to pass as `asset` or in `additionalAssets`.
    */
   public uploadNftAsset = async (file: Blob, fileName: string): Promise<NftAssetInput> => {
+    if (this.dryRun) {
+      throw new Error('uploadNftAsset does not support dryRun mode: Spyglass stores the file for real');
+    }
     const named = typeof File !== 'undefined' && file instanceof File ? file : new File([file], fileName);
     const result = await this.mediaApiClient.uploadAsset(named);
     if (!result?.url) {
@@ -2580,6 +3117,9 @@ export class VfxClient {
     params: { scIdentifier: string; mediaMap: Record<string, string> },
   ): Promise<void> => {
     const resolved = this.resolve(signer);
+    if (this.dryRun) {
+      throw new Error("associateNftMedia does not support dryRun mode: it replaces the NFT's live media URLs");
+    }
     const message = `${generateRandomStringSecure(16, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
     const signature = await resolved.sign(message, { kind: 'spyglass-auth', flowId: newFlowId(), message });
     const { token } = await this.authApiClient.signToken(resolved.address, message, signature);
@@ -2839,14 +3379,16 @@ export class VfxClient {
 
     const signatureTime = Math.round(Date.now() / 1000);
     const recoveryMessage = `${signatureTime}${recoveryAddress}`;
-    const recoverySigScript = await recovery.sign(recoveryMessage, {
-      kind: 'reserve-recovery',
-      flowId,
-      message: recoveryMessage,
-      reserveAddress: resolved.address,
-      recoveryAddress,
-      signatureTime,
-    });
+    const recoverySigScript = await this.signing(() =>
+      recovery.sign(recoveryMessage, {
+        kind: 'reserve-recovery',
+        flowId,
+        message: recoveryMessage,
+        reserveAddress: resolved.address,
+        recoveryAddress,
+        signatureTime,
+      }),
+    );
 
     return this.sendReserveTx(
       resolved,
@@ -3187,6 +3729,19 @@ export class VfxClient {
     throw new Error(`${label} requires a privateKey or a signer`);
   }
 
+  /**
+   * Run a signing step of a send. A signer that throws instead of signing
+   * passes its error through unchanged, as before; with throwOnRefusal it
+   * arrives as SignerError, as from every RawTransactionService send.
+   */
+  private async signing<T>(sign: () => Promise<T>): Promise<T> {
+    try {
+      return await sign();
+    } catch (error) {
+      throw this.throwOnRefusal && !(error instanceof SignerError) ? new SignerError(error) : error;
+    }
+  }
+
   private async signAndSend(
     prepared: PreparedTransactionResponse,
     signer: ResolvedSigner,
@@ -3194,7 +3749,10 @@ export class VfxClient {
     flowId: string,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
-    const signature = await signer.sign(hash, this.preparedSigningRequest(prepared, flowId));
+    // Built outside the signing step: a hash mismatch it finds stays a
+    // TransactionHashMismatchError, never a SignerError.
+    const request = this.preparedSigningRequest(prepared, flowId);
+    const signature = await this.signing(() => signer.sign(hash, request));
     // The prepare endpoint chose this transaction's nonce, so the session's
     // cached next nonce for the sender can no longer be trusted, whatever the
     // send's outcome.
@@ -3204,13 +3762,30 @@ export class VfxClient {
     // Spyglass also returns when its own call to the node times out) leaves it
     // unknown whether the transaction was accepted. A plain error here would
     // read as "not sent" and invite a resend, so it carries the hash instead.
-    // An explicit `success: false` body is a definite refusal and is left to
-    // assertSent.
+    // An explicit `success: false` body is a definite refusal: left to
+    // assertSent, or with throwOnRefusal raised here as
+    // TransactionRefusedError carrying the prepared hash and the reason.
+    let sent: SentTransactionResponse;
     try {
-      return await sendFn({ hash, signature, public_key: signer.publicKey });
+      sent = await sendFn({ hash, signature, public_key: signer.publicKey });
     } catch (error) {
+      // Spyglass 78+ answers a send the node refused with a 500 that carries
+      // the node's reason as `node_message` (null when the node did not
+      // answer). With a reason the refusal is definite, not a lost answer.
+      const nodeMessage = this.throwOnRefusal ? nodeMessageOf(error) : null;
+      if (nodeMessage) {
+        throw new TransactionRefusedError(hash, nodeMessage);
+      }
       throw new TransactionDispatchError(hash, error);
     }
+    if (this.throwOnRefusal && sent?.success === false) {
+      const body = sent as unknown as { node_message?: unknown; message?: unknown; Message?: unknown };
+      const reason = [body.node_message, body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as
+        | string
+        | undefined;
+      throw new TransactionRefusedError(hash, reason ?? null);
+    }
+    return sent;
   }
 
   /**
@@ -3330,6 +3905,21 @@ function isTransientReadError(error: unknown): boolean {
   if (error instanceof VbtcNodeUnreachableError) return true;
   if (error instanceof VfxApiError) return error.status === undefined || error.status >= 500;
   return error instanceof TypeError || (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name));
+}
+
+/**
+ * The node's refusal reason in a Spyglass error answer (`node_message`, from
+ * Spyglass 78), or null when there is none: an older Spyglass, the node not
+ * answering, or not an HTTP error at all.
+ */
+function nodeMessageOf(error: unknown): string | null {
+  if (!(error instanceof VfxApiError) || !error.body) return null;
+  try {
+    const message = (JSON.parse(error.body) as { node_message?: unknown })?.node_message;
+    return typeof message === 'string' && message !== '' ? message : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The txid of a signed Bitcoin transaction, or null if the hex does not parse. */

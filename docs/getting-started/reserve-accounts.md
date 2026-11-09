@@ -15,9 +15,9 @@ A reserve account (also called a vault) is an `xRBX…` address whose outgoing s
 - **Recovery.** The recovery key signs a `Recover()` that sweeps the vault's balance to the recovery address and permanently deactivates the vault.
 - **Scope.** The delay applies to VFX, vBTC and NFT sends. A fungible-token transfer from a vault carries the unlock time but settles immediately, so a vault protects treasury, not fund tokens. Domain operations, token deployment and multi-contract vBTC transfers are refused from a vault.
 
-## Step 1: Derive the Vault Keys
+## Step 1: Create the Vault Keys
 
-The vault the VerifiedX web wallet pairs with an account is derived from that account's main key, so the SDK produces the same vault address and recovery key as the wallet.
+This creates a **new** vault: a random vault key and a separate, random recovery key. Neither comes from the main key, so a stolen main key or vault key cannot also give away the recovery key. To restore a vault that already exists, skip this step and use the restore helpers under "Other ways to get a vault" below: a vault key or restore code you kept, or `restoreLegacyWebWalletVault` / `findLegacyRecovery` for a vault the Flutter web wallet derived from the main key.
 
 ```typescript
 import { VfxClient, Network } from 'vfx-web-sdk';
