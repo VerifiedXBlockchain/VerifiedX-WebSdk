@@ -34,28 +34,23 @@ const TAG_BYTES = 16;
 const HEADER_BYTES = EPHEMERAL_KEY_BYTES + NONCE_BYTES + TAG_BYTES;
 
 // The wallet's three forms, in the order it tries them. Data may span lines
-// and may carry literal "\n" sequences where a description escaped its breaks.
-const VFX_SHH_FORMS: { pattern: RegExp; stripsWhitespace: boolean }[] = [
-  {
-    pattern: /VFX-SHH:([^\s\n\\]+)(?:\\n|\s*\n\s*)([A-Za-z0-9+/=\n\s\\]+?)(?:\\n|\s*\n\s*)\/VFX-SHH/im,
-    stripsWhitespace: true,
-  },
-  { pattern: /\[VFX-SHH:([^\]]+)\]\s*\{([^}]+)\}\s*\[\/VFX-SHH\]/i, stripsWhitespace: false },
-  {
-    pattern: /\[VFX-SHH:([^\]]+)\](?:\\n|\s*\n\s*)([A-Za-z0-9+/=\n\s\\]+?)(?:\\n|\s*\n\s*)\[\/VFX-SHH\]/im,
-    stripsWhitespace: true,
-  },
+// and may carry literal "\n" sequences where a description escaped its
+// breaks; base64 has neither, so both are removed from every form (the
+// wallet leaves them in the braced form, which then fails to decode).
+const VFX_SHH_FORMS: RegExp[] = [
+  /VFX-SHH:([^\s\n\\]+)(?:\\n|\s*\n\s*)([A-Za-z0-9+/=\n\s\\]+?)(?:\\n|\s*\n\s*)\/VFX-SHH/im,
+  /\[VFX-SHH:([^\]]+)\]\s*\{([^}]+)\}\s*\[\/VFX-SHH\]/i,
+  /\[VFX-SHH:([^\]]+)\](?:\\n|\s*\n\s*)([A-Za-z0-9+/=\n\s\\]+?)(?:\\n|\s*\n\s*)\[\/VFX-SHH\]/im,
 ];
 
 /** The VFX-SHH message in `text`, or null when there is none. */
 export function parseVfxShhMessage(text: string): VfxShhMessage | null {
   if (!text) return null;
-  for (const { pattern, stripsWhitespace } of VFX_SHH_FORMS) {
+  for (const pattern of VFX_SHH_FORMS) {
     const match = pattern.exec(text);
     if (!match) continue;
     const recipientAddress = match[1].trim();
-    const trimmed = match[2].trim();
-    const encryptedData = stripsWhitespace ? trimmed.replace(/\\n/g, '').replace(/\s/g, '') : trimmed;
+    const encryptedData = match[2].trim().replace(/\\n/g, '').replace(/\s/g, '');
     if (recipientAddress && encryptedData) {
       return { recipientAddress, encryptedData, rawMessage: match[0] };
     }
