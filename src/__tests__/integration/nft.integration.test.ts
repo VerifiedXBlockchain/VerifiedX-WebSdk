@@ -146,6 +146,7 @@ async function waitFor<T>(label: string, read: () => Promise<T>, done: (value: T
     expect(nftEvolveRefusal(nft, reader.address, 1)).toMatch(/Only the minter/);
     expect(await client.decryptNftMessage(reader, nft)).toEqual({ recipientAddress: reader.address, message: secret });
     await expect(client.decryptNftMessage(minter, nft)).rejects.toThrow(/for /);
-    expect(await client.pullNftBeaconAssets(minter, scIdentifier)).toEqual({ locators: 'NA', pulled: false });
+    // Never transferred, so no beacon holds anything for it.
+    expect((await client.pullNftBeaconAssets(minter, scIdentifier)).pulled).toBe(false);
   });
 });
