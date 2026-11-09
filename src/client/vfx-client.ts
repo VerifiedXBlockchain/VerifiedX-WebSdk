@@ -58,6 +58,7 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { frostResumeActionFor } from '../services/frost-resume';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
@@ -87,6 +88,7 @@ import {
   TokenVotingTopic,
   Transaction,
   VbtcCancelResult,
+  VbtcWithdrawalCheckpoint,
   VbtcMultiTransferResult,
   VbtcMultiWithdrawalResult,
   VbtcWithdrawalShare,
@@ -261,6 +263,44 @@ export class VbtcWithdrawalClosedError extends Error {
   }
 }
 
+/**
+ * `resumeJobId` named a FROST job the explorer no longer knows. Nothing new
+ * was signed. Clear the stored job and call completeWithdrawal without it
+ * (with `resignGuard`, so a signature that did land is not repeated).
+ */
+export class VbtcFrostJobNotFoundError extends Error {
+  readonly withdrawalRequestHash: string;
+  readonly jobId: string;
+
+  constructor(withdrawalRequestHash: string, jobId: string) {
+    super(`FROST job ${jobId} for withdrawal request ${withdrawalRequestHash} is not known to the explorer any more`);
+    this.name = 'VbtcFrostJobNotFoundError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    this.jobId = jobId;
+    Object.setPrototypeOf(this, VbtcFrostJobNotFoundError.prototype);
+  }
+}
+
+/**
+ * `resignGuard` found that this withdrawal was already signed (`signed_at` or
+ * `pending_btc`) but the explorer names no Bitcoin transaction for it.
+ * Signing again could pay it twice, so nothing was done. Do not retry; find
+ * the broadcast (or wait for the explorer) and use recordWithdrawalCompletion.
+ */
+export class VbtcWithdrawalAlreadySignedError extends Error {
+  readonly withdrawalRequestHash: string;
+
+  constructor(withdrawalRequestHash: string) {
+    super(
+      `Withdrawal request ${withdrawalRequestHash} has already been signed and no Bitcoin transaction is recorded ` +
+        'for it yet. Do not start it again: that could pay it twice.',
+    );
+    this.name = 'VbtcWithdrawalAlreadySignedError';
+    this.withdrawalRequestHash = withdrawalRequestHash;
+    Object.setPrototypeOf(this, VbtcWithdrawalAlreadySignedError.prototype);
+  }
+}
+
 /** Spyglass answered but could not reach the node, so the withdrawal's state is unknown; ask again. */
 export class VbtcNodeUnreachableError extends Error {
   readonly answer: string;
@@ -312,7 +352,37 @@ type CompleteWithdrawalParams = {
   signer?: Signer;
   onProgress?: (event: VbtcProgressEvent) => void;
   pollIntervalMs?: number;
+  /** Deadline for the whole call; default 3 minutes. */
   timeoutMs?: number;
+  /**
+   * Deadline for the FROST signing job alone; defaults to `timeoutMs`. The
+   * Flutter wallet waits 10 minutes (real ceremonies have taken over 4).
+   */
+  frostTimeoutMs?: number;
+  /**
+   * Resume an existing FROST job (the `jobId` of a `frost-job-started`
+   * checkpoint) instead of starting a new signing: no prepare, no new
+   * signatures, just polling, broadcast and the Type 28. Throws
+   * VbtcFrostJobNotFoundError when the explorer no longer knows the job.
+   */
+  resumeJobId?: string;
+  /**
+   * Called, and awaited, at the two moments a withdrawal must be persisted
+   * to survive a closed tab: when the FROST job starts (`frost-job-started`,
+   * before polling) and when its Bitcoin transaction is broadcast
+   * (`btc-broadcast`, before the Type 28). A throwing hook does not stop the
+   * withdrawal; the failure is reported through `onProgress`.
+   */
+  onCheckpoint?: (checkpoint: VbtcWithdrawalCheckpoint) => void | Promise<void>;
+  /**
+   * Before signing, read the explorer's row for this request and, if it
+   * shows a signature already exists (`signed_at` set or status
+   * `pending_btc`), record the completion when the row names its Bitcoin
+   * transaction or throw VbtcWithdrawalAlreadySignedError otherwise, rather
+   * than sign a second time. An unreadable row lets signing go ahead, as the
+   * Flutter wallet does. Off by default.
+   */
+  resignGuard?: boolean;
 };
 
 type RecordWithdrawalCompletionParams = {
@@ -1221,6 +1291,7 @@ export class VfxClient {
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
+    const frostTimeoutMs = params.frostTimeoutMs ?? timeoutMs;
     const withdrawalRequestHash = params.withdrawalRequestHash;
     // Approved before FROST is prepared: its start and share messages carry timestamps.
     const flowId = await this.approveFlow(
@@ -1233,6 +1304,18 @@ export class VfxClient {
       },
       flow,
     );
+
+    if (params.resumeJobId) {
+      // A job is only resumed while the explorer still knows it; "Job not
+      // found" means it is gone and a fresh call (without resumeJobId) is the
+      // way on. Any other answer, or a transient error, resumes polling.
+      const probe = await this.vbtcV2ApiClient.getWithdrawCompleteStatus(params.resumeJobId).catch(() => undefined);
+      if ((probe as { success?: boolean; message?: string } | undefined)?.message === 'Job not found') {
+        throw new VbtcFrostJobNotFoundError(withdrawalRequestHash, params.resumeJobId);
+      }
+      onProgress({ phase: 'frost_polling', message: `Resuming FROST job ${params.resumeJobId}` });
+      return this.finishFrostJob(params, params.resumeJobId, { flowId, frostTimeoutMs, pollIntervalMs });
+    }
 
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
@@ -1271,6 +1354,33 @@ export class VfxClient {
     const frostPrep = answer as unknown as WithdrawCompletePrepareResponse;
     if (!frostPrep?.success) {
       throw new Error(`completeWithdrawal frost prepare failed: ${JSON.stringify(frostPrep)}`);
+    }
+
+    if (params.resignGuard) {
+      const row = await this.vbtcV2ApiClient
+        .getWithdrawals(params.scIdentifier)
+        .then((rows) => rows.find((r) => r.request_transaction_hash === withdrawalRequestHash) ?? null)
+        .catch(() => null);
+      const action = frostResumeActionFor(row);
+      if (action === 'completion-only' && row) {
+        return this.recordWithdrawalCompletionInFlow(
+          {
+            scIdentifier: params.scIdentifier,
+            requestorAddress: params.requestorAddress,
+            withdrawalRequestHash,
+            btcTransactionHash: row.btc_transaction_hash,
+            amount: params.amount,
+            btcDestination: params.btcAddress,
+            privateKey: params.privateKey,
+            signer: params.signer,
+            onProgress,
+          },
+          { flowId },
+        );
+      }
+      if (action === 'refuse') {
+        throw new VbtcWithdrawalAlreadySignedError(withdrawalRequestHash);
+      }
     }
 
     // Multi-input withdrawals (caster-upgrade nodes) return one start message
@@ -1348,6 +1458,50 @@ export class VfxClient {
     if (!frostExec?.success || !frostExec.job_id) {
       throw new Error(`completeWithdrawal frost execute failed: ${JSON.stringify(frostExec)}`);
     }
+    await this.reportWithdrawalCheckpoint(params, {
+      kind: 'frost-job-started',
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash,
+      jobId: frostExec.job_id,
+      amount: params.amount,
+      btcAddress: params.btcAddress,
+    });
+
+    return this.finishFrostJob(params, frostExec.job_id, { flowId, frostTimeoutMs, pollIntervalMs });
+  };
+
+  private async reportWithdrawalCheckpoint(
+    params: CompleteWithdrawalParams,
+    checkpoint: VbtcWithdrawalCheckpoint,
+  ): Promise<void> {
+    if (!params.onCheckpoint) return;
+    try {
+      await params.onCheckpoint(checkpoint);
+    } catch (error) {
+      params.onProgress?.({
+        phase: 'checkpoint_failed',
+        message: `Could not save the ${checkpoint.kind} checkpoint: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        data: checkpoint,
+      });
+    }
+  }
+
+  /**
+   * Poll a FROST signing job to its signed Bitcoin transaction, broadcast it,
+   * and record the completion (Type 28). Shared by a fresh withdrawal and a
+   * resumed `resumeJobId`.
+   */
+  private async finishFrostJob(
+    params: CompleteWithdrawalParams,
+    jobId: string,
+    opts: { flowId: string; frostTimeoutMs: number; pollIntervalMs: number },
+  ): Promise<VbtcWithdrawalResult> {
+    const { flowId, pollIntervalMs } = opts;
+    const timeoutMs = opts.frostTimeoutMs;
+    const onProgress = params.onProgress ?? (() => undefined);
+    const withdrawalRequestHash = params.withdrawalRequestHash;
 
     // The failed-status diagnostics (failure_code, retryable, ...) ride on
     // the polled status object; captured here so the thrown error can say
@@ -1357,7 +1511,7 @@ export class VfxClient {
     let frostFinal;
     try {
       frostFinal = await this.pollUntilDone({
-        getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(frostExec.job_id),
+        getStatus: () => this.vbtcV2ApiClient.getWithdrawCompleteStatus(jobId),
         isDone: (s) => s?.success === true && (s as { status?: string }).status === 'complete',
         isFailed: (s) => {
           const failed = s?.success === false || (s as { status?: string }).status === 'failed';
@@ -1435,6 +1589,18 @@ export class VfxClient {
       message: 'BTC transaction broadcast',
       data: { txid: broadcast.txid },
     });
+    // Recorded before the Type 28 is attempted: from here the Bitcoin has
+    // left the vault, and what finishes the withdrawal is this txid alone.
+    await this.reportWithdrawalCheckpoint(params, {
+      kind: 'btc-broadcast',
+      scIdentifier: params.scIdentifier,
+      withdrawalRequestHash,
+      jobId,
+      btcTransactionHash: broadcast.txid,
+      signedBtcTxHex,
+      amount: params.amount,
+      btcAddress: params.btcAddress,
+    });
 
     // Step 4: Record completion (Type 28).
     //
@@ -1461,7 +1627,7 @@ export class VfxClient {
     } catch (error) {
       throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
     }
-  };
+  }
 
   /**
    * Where a withdrawal from a vault the chain watches stands: its pinned

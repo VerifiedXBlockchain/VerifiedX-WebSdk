@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **FROST withdrawal resume** on `completeWithdrawal`, all opt-in: `resumeJobId` polls an existing signing job without preparing or signing again (`VbtcFrostJobNotFoundError` when the explorer no longer knows it); `onCheckpoint` is awaited at `frost-job-started` (before polling) and `btc-broadcast` (before the Type 28) so an app can persist them; `resignGuard` reads the explorer row first and records only, or refuses with `VbtcWithdrawalAlreadySignedError`, when `signed_at` / `pending_btc` say it was already signed; `frostTimeoutMs` bounds the signing job on its own (Flutter waits 10 minutes). `frostResumeActionFor(row)` exposes the guard. `VbtcWithdrawalRequest.signed_at` is typed.
+
 ## Unreleased (9.1.0)
 
 ### Added

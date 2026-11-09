@@ -11,7 +11,11 @@ export {
   VbtcWithdrawalUnrecordedError,
   VbtcNodeUnreachableError,
   VbtcWithdrawalClosedError,
+  VbtcFrostJobNotFoundError,
+  VbtcWithdrawalAlreadySignedError,
 } from './client/vfx-client';
+export { frostResumeActionFor } from './services/frost-resume';
+export type { FrostResumeAction } from './services/frost-resume';
 export { parseWatchedWithdrawal, VBTC_WATCHED_MAX_FEE_RATE } from './services/watched-withdrawal';
 export {
   btcNameAcceptanceMessage,
@@ -61,6 +65,7 @@ export type {
   VbtcCancelResult,
   VbtcProgressPhase,
   VbtcProgressEvent,
+  VbtcWithdrawalCheckpoint,
   FungibleToken,
   FungibleTokenDetail,
   FungibleTokenBalance,
