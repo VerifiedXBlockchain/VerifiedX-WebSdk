@@ -3062,6 +3062,14 @@ export class VfxClient {
   };
 
   /**
+   * The beacon locators the node last recorded for an NFT's media, "NA" when
+   * it has none, or null when the node has no answer for it.
+   */
+  public getNftLocators = async (scIdentifier: string): Promise<string | null> => {
+    return this.rawTransactionApiClient.getLocators(scIdentifier);
+  };
+
+  /**
    * After receiving an NFT with media, ask the node to fetch the files from
    * the beacons the sender pushed them to (the wallet does this when the
    * transfer lands). The new owner signs the contract id. Returns the

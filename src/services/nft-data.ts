@@ -72,11 +72,36 @@ function evolveDateForCompiler(value: Date | string | undefined): string {
   if (typeof value === 'string' && !/(Z|[+-]\d{2}:?\d{2})$/i.test(value.trim())) {
     throw new Error(`evolveDate ${value} has no time zone; give a Date or an ISO string ending in Z or an offset`);
   }
+  if (typeof value === 'string' && !isoDatePartsExist(value.trim())) {
+    // Date would roll 2027-02-31 over to March 3 rather than refuse it.
+    throw new Error(`evolveDate ${value} is not a valid date`);
+  }
   const date = typeof value === 'string' ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) {
     throw new Error(`evolveDate ${String(value)} is not a valid date`);
   }
   return date.toISOString();
+}
+
+/** Whether an ISO 8601 date-time names a real calendar day and time of day, as written. */
+function isoDatePartsExist(text: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-](\d{2}):?(\d{2}))$/i.exec(
+    text,
+  );
+  if (!match) return false;
+  const [year, month, day, hour, minute, second = '0', offsetHours = '0', offsetMinutes = '0'] = match.slice(1);
+  const daysInMonth = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+  return (
+    Number(month) >= 1 &&
+    Number(month) <= 12 &&
+    Number(day) >= 1 &&
+    Number(day) <= daysInMonth &&
+    Number(hour) <= 23 &&
+    Number(minute) <= 59 &&
+    Number(second) <= 59 &&
+    Number(offsetHours) <= 23 &&
+    Number(offsetMinutes) <= 59
+  );
 }
 
 function extensionOf(fileName: string): string {

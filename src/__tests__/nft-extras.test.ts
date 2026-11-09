@@ -83,6 +83,16 @@ describe('time evolve in the mint payload', () => {
     expect(() => nftMintPayload(phases())).toThrow(/needs an evolveDate/);
     expect(() => nftMintPayload(phases('2026-12-25T12:30:00'))).toThrow(/no time zone/);
     expect(() => nftMintPayload(phases('soonZ'))).toThrow(/not a valid date/);
+    // Calendar days and times that do not exist are refused, not rolled over.
+    for (const bad of [
+      '2027-02-31T12:00:00Z',
+      '2026-02-29T00:00:00Z',
+      '2026-13-01T00:00:00Z',
+      '2026-12-25T24:00:00Z',
+    ]) {
+      expect(() => nftMintPayload(phases(bad))).toThrow(/not a valid date/);
+    }
+    expect(() => nftMintPayload(phases('2028-02-29T23:59:59.5+05:30'))).not.toThrow();
   });
 
   test("'manual' and 'blockHeight' payloads are unchanged", () => {
@@ -144,6 +154,7 @@ describe('pullNftBeaconAssets', () => {
       [`/raw/locators/${encodeURIComponent(SC)}/`]: () => ({ Locators: 'beacon-locator-b64' }),
       '/raw/beacon-assets/': () => ({ success: true }),
     });
+    expect(await new VfxClient('testnet').getNftLocators(SC)).toBe('beacon-locator-b64');
     const result = await new VfxClient('testnet').pullNftBeaconAssets(owner, SC);
     expect(result).toEqual({ locators: 'beacon-locator-b64', pulled: true });
     const pull = calls.find((c) => c.url.includes('/raw/beacon-assets/'));
@@ -200,6 +211,8 @@ describe('VFX-SHH', () => {
       `Hello\n${formatVfxShhMessage('xAbc', wrapped)}\nbye`,
       `VFX-SHH:xAbc\\n${data}\\n/VFX-SHH`,
       `[VFX-SHH:xAbc]{${data}}[/VFX-SHH]`,
+      // Braced and wrapped, then escaped by nftMintPayload's description handling.
+      `[VFX-SHH:xAbc]{${data.slice(0, 40)}\\n${data.slice(40)}}[/VFX-SHH]`,
       `[VFX-SHH:xAbc]\n${wrapped}\n[/VFX-SHH]`,
     ]) {
       expect(parseVfxShhMessage(text)).toMatchObject({ recipientAddress: 'xAbc', encryptedData: data });
