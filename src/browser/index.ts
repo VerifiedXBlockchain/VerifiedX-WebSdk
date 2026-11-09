@@ -29,6 +29,7 @@ export {
   PreSignCheckError,
   TransactionDispatchError,
   TransactionRefusedError,
+  SignerError,
 } from '../services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from '../btc/errors';
 

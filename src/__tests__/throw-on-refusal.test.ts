@@ -1,4 +1,4 @@
-import { VfxClient } from '../index';
+import { SignerError, VfxClient } from '../index';
 import KeypairService from '../services/keypair-service';
 import { Network } from '../constants';
 import { HashableTransaction, transactionHash } from '../services/transaction-hash';
@@ -109,5 +109,38 @@ describe('Greptile review fixes', () => {
         privateKey,
       }),
     ).rejects.toThrow(/transferVbtc:send failed/);
+  });
+});
+
+describe('throwOnRefusal and a signer that refuses to sign', () => {
+  // A browser extension rejects with a provider error, not an Error instance.
+  const rejection = { code: 4001, message: 'User rejected the request.' };
+  const refusingSigner = {
+    address: keypair.address,
+    publicKey: keypair.publicKey,
+    signDigest: () => {
+      throw rejection;
+    },
+  };
+
+  test('default unchanged: the send resolves to null', async () => {
+    const { calls } = install({ Result: 'Success' }, { Result: 'Success' });
+    expect(await new VfxClient('testnet').sendCoin(refusingSigner, RECIPIENT, 1)).toBeNull();
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
+  });
+
+  test('with throwOnRefusal it throws SignerError carrying the signer error, before anything is sent', async () => {
+    const { calls } = install({ Result: 'Success' }, { Result: 'Success' });
+    for (const client of [new VfxClient('testnet', { throwOnRefusal: true }), new VfxClient('testnet')]) {
+      const send = client.sendCoin(refusingSigner, RECIPIENT, 1, { throwOnRefusal: true });
+      await expect(send).rejects.toBeInstanceOf(SignerError);
+      await expect(send).rejects.toMatchObject({ cause: rejection });
+      await expect(send).rejects.toThrow(/User rejected the request.*Nothing was sent/);
+    }
+    // The client option alone covers the other sends.
+    await expect(
+      new VfxClient('testnet', { throwOnRefusal: true }).sendCoin(refusingSigner, RECIPIENT, 1),
+    ).rejects.toBeInstanceOf(SignerError);
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
   });
 });

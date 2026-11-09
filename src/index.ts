@@ -30,6 +30,7 @@ export {
   PreSignCheckError,
   TransactionDispatchError,
   TransactionRefusedError,
+  SignerError,
 } from './services/raw-transaction-service';
 export { BtcBroadcastUnknownError } from './btc/errors';
 export { MediaApiClient } from './client/media-api-client';

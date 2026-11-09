@@ -41,8 +41,10 @@ export interface IRawTransactionServiceOptions {
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
   /**
    * Throw TransactionRefusedError, carrying the node's reason, when the node
-   * refuses the transaction (at verification, or at the send itself),
-   * instead of resolving to null.
+   * refuses the transaction (at verification, or at the send itself), and
+   * SignerError, carrying the signer's own error, when the signer refuses or
+   * fails to sign (a rejected prompt in a browser extension), instead of
+   * resolving to null.
    */
   throwOnRefusal?: boolean;
   /**
@@ -217,14 +219,18 @@ export class RawTransactionService {
       this.beforeSign?.(this.updateTransactionData());
 
       const hash = this.hash as string;
-      this.signature = await this.signer.sign(hash, {
-        kind: 'transaction',
-        flowId: this.flowId,
-        message: hash,
-        transaction: this.signingTransaction(),
-        hashSource: this.hashMode === 'server' ? 'server' : 'local',
-        ...(this.hashPreimage !== null && { hashPreimage: this.hashPreimage }),
-      });
+      try {
+        this.signature = await this.signer.sign(hash, {
+          kind: 'transaction',
+          flowId: this.flowId,
+          message: hash,
+          transaction: this.signingTransaction(),
+          hashSource: this.hashMode === 'server' ? 'server' : 'local',
+          ...(this.hashPreimage !== null && { hashPreimage: this.hashPreimage }),
+        });
+      } catch (error) {
+        throw new SignerError(error);
+      }
 
       if (!this.signature) {
         throw new Error('Signature was null');
@@ -289,13 +295,34 @@ export class RawTransactionService {
         error instanceof TransactionDispatchError ||
         error instanceof TransactionRefusedError ||
         error instanceof PreSignCheckError ||
-        error instanceof TransactionHashMismatchError
+        error instanceof TransactionHashMismatchError ||
+        (error instanceof SignerError && this.throwOnRefusal)
       ) {
         throw error;
       }
       console.error(`Error in process():`, error);
       return null;
     }
+  }
+}
+
+/**
+ * Thrown, for callers that ask for it with `throwOnRefusal`, when the signer
+ * threw instead of signing: the person rejected the prompt, or the key
+ * source failed. Nothing was signed or sent. `cause` is the signer's error
+ * as it was thrown (an extension's `{ code: 4001 }`, say).
+ */
+export class SignerError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    // Extension providers reject with plain `{ code, message }` objects.
+    const message = (cause as { message?: unknown } | null)?.message;
+    const detail = typeof message === 'string' && message !== '' ? message : String(cause);
+    super(`The signer did not sign the transaction: ${detail}. Nothing was sent.`);
+    this.name = 'SignerError';
+    this.cause = cause;
+    Object.setPrototypeOf(this, SignerError.prototype);
   }
 }
 
