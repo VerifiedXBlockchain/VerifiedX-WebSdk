@@ -111,3 +111,84 @@ describe('Greptile review fixes', () => {
     ).rejects.toThrow(/transferVbtc:send failed/);
   });
 });
+
+describe('throwOnRefusal on the NFT writes', () => {
+  const SC = '7a6b4c3d-0000-4000-8000-000000000001:1762600000';
+  const refused = { Result: 'Fail', Message: 'You are attempting to devolve/evolve a Smart contract you dont own.' };
+  const evolvingNft = {
+    identifier: SC,
+    minter_address: keypair.address,
+    owner_address: RECIPIENT,
+    is_burned: false,
+    primary_asset_name: 'default',
+    primary_asset_size: 0,
+    smart_contract_data: JSON.stringify({
+      SmartContractMain: {
+        SmartContractAsset: { Name: 'default', FileSize: 0 },
+        Features: [{ FeatureName: 0, FeatureFeatures: [{ EvolutionState: 1, Name: 'One', IsCurrentState: false }] }],
+      },
+    }),
+  };
+
+  function installNft() {
+    return installFetch({
+      '/raw/timestamp/': () => textResponse('1700000000'),
+      '/raw/nonce/': () => textResponse('7'),
+      '/raw/hash/': (_u: string, init?: RequestInit) => ({
+        Result: 'Success',
+        Hash: transactionHash((JSON.parse(init?.body as string) as { transaction: HashableTransaction }).transaction),
+      }),
+      '/raw/verify/': () => refused,
+      '/raw/send/': () => ({ Result: 'Success' }),
+      '/raw/smart-contract-data/': () => [{ Function: 'Mint()', ContractUID: SC, Data: 'H4sI', MD5List: 'x' }],
+      '/raw/nft-transfer-data/': () => [{ Function: 'Transfer()', ContractUID: SC, ToAddress: RECIPIENT }],
+      '/raw/nft-evolve-data/': () => [{ Function: 'ChangeEvolveStateSpecific()', ContractUID: SC, NewEvoState: 1 }],
+      '/raw/nft-burn-data/': () => ({
+        Success: true,
+        Message: JSON.stringify([{ Function: 'Burn()', ContractUID: SC, FromAddress: keypair.address }]),
+      }),
+      [`/nft/${encodeURIComponent(SC)}/`]: () => ({ ...evolvingNft, owner_address: keypair.address }),
+    });
+  }
+
+  const mint = { name: 'Lighthouse', description: 'd', minterName: 'M' };
+  const writes = (client: VfxClient, perCall?: { throwOnRefusal: boolean }) => ({
+    mintNft: () => client.mintNft(keypair, mint, perCall),
+    transferNft: () =>
+      client.transferNft(keypair, { scIdentifier: SC, toAddress: RECIPIENT, locator: 'NA', ...perCall }),
+    evolveNft: () => client.evolveNft(keypair, { scIdentifier: SC, stage: 1, ...perCall }),
+    burnNft: () => client.burnNft(keypair, { scIdentifier: SC, ...perCall }),
+  });
+
+  test('default unchanged: each NFT write resolves to null on a refusal', async () => {
+    installNft();
+    for (const [name, write] of Object.entries(writes(new VfxClient('testnet')))) {
+      expect([name, await write()]).toEqual([name, null]);
+    }
+  });
+
+  test('per call, each NFT write throws TransactionRefusedError with the reason', async () => {
+    installNft();
+    for (const write of Object.values(writes(new VfxClient('testnet'), { throwOnRefusal: true }))) {
+      await expect(write()).rejects.toMatchObject({ name: 'TransactionRefusedError', reason: refused.Message });
+    }
+  });
+
+  test('the client option covers the NFT writes; a per-call false turns it off', async () => {
+    installNft();
+    const client = new VfxClient('testnet', { throwOnRefusal: true });
+    for (const write of Object.values(writes(client))) {
+      await expect(write()).rejects.toMatchObject({ name: 'TransactionRefusedError' });
+    }
+    for (const write of Object.values(writes(client, { throwOnRefusal: false }))) {
+      expect(await write()).toBeNull();
+    }
+  });
+
+  test('mintNfts wraps the refusal in NftBulkMintError, the refusal as its cause', async () => {
+    installNft();
+    const failure = new VfxClient('testnet').mintNfts(keypair, [mint, mint], { throwOnRefusal: true });
+    await expect(failure).rejects.toMatchObject({ name: 'NftBulkMintError', index: 0, minted: [] });
+    await expect(failure).rejects.toHaveProperty('cause.name', 'TransactionRefusedError');
+  });
+});

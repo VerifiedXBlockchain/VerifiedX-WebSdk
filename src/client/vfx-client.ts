@@ -176,14 +176,22 @@ export interface ReserveSendOptions {
   unlockHours?: number;
 }
 
-/** Per-call options for `sendCoin`. */
-export interface SendCoinOptions extends ReserveSendOptions {
+/** The per-call refusal switch `sendCoin` and the NFT writes take. */
+export interface RefusalOptions {
   /**
    * Throw TransactionRefusedError, with the node's reason, when the node
    * refuses this send, instead of resolving to null. Overrides the client's
    * `throwOnRefusal` for this call.
    */
   throwOnRefusal?: boolean;
+}
+
+/** Per-call options for `sendCoin`. */
+export interface SendCoinOptions extends ReserveSendOptions, RefusalOptions {}
+
+/** The RawTransactionService option a call's RefusalOptions sets, if any. */
+function refusalOverride(options: RefusalOptions | undefined): { throwOnRefusal?: boolean } {
+  return options?.throwOnRefusal !== undefined ? { throwOnRefusal: options.throwOnRefusal } : {};
 }
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
@@ -2867,6 +2875,7 @@ export class VfxClient {
   public mintNft = async (
     signer: KeypairOrSigner,
     params: NftMintParams,
+    options: RefusalOptions = {},
   ): Promise<{ transactionHash: string; scIdentifier: string } | null> => {
     const resolved = this.resolve(signer);
     this.assertNotReserve(resolved, 'mintNft');
@@ -2875,7 +2884,7 @@ export class VfxClient {
       minterAddress: resolved.address,
       names: [params.name],
     });
-    return this.mintOneNft(resolved, params, flowId);
+    return this.mintOneNft(resolved, params, flowId, options);
   };
 
   /**
@@ -2886,6 +2895,7 @@ export class VfxClient {
   public mintNfts = async (
     signer: KeypairOrSigner,
     items: NftMintParams[],
+    options: RefusalOptions = {},
   ): Promise<Array<{ transactionHash: string; scIdentifier: string }>> => {
     const resolved = this.resolve(signer);
     this.assertNotReserve(resolved, 'mintNfts');
@@ -2905,7 +2915,7 @@ export class VfxClient {
     for (const [index, item] of items.entries()) {
       let result: { transactionHash: string; scIdentifier: string } | null;
       try {
-        result = await this.mintOneNft(resolved, item, flowId);
+        result = await this.mintOneNft(resolved, item, flowId, options);
       } catch (error) {
         throw new NftBulkMintError(index, minted, error);
       }
@@ -2921,6 +2931,7 @@ export class VfxClient {
     signer: ResolvedSigner,
     params: NftMintParams,
     flowId: string,
+    options: RefusalOptions,
   ): Promise<{ transactionHash: string; scIdentifier: string } | null> {
     const payload = nftMintPayload({ ...params, minterAddress: signer.address });
     const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
@@ -2934,6 +2945,7 @@ export class VfxClient {
       data,
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...refusalOverride(options),
       flowId,
       approved: true,
     });
@@ -2952,7 +2964,7 @@ export class VfxClient {
    */
   public transferNft = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; toAddress: string; locator?: string } & ReserveSendOptions,
+    params: { scIdentifier: string; toAddress: string; locator?: string } & ReserveSendOptions & RefusalOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const toAddress = await this.resolveRecipient(params.toAddress, 'transferNft');
@@ -3010,6 +3022,7 @@ export class VfxClient {
       unlockTime,
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...refusalOverride(params),
       flowId,
       approved: true,
     });
@@ -3026,7 +3039,7 @@ export class VfxClient {
    */
   public evolveNft = async (
     signer: KeypairOrSigner,
-    params: { scIdentifier: string; stage: number; ownerAddress?: string },
+    params: { scIdentifier: string; stage: number; ownerAddress?: string } & RefusalOptions,
   ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     if (!Number.isInteger(params.stage) || params.stage < 0) {
@@ -3055,6 +3068,7 @@ export class VfxClient {
       data,
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...refusalOverride(params),
       flowId,
       approved: true,
     });
@@ -3131,7 +3145,10 @@ export class VfxClient {
   };
 
   /** Burn an NFT the signer owns. */
-  public burnNft = async (signer: KeypairOrSigner, params: { scIdentifier: string }): Promise<string | null> => {
+  public burnNft = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string } & RefusalOptions,
+  ): Promise<string | null> => {
     const resolved = this.resolve(signer);
     const flowId = await this.approveFlow(resolved, {
       action: 'nft-burn',
@@ -3149,6 +3166,7 @@ export class VfxClient {
       unlockTime: this.unlockTimeFor(resolved),
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...refusalOverride(params),
       flowId,
       approved: true,
     });
