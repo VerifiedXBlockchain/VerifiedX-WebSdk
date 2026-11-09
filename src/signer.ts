@@ -56,6 +56,12 @@ export type SigningRequest =
       hashSource: 'local' | 'server' | 'prepared';
     })
   | (SigningRequestBase & {
+      /** The owner's signature over the contract id, asking the node to push a vBTC vault's media to a beacon for `toAddress`. */
+      kind: 'vbtc-beacon-upload';
+      scIdentifier: string;
+      toAddress: string;
+    })
+  | (SigningRequestBase & {
       kind: 'vbtc-ceremony';
       step: 'start' | 'share';
       ceremonyId: string;
@@ -91,6 +97,21 @@ export type SigningRequest =
       signatureTime: number;
     })
   | (SigningRequestBase & {
+      /** The owner's signature over the contract id, asking the node to push the NFT's media to a beacon for `toAddress`. */
+      kind: 'nft-beacon-upload';
+      scIdentifier: string;
+      toAddress: string;
+    })
+  | (SigningRequestBase & {
+      /** A proof that the signer owns the NFT, handed to someone who checks it with `verifyNftOwnership`. */
+      kind: 'nft-ownership-proof';
+      scIdentifier: string;
+    })
+  | (SigningRequestBase & {
+      /** A Spyglass session token for the signer's address (needed to replace an NFT's media URLs). */
+      kind: 'spyglass-auth';
+    })
+  | (SigningRequestBase & {
       kind: 'message';
     });
 
@@ -110,6 +131,13 @@ export type SigningIntent =
       txType: number;
       data: unknown;
       unlockTime: number | null;
+      /**
+       * The fee the transaction will carry, and amount + fee: quoted before
+       * approval and then used as-is. Absent when no quote was made
+       * ('server' mode with a signer that has no `approve`).
+       */
+      fee?: number;
+      total?: number;
     }
   | {
       action: 'vbtc-create';
@@ -133,6 +161,14 @@ export type SigningIntent =
       fromAddress: string;
       toAddress: string;
       amount: number;
+    }
+  | {
+      /** Hand a vBTC vault (its contract and the right to withdraw) to another account. */
+      action: 'vbtc-ownership-transfer';
+      flowId: string;
+      scIdentifier: string;
+      fromAddress: string;
+      toAddress: string;
     }
   | {
       /** A Type 27 request; the completion that follows (FROST and the Type 28 record) shares its flow. */
@@ -161,6 +197,36 @@ export type SigningIntent =
       btcTransactionHash: string;
       amount: number;
       btcDestination: string;
+    }
+  | {
+      /** One or more NFT mints (`mintNfts` approves the whole batch once). */
+      action: 'nft-mint';
+      flowId: string;
+      minterAddress: string;
+      names: string[];
+    }
+  | {
+      action: 'nft-transfer';
+      flowId: string;
+      scIdentifier: string;
+      fromAddress: string;
+      toAddress: string;
+      /** Hours a send from a vault waits before it settles; null from an ordinary account. */
+      unlockHours: number | null;
+    }
+  | {
+      action: 'nft-evolve';
+      flowId: string;
+      scIdentifier: string;
+      minterAddress: string;
+      ownerAddress: string;
+      stage: number;
+    }
+  | {
+      action: 'nft-burn';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
     }
   | {
       action: 'reserve-recovery';

@@ -16,6 +16,10 @@ export { BTC_TO_SATOSHI_MULTIPLIER, SATOSHI_TO_BTC_MULTIPLIER } from './constant
 // Export utility functions
 export { publicKeyToAddress, wifToPrivateKey, seedToPrivateKey, hashSeed, regtestUtils } from './utils';
 
+// External Bitcoin signing (extension, hardware wallet, HSM)
+export { btcSignerFromWif, signBtcMessage, btcMessageDigest, isBtcSigner } from './signer';
+export type { BtcSigner, BtcSigningRequest, BtcSigningIntent } from './signer';
+
 // Export errors
 export { BtcBroadcastUnknownError } from './errors';
 

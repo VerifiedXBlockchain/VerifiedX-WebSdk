@@ -71,7 +71,7 @@ describe('compat(wallet): email/password sign in', () => {
     expect(btcCredentialsFromDerivationText(v.derivationText)).toEqual({ email: v.btcEmail, password: v.btcPassword });
     for (const network of NETWORKS) {
       expect(services[network].addressFromPrivate(privateKey)).toBe(v[network].address);
-      expectSameVault(services[network].reserveKeypairFromPrivateKey(privateKey), v[network].reserve);
+      expectSameVault(services[network].restoreLegacyWebWalletVault(privateKey), v[network].reserve);
       expectSameBtc(walletDerivationText(privateKey), network, v[network].btc);
     }
   });
@@ -97,7 +97,7 @@ describe('compat(wallet): recovery phrase sign in', () => {
     for (const network of NETWORKS) {
       const expected = (v as Required<typeof v>)[network];
       expect(services[network].addressFromPrivate(privateKey)).toBe(expected.address);
-      expectSameVault(services[network].reserveKeypairFromPrivateKey(privateKey), expected.reserve);
+      expectSameVault(services[network].restoreLegacyWebWalletVault(privateKey), expected.reserve);
       expectSameBtc(walletDerivationText(privateKey), network, expected.btc);
     }
   });
@@ -125,7 +125,7 @@ describe('compat(wallet): imported private key', () => {
       });
       for (const network of NETWORKS) {
         expectSameVault(
-          services[network].reserveKeypairFromDerivationText(candidate.derivationText),
+          services[network].restoreLegacyWebWalletVaultFromDerivationText(candidate.derivationText),
           candidate[network].reserve,
         );
         expectSameBtc(candidate.derivationText, network, candidate[network].btc);
