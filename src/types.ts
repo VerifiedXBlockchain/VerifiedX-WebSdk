@@ -23,6 +23,20 @@ export interface VfxAddress {
   deactivated?: boolean;
 }
 
+/** A block as Spyglass indexes it. */
+export interface VfxBlock {
+  height: number;
+  hash: string;
+  previous_hash: string;
+  validator_address: string;
+  validator_signature?: string;
+  chain_ref_id?: string;
+  merkle_root?: string;
+  date_crafted?: string;
+  master_node?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
 export interface Transaction {
   hash: string;
   height: number;

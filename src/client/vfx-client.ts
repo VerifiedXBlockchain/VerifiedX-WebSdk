@@ -90,6 +90,7 @@ import {
   LegacyVaultSource,
   PaginatedResponse,
   ReserveKeypair,
+  VfxBlock,
   TokenVotingTopic,
   Transaction,
   VaultKeypair,
@@ -121,6 +122,8 @@ import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
+import { CoinPrice, CoinPricePoint, PriceApiClient, PricedCoin } from './price-api-client';
+import { NftListingApiClient } from './nft-listing-api-client';
 import { NftApiClient, NftListQuery, VfxNft, nftIsMedialess } from './nft-api-client';
 import { MediaApiClient } from './media-api-client';
 import { AuthApiClient } from './auth-api-client';
@@ -402,6 +405,8 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  private priceApiClient: PriceApiClient;
+  private nftListingApiClient: NftListingApiClient;
   private nftApiClient: NftApiClient;
   private mediaApiClient: MediaApiClient;
   private authApiClient: AuthApiClient;
@@ -434,6 +439,8 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.priceApiClient = new PriceApiClient(networkEnum, this.apiOptions);
+    this.nftListingApiClient = new NftListingApiClient(networkEnum, this.apiOptions);
     this.nftApiClient = new NftApiClient(networkEnum, this.apiOptions);
     this.mediaApiClient = new MediaApiClient(networkEnum, this.apiOptions);
     this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
@@ -1062,6 +1069,55 @@ export class VfxClient {
     limit = 10,
   ): Promise<PaginatedResponse<Transaction> | null> => {
     return this.transactionApiClient.listTransactionsForAddress(address, page, limit);
+  };
+
+  /** Transactions to or from any of `addresses`, newest first, in one list. Failures throw. */
+  public listTransactionsForAddresses = async (
+    addresses: string[],
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResponse<Transaction>> => {
+    return this.transactionApiClient.listTransactionsForAddresses(addresses, page, limit);
+  };
+
+  /** One transaction by hash, or null when Spyglass has none. Other failures throw. */
+  public getTransaction = async (hash: string): Promise<Transaction | null> => {
+    return this.transactionApiClient.getTransaction(hash);
+  };
+
+  /** The newest block Spyglass has indexed. */
+  public getLatestBlock = async (): Promise<VfxBlock> => {
+    return this.blockApiClient.getLatestBlock();
+  };
+
+  /** Height of the newest block Spyglass has indexed. */
+  public getLatestBlockHeight = async (): Promise<number> => {
+    return this.blockApiClient.getLatestHeight();
+  };
+
+  /** A block by height, or null when Spyglass has none. */
+  public getBlock = async (height: number): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlock(height);
+  };
+
+  /** A block by hash, or null when Spyglass has none. */
+  public getBlockByHash = async (hash: string): Promise<VfxBlock | null> => {
+    return this.blockApiClient.getBlockByHash(hash);
+  };
+
+  /** The latest USDT price of VFX or BTC (CoinMarketCap via Spyglass). */
+  public getCoinPrice = async (coin: PricedCoin = 'vfx'): Promise<CoinPrice> => {
+    return this.priceApiClient.getPrice(coin);
+  };
+
+  /** Up to the last 1,000 recorded prices of VFX or BTC, newest first. */
+  public getCoinPriceHistory = async (coin: PricedCoin = 'vfx'): Promise<CoinPricePoint[]> => {
+    return this.priceApiClient.getPriceHistory(coin);
+  };
+
+  /** Identifiers of the NFTs `ownerAddress` has listed for sale on the shop. */
+  public listListedNftIds = async (ownerAddress: string): Promise<string[]> => {
+    return this.nftListingApiClient.listListedNftIds(ownerAddress);
   };
 
   // ---------------------------------------------------------------------------
