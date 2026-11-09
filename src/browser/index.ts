@@ -108,6 +108,7 @@ export {
   walletDerivationText,
 } from '../services/wallet-derivation';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from '../services/vbtc-multi';
+export { VFX_API_BASE_URL_MAINNET, VFX_API_BASE_URL_TESTNET, VFX_API_BASE_URL_DEVNET } from '../constants';
 export {
   TOKEN_BASE_ADDRESS,
   RESERVE_BASE_ADDRESS,

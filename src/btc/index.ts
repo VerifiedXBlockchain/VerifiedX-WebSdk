@@ -25,3 +25,7 @@ export type { BtcClientOptions } from './client';
 
 // Default export - the main client
 export default BtcClient;
+
+// Fee rates as the wallet shows them (testnet floors, offline fallback)
+export { recommendedFeeRates, BTC_FALLBACK_FEE_RATES, BTC_TESTNET_FEE_RATE_FLOORS } from './fee-rates';
+export type { RecommendedFeeRates } from './fee-rates';

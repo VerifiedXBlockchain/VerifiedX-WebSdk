@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`btc.recommendedFeeRates(network)`**: fee tiers as the Flutter wallet shows them, with testnet floors (10/8/5/5/2 sat/vB) and a fixed fallback table marked `isEstimate` when the fee API cannot be reached. `BtcClient.getFeeRates` is unchanged.
+- **`VFX_API_BASE_URL_DEVNET`** (`https://data-devnet.verifiedx.io/api`), plus the mainnet and testnet base URLs as exports. Devnet uses the testnet address prefix, so a devnet client is `new VfxClient('testnet', { baseUrl: VFX_API_BASE_URL_DEVNET })`.
+
 ## Unreleased (9.1.0)
 
 ### Added
