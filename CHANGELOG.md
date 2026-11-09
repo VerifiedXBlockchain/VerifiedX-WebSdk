@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **vBTC withdrawal state**: `VbtcWithdrawalRequest` types the watched-vault fields Spyglass returns (`pin_state`, `pin_txid`, `pin_fee_rate`, `releasing`, `expires_at_height`, `closed_because`, `refunded_amount`), all optional. Helpers ported from the Flutter wallet: `isWithdrawalResumable`, `watchedWithdrawalRowState`, `withdrawalRowCanCancel`, `isWithdrawalStale` (Core's 360-block expiry, 90-minute fallback), `resumableWithdrawalsFor`, `liveResumableWithdrawalsFor`, `vbtcMultiWithdrawalMax`, and `VfxClient.getLiveResumableWithdrawals`, which looks up the heights.
+
 ## Unreleased (9.1.0)
 
 ### Added

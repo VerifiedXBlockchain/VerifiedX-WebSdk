@@ -117,6 +117,25 @@ export interface VbtcWithdrawalRequest {
   btc_address: string;
   amount: string;
   fee_rate: string;
+  /**
+   * On a watched vault, while the request is open: the node's state for it,
+   * `Waiting` (no Bitcoin transaction fixed yet, can still be cancelled) or
+   * `Pinned`. Null once closed, before the node was read, and on vaults the
+   * chain does not watch. Absent from older Spyglass deployments.
+   */
+  pin_state?: string | null;
+  /** The pinned Bitcoin transaction's txid while the request is open and pinned. */
+  pin_txid?: string | null;
+  /** The pinned transaction's fee rate (sat/vB). */
+  pin_fee_rate?: number | null;
+  /** The requester asked to release the pinned withdrawal; the vBTC comes back once it closes. */
+  releasing?: boolean | null;
+  /** The height after which an open watched request expires. */
+  expires_at_height?: number | null;
+  /** Why a cancelled request closed unpaid (Cancelled, Released, Expired or Void). */
+  closed_because?: string | null;
+  /** What a closed request refunded when less than its amount (a release keeps its Bitcoin fee). */
+  refunded_amount?: string | null;
   btc_transaction_hash: string;
   /**
    * See {@link VbtcWithdrawalStatus} for the per-value caveats. `pending_btc`

@@ -97,6 +97,18 @@ export {
   withdrawalFeeFloorError,
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
+export {
+  VBTC_WITHDRAWAL_EXPIRY_BLOCKS,
+  VBTC_WITHDRAWAL_STALE_AFTER_MS,
+  isWithdrawalResumable,
+  isWithdrawalStale,
+  liveResumableWithdrawalsFor,
+  resumableWithdrawalsFor,
+  vbtcMultiWithdrawalMax,
+  watchedWithdrawalRowState,
+  withdrawalRowCanCancel,
+} from '../services/vbtc-withdrawal-state';
+export type { WatchedWithdrawalRowState } from '../services/vbtc-withdrawal-state';
 // Web wallet sign-in derivation (vault and Bitcoin account texts)
 export {
   btcCredentialsFromDerivationText,

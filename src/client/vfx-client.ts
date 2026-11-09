@@ -58,6 +58,7 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { liveResumableWithdrawalsFor, resumableWithdrawalsFor } from '../services/vbtc-withdrawal-state';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
@@ -109,7 +110,7 @@ import {
   isValidVfxDomain,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
-import { VfxApiError } from './base-api-client';
+import { BaseApiClient, VfxApiError } from './base-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
@@ -348,6 +349,8 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  /** `/transaction/{hash}/`, read only for a request's mined height. */
+  private transactionHeightApiClient: BaseApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
   /** Clock offset and next-nonce cache shared by every send from this client. */
@@ -377,6 +380,11 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.transactionHeightApiClient = new BaseApiClient({
+      basePath: '/transaction',
+      network: networkEnum,
+      ...this.apiOptions,
+    });
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
   }
@@ -821,6 +829,38 @@ export class VfxClient {
   // ---------------------------------------------------------------------------
   // vBTC V2
   // ---------------------------------------------------------------------------
+
+  /**
+   * `address`'s withdrawal requests on a vault that the chain still treats as
+   * its active one, so the wallet should resume them rather than start a new
+   * one. Judged by block height (the latest block, and each request
+   * transaction's height), falling back to 90 minutes from `created_at`
+   * for any request whose height cannot be read.
+   */
+  public getLiveResumableWithdrawals = async (
+    tokenOrScIdentifier: VbtcV2Token | string,
+    address: string,
+  ): Promise<VbtcWithdrawalRequest[]> => {
+    const token =
+      typeof tokenOrScIdentifier === 'string'
+        ? await this.vbtcV2ApiClient.getTokenDetail(tokenOrScIdentifier)
+        : tokenOrScIdentifier;
+    const candidates = resumableWithdrawalsFor(token, address);
+    if (candidates.length === 0) return [];
+    const currentBlockHeight = await this.blockApiClient.getLatestHeight().catch(() => null);
+    const requestBlockHeights: Record<string, number> = {};
+    if (currentBlockHeight !== null) {
+      for (const request of candidates) {
+        const hash = request.request_transaction_hash;
+        if (!hash) continue;
+        const tx = await this.transactionHeightApiClient
+          .makeJsonRequest(`/${encodeURIComponent(hash)}/`)
+          .catch(() => null);
+        if (typeof tx?.height === 'number') requestBlockHeights[hash] = tx.height;
+      }
+    }
+    return liveResumableWithdrawalsFor(token, address, { currentBlockHeight, requestBlockHeights });
+  };
 
   public listVbtcTokens = async (): Promise<VbtcV2Token[]> => {
     return this.vbtcV2ApiClient.listAllTokens();
