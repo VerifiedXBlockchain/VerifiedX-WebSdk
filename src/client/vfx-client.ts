@@ -59,6 +59,7 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { liveResumableWithdrawalsFor, resumableWithdrawalsFor } from '../services/vbtc-withdrawal-state';
 import { frostResumeActionFor } from '../services/frost-resume';
 import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
 import {
@@ -119,7 +120,7 @@ import {
   isValidVfxDomain,
 } from '../utils';
 import { AddressApiClient } from './address-api-client';
-import { VfxApiError } from './base-api-client';
+import { BaseApiClient, VfxApiError } from './base-api-client';
 import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
@@ -421,6 +422,8 @@ interface ApprovedFlow {
   flowId: string;
 }
 
+/** Concurrent transaction lookups in getLiveResumableWithdrawals. */
+const WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY = 4;
 const OWNERSHIP_NONCE_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
 
 /**
@@ -479,6 +482,8 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  /** `/transaction/{hash}/`, read only for a request's mined height. */
+  private transactionHeightApiClient: BaseApiClient;
   private priceApiClient: PriceApiClient;
   private nftListingApiClient: NftListingApiClient;
   private nftApiClient: NftApiClient;
@@ -513,6 +518,11 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.transactionHeightApiClient = new BaseApiClient({
+      basePath: '/transaction',
+      network: networkEnum,
+      ...this.apiOptions,
+    });
     this.priceApiClient = new PriceApiClient(networkEnum, this.apiOptions);
     this.nftListingApiClient = new NftListingApiClient(networkEnum, this.apiOptions);
     this.nftApiClient = new NftApiClient(networkEnum, this.apiOptions);
@@ -1197,6 +1207,42 @@ export class VfxClient {
   // ---------------------------------------------------------------------------
   // vBTC V2
   // ---------------------------------------------------------------------------
+
+  /**
+   * `address`'s withdrawal requests on a vault that the chain still treats as
+   * its active one, so the wallet should resume them rather than start a new
+   * one. Judged by block height (the latest block, and each request
+   * transaction's height), falling back to 90 minutes from `created_at`
+   * for any request whose height cannot be read.
+   */
+  public getLiveResumableWithdrawals = async (
+    tokenOrScIdentifier: VbtcV2Token | string,
+    address: string,
+  ): Promise<VbtcWithdrawalRequest[]> => {
+    const token =
+      typeof tokenOrScIdentifier === 'string'
+        ? await this.vbtcV2ApiClient.getTokenDetail(tokenOrScIdentifier)
+        : tokenOrScIdentifier;
+    const candidates = resumableWithdrawalsFor(token, address);
+    if (candidates.length === 0) return [];
+    const currentBlockHeight = await this.blockApiClient.getLatestHeight().catch(() => null);
+    const requestBlockHeights: Record<string, number> = {};
+    if (currentBlockHeight !== null) {
+      // A few lookups at a time, so one slow request does not hold up the rest.
+      const hashes = candidates.map((request) => request.request_transaction_hash).filter((hash) => !!hash);
+      for (let i = 0; i < hashes.length; i += WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY) {
+        await Promise.all(
+          hashes.slice(i, i + WITHDRAWAL_HEIGHT_LOOKUP_CONCURRENCY).map(async (hash) => {
+            const tx = await this.transactionHeightApiClient
+              .makeJsonRequest(`/${encodeURIComponent(hash)}/`)
+              .catch(() => null);
+            if (typeof tx?.height === 'number') requestBlockHeights[hash] = tx.height;
+          }),
+        );
+      }
+    }
+    return liveResumableWithdrawalsFor(token, address, { currentBlockHeight, requestBlockHeights });
+  };
 
   public listVbtcTokens = async (): Promise<VbtcV2Token[]> => {
     return this.vbtcV2ApiClient.listAllTokens();
