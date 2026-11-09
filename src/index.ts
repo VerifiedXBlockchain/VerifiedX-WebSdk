@@ -134,7 +134,7 @@ export {
 } from './services/vbtc-withdrawal-state';
 export type { WatchedWithdrawalRowState } from './services/vbtc-withdrawal-state';
 // NFTs (VFX10)
-export { NftBulkMintError } from './client/vfx-client';
+export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
 export {
   nftContract,
   nftEvolveStages,

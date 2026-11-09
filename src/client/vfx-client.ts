@@ -527,6 +527,29 @@ function parseTxData(data: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
+/**
+ * Thrown by `fundAndRegisterVault` when the funding landed but the
+ * registration was refused. `fundingHash` is the payment already made: retry
+ * with `registerReserveAccount`, not by funding again. A registration whose
+ * send may have reached the node throws TransactionDispatchError instead.
+ */
+export class VaultRegistrationError extends Error {
+  readonly fundingHash: string;
+  readonly cause: unknown;
+
+  constructor(fundingHash: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `fundAndRegisterVault: funding ${fundingHash} landed but the registration failed; ` +
+        `call registerReserveAccount to retry, without funding again: ${detail}`,
+    );
+    this.name = 'VaultRegistrationError';
+    this.fundingHash = fundingHash;
+    this.cause = cause;
+    Object.setPrototypeOf(this, VaultRegistrationError.prototype);
+  }
+}
+
 /** What fundAndRegisterVault sends by default: the Flutter wallet's VAULT_ACTIVATION_AMOUNT. */
 const VAULT_FUND_AND_ACTIVATE_AMOUNT = 5;
 
@@ -3351,10 +3374,13 @@ export class VfxClient {
       const registrationHash = await this.registerReserveAccount(vault, { recoveryAddress });
       return { fundingHash, registrationHash };
     } catch (e) {
-      throw new Error(
-        `fundAndRegisterVault: funding ${fundingHash} landed but the registration failed; ` +
-          `call registerReserveAccount to retry, without funding again: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      // A registration that may have reached the node keeps its type and
+      // hash, so callers check the chain before retrying.
+      if (e instanceof TransactionDispatchError) {
+        e.message = `fundAndRegisterVault: funding ${fundingHash} landed; registration: ${e.message}`;
+        throw e;
+      }
+      throw new VaultRegistrationError(fundingHash, e);
     }
   };
 
