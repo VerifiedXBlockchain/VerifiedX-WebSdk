@@ -109,7 +109,15 @@ export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from 
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
 // NFTs (VFX10)
 export { NftBulkMintError } from './client/vfx-client';
-export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from './client/nft-api-client';
+export {
+  nftContract,
+  nftEvolveStages,
+  nftCurrentStage,
+  nftIsMedialess,
+  nftEvolveRefusal,
+} from './client/nft-api-client';
+export { parseVfxShhMessage, formatVfxShhMessage, decryptVfxShh, encryptVfxShh } from './services/vfx-shh';
+export type { VfxShhMessage } from './services/vfx-shh';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {
   nftMintPayload,

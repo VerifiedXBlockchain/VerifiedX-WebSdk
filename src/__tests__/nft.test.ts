@@ -45,6 +45,33 @@ function installPipeline(overrides: Record<string, (url: string, init?: RequestI
   });
 }
 
+/** An NFT `owner` minted with two manual evolve stages, held by RECIPIENT. */
+function evolvingNft(overrides: Record<string, unknown> = {}) {
+  return {
+    identifier: SC,
+    minter_address: owner.address,
+    owner_address: RECIPIENT,
+    is_burned: false,
+    description: 'base',
+    primary_asset_name: 'default',
+    primary_asset_size: 0,
+    smart_contract_data: JSON.stringify({
+      SmartContractMain: {
+        Features: [
+          {
+            FeatureName: 0,
+            FeatureFeatures: [
+              { EvolutionState: 1, Name: 'One', Description: 'first', IsCurrentState: false },
+              { EvolutionState: 2, Name: 'Two', Description: 'second', IsCurrentState: false },
+            ],
+          },
+        ],
+      },
+    }),
+    ...overrides,
+  };
+}
+
 const sent = (calls: CapturedCall[]) =>
   calls
     .filter((c) => c.url.includes('/raw/send/'))
@@ -275,7 +302,9 @@ describe('VfxClient NFT writes', () => {
   });
 
   test('evolveNft sends the stage change to the owner; burnNft sends a Type 4 to the owner', async () => {
-    const { calls } = installPipeline();
+    const { calls } = installPipeline({
+      [`/nft/${encodeURIComponent(SC)}/`]: () => evolvingNft(),
+    });
     const client = new VfxClient('testnet');
     await client.evolveNft(owner, { scIdentifier: SC, stage: 2, ownerAddress: RECIPIENT });
     expect(calls.find((c) => c.url.includes('/raw/nft-evolve-data/'))?.url).toContain(`/${RECIPIENT}/2/`);

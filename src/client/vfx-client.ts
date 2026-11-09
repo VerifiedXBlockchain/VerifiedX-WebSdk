@@ -59,6 +59,7 @@ import {
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
 import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
+import { decryptVfxShh, parseVfxShhMessage } from '../services/vfx-shh';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
@@ -119,7 +120,14 @@ import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
-import { NftApiClient, NftListQuery, VfxNft, nftIsMedialess } from './nft-api-client';
+import {
+  NftApiClient,
+  NftListQuery,
+  VfxNft,
+  nftEvolveRefusal,
+  nftEvolveStages,
+  nftIsMedialess,
+} from './nft-api-client';
 import { MediaApiClient } from './media-api-client';
 import { AuthApiClient } from './auth-api-client';
 import { TransactionApiClient } from './transaction-api.client';
@@ -2452,7 +2460,9 @@ export class VfxClient {
    * Move an evolving NFT to `stage` (1 is the first phase; a lower stage
    * than the current one devolves it). Only the minter can do this, for an
    * NFT wherever it is held; the transaction goes to the current owner,
-   * read from Spyglass unless `ownerAddress` is given.
+   * read from Spyglass unless `ownerAddress` is given. The NFT is read from
+   * Spyglass first and the call throws, before anything is signed, when
+   * Core's rules would refuse it (`nftEvolveRefusal`).
    */
   public evolveNft = async (
     signer: KeypairOrSigner,
@@ -2462,7 +2472,12 @@ export class VfxClient {
     if (!Number.isInteger(params.stage) || params.stage < 0) {
       throw new Error('evolveNft: stage must be a whole number, 0 or more');
     }
-    const ownerAddress = params.ownerAddress ?? (await this.nftApiClient.getNft(params.scIdentifier)).owner_address;
+    const nft = await this.nftApiClient.getNft(params.scIdentifier);
+    const refusal = nftEvolveRefusal(nft, resolved.address, params.stage);
+    if (refusal) {
+      throw new Error(`evolveNft: ${refusal}`);
+    }
+    const ownerAddress = params.ownerAddress ?? nft.owner_address;
     const flowId = await this.approveFlow(resolved, {
       action: 'nft-evolve',
       scIdentifier: params.scIdentifier,
@@ -2484,6 +2499,67 @@ export class VfxClient {
       approved: true,
     });
     return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * After receiving an NFT with media, ask the node to fetch the files from
+   * the beacons the sender pushed them to (the wallet does this when the
+   * transfer lands). The new owner signs the contract id. Returns the
+   * locators used, or `pulled: false` for an NFT without media (locator
+   * "NA"), which has nothing to fetch. Spyglass shows the new media URLs
+   * about 30 s after a pull.
+   */
+  public pullNftBeaconAssets = async (
+    signer: KeypairOrSigner,
+    scIdentifier: string,
+  ): Promise<{ locators: string; pulled: boolean }> => {
+    const resolved = this.resolve(signer);
+    if (this.dryRun) {
+      throw new Error('pullNftBeaconAssets does not support dryRun mode: the node fetches the files for real');
+    }
+    const locators = await this.rawTransactionApiClient.getLocators(scIdentifier);
+    if (!locators) {
+      throw new Error(`pullNftBeaconAssets: the node has no beacon locators for ${scIdentifier}`);
+    }
+    if (locators === 'NA') {
+      return { locators, pulled: false };
+    }
+    const signature = await resolved.sign(scIdentifier, {
+      kind: 'nft-beacon-download',
+      flowId: newFlowId(),
+      message: scIdentifier,
+      scIdentifier,
+      locators,
+    });
+    await this.rawTransactionApiClient.beaconAssetsRequest(scIdentifier, locators, resolved.address, signature);
+    return { locators, pulled: true };
+  };
+
+  /**
+   * Read the VFX-SHH message in an NFT: the one in its current evolve
+   * stage's description, else in its own description, as the wallet looks.
+   * Needs the recipient's private key (a Keypair): a Signer only signs, and
+   * decryption needs the key itself. Returns null when the NFT carries no
+   * message; throws when `keypair` is not the recipient or the message does
+   * not decrypt.
+   */
+  public decryptNftMessage = async (
+    keypair: Keypair,
+    nftOrScIdentifier: VfxNft | string,
+  ): Promise<{ recipientAddress: string; message: string } | null> => {
+    const nft =
+      typeof nftOrScIdentifier === 'string' ? await this.nftApiClient.getNft(nftOrScIdentifier) : nftOrScIdentifier;
+    const current = nftEvolveStages(nft).find((stage) => stage.IsCurrentState);
+    const encrypted =
+      (current && parseVfxShhMessage(String(current.Description ?? ''))) ?? parseVfxShhMessage(nft.description ?? '');
+    if (!encrypted) {
+      return null;
+    }
+    if (keypair.address !== encrypted.recipientAddress) {
+      throw new Error(`decryptNftMessage: the message is for ${encrypted.recipientAddress}, not ${keypair.address}`);
+    }
+    const message = await decryptVfxShh(encrypted.encryptedData, keypair.privateKey);
+    return { recipientAddress: encrypted.recipientAddress, message };
   };
 
   /** Burn an NFT the signer owns. */

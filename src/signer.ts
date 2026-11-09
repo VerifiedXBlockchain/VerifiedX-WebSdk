@@ -97,6 +97,12 @@ export type SigningRequest =
       toAddress: string;
     })
   | (SigningRequestBase & {
+      /** The new owner's signature over the contract id, asking the node to fetch the NFT's media from its beacons. */
+      kind: 'nft-beacon-download';
+      scIdentifier: string;
+      locators: string;
+    })
+  | (SigningRequestBase & {
       /** A proof that the signer owns the NFT, handed to someone who checks it with `verifyNftOwnership`. */
       kind: 'nft-ownership-proof';
       scIdentifier: string;
