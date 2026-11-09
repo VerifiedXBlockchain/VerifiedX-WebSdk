@@ -1,4 +1,4 @@
-import * as EC from 'elliptic';
+import EC from 'elliptic';
 import { getSecureRandomBytes, normalizePrivateKey } from '../utils';
 import { hkdfSha256 } from './keypair-service';
 
