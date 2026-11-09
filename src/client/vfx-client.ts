@@ -4015,10 +4015,16 @@ export class VfxClient {
       typeof prepared.TransactionType === 'number'
         ? prepared.TransactionType
         : CORE_TX_TYPE_NAMES.indexOf(String(prepared.TransactionType ?? ''));
+    const fromAddress = String(prepared.FromAddress ?? '');
+    // Core's GetRawRequestWithdrawalTxData addresses the request to the
+    // requestor (ToAddress = RequestorAddress) but leaves ToAddress out of its
+    // answer; a signer that rebuilds the hash needs it.
+    const toAddress =
+      prepared.ToAddress ?? (CORE_TX_TYPE_NAMES[txType] === 'VBTC_V2_WITHDRAWAL_REQUEST' ? fromAddress : '');
     const transaction: SigningTransaction = {
       Hash: prepared.Hash,
-      FromAddress: String(prepared.FromAddress ?? ''),
-      ToAddress: String(prepared.ToAddress ?? ''),
+      FromAddress: fromAddress,
+      ToAddress: String(toAddress),
       TransactionType: txType,
       Amount: Number(prepared.Amount ?? 0),
       Fee: Number(prepared.Fee ?? 0),

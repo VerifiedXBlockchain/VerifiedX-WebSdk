@@ -543,6 +543,38 @@ describe('every prepared vBTC action is approved before it is prepared', () => {
     expect(declined.calls).toHaveLength(0);
   });
 
+  test('a prepared withdrawal request without ToAddress is addressed to the requestor, as Core builds it', async () => {
+    // Core's GetRawRequestWithdrawalTxData answer: ToAddress = RequestorAddress
+    // in the transaction, but no ToAddress (and no Amount) in the JSON.
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({
+        success: true,
+        Hash: 'REQ',
+        FromAddress: address,
+        Fee: 0.0000104,
+        Nonce: 3,
+        Timestamp: 1762659000,
+        TransactionType: 'VBTC_V2_WITHDRAWAL_REQUEST',
+        Data: '{"Function":"VBTCWithdrawalRequest()"}',
+      }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      ...frostMocks,
+    });
+    const { signer, requests } = approvingSigner(calls);
+    await new VfxClient('testnet').requestWithdrawal({
+      scIdentifier: 'sc-1',
+      requestorAddress: address,
+      btcAddress: 'bc1qBTC',
+      amount: 0.001,
+      feeRate: 10,
+      signer,
+      pollIntervalMs: 1,
+      timeoutMs: 2000,
+    });
+    const request = requests.find((r) => r.kind === 'transaction' && r.message === 'REQ');
+    expect(request).toMatchObject({ transaction: { FromAddress: address, ToAddress: address, Amount: 0 } });
+  });
+
   test('requestWithdrawal is one approval and one flow, through FROST and the completion record', async () => {
     const { calls } = installFetch({
       '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ', Fee: 1 }),
