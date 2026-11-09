@@ -33,8 +33,9 @@
     "test": "jest --config jest.config.js --silent='false'",
     "test:integration": "RUN_INTEGRATION=1 jest --config jest.config.js --testPathPattern=integration --silent='false'",
     "pack:prerelease": "node scripts/pack-prerelease.js",
+    "test:esm": "node scripts/esm-smoke.mjs",
     "prepare": "npm run build",
-    "prepublishOnly": "npm test && npm run lint && npm run build",
+    "prepublishOnly": "npm test && npm run lint && npm run build && npm run test:esm",
     "preversion": "npm run lint",
     "version": "npm run format && git add -A src",
     "postversion": "git push && git push --tags"

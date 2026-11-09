@@ -3,7 +3,7 @@ import * as bip39 from 'bip39';
 import KeypairService from '../../services/keypair-service';
 import { isValidPrivateKey } from '../utils';
 import { Network } from '../../constants';
-import { ReserveKeypair } from '../../types';
+import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../../types';
 
 /**
  * Browser-facing keypair service.
@@ -32,6 +32,16 @@ export class BrowserKeypairService {
 
   public generateMnemonic(words: 12 | 24 = 12): string {
     return this.inner.generateMnemonic(words);
+  }
+
+  /** See KeypairService.privateKeyFromSeedString. */
+  public privateKeyFromSeedString(seed: string, index = 0): string {
+    return this.inner.privateKeyFromSeedString(seed, index);
+  }
+
+  /** See KeypairService.privateKeyFromBtcKey. */
+  public privateKeyFromBtcKey(btcPrivateKeyOrWif: string): string {
+    return this.inner.privateKeyFromBtcKey(btcPrivateKeyOrWif);
   }
 
   /**
@@ -145,24 +155,40 @@ export class BrowserKeypairService {
     return this.inner.reserveAddressFromPublic(publicKeyHex);
   }
 
-  public reserveKeypairFromPrivateKey(mainPrivateKey: string): ReserveKeypair {
-    return this.inner.reserveKeypairFromPrivateKey(mainPrivateKey);
+  public restoreLegacyWebWalletVault(mainPrivateKey: string): ReserveKeypair {
+    return this.inner.restoreLegacyWebWalletVault(mainPrivateKey);
   }
 
-  public reserveKeypairFromDerivationText(derivationText: string): ReserveKeypair {
-    return this.inner.reserveKeypairFromDerivationText(derivationText);
+  public restoreLegacyWebWalletVaultFromDerivationText(derivationText: string): ReserveKeypair {
+    return this.inner.restoreLegacyWebWalletVaultFromDerivationText(derivationText);
   }
 
-  public reserveKeypairFromReservePrivateKey(reservePrivateKey: string): ReserveKeypair {
-    return this.inner.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  public restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey: string): ReserveKeypair {
+    return this.inner.restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey);
   }
 
   public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
     return this.inner.reserveKeypairFromRestoreCode(restoreCode);
   }
 
-  public generateReserveKeypair(): ReserveKeypair {
-    return this.inner.generateReserveKeypair();
+  public newVaultKeypair(): VaultKeypair {
+    return this.inner.newVaultKeypair();
+  }
+
+  public vaultKeypairFromPrivateKey(vaultPrivateKey: string): VaultKeypair {
+    return this.inner.vaultKeypairFromPrivateKey(vaultPrivateKey);
+  }
+
+  public deriveLegacyRecoveryKey(source: LegacyVaultSource): Keypair & { vaultAddress: string } {
+    return this.inner.deriveLegacyRecoveryKey(source);
+  }
+
+  public newRecoveryKey(): Keypair {
+    return this.inner.newRecoveryKey();
+  }
+
+  public recoveryKeyFromPasskeyPrf(prfOutput: Uint8Array | ArrayBuffer): Keypair {
+    return this.inner.recoveryKeyFromPasskeyPrf(prfOutput);
   }
 
   public getSignature(message: string, privateKeyHex: string): string {
