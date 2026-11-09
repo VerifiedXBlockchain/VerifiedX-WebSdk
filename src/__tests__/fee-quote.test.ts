@@ -133,3 +133,32 @@ describe('the fee is known before approval and is the fee that is sent', () => {
     ).toBeGreaterThanOrEqual(quote.fee);
   });
 });
+
+describe('Greptile review fixes', () => {
+  test("a /raw/fee outage while quoting in 'server' mode returns null, like any failure before dispatch", async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { calls } = installFetch({ '/raw/fee/': () => new Response('down', { status: 502 }) });
+    const intents: SigningIntent[] = [];
+    const result = await new RawTransactionService({
+      network: Network.Testnet,
+      signer: approvingSigner(intents),
+      toAddress: RECIPIENT,
+      amount: 1,
+      hashMode: 'server',
+    }).process();
+    expect(result).toBeNull();
+    expect(intents).toHaveLength(0);
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
+  });
+
+  test('a declined approval still throws', async () => {
+    installPipeline();
+    const signer = approvingSigner([]);
+    signer.approve = () => {
+      throw new Error('declined');
+    };
+    await expect(
+      new RawTransactionService({ network: Network.Testnet, signer, toAddress: RECIPIENT, amount: 1 }).process(),
+    ).rejects.toThrow('declined');
+  });
+});

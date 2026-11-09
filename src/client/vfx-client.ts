@@ -533,9 +533,12 @@ export class VfxClient {
 
   /**
    * The fee and total (amount + fee) `sendCoin` would take with these
-   * arguments, before anything is signed. In 'both' and 'local' hashMode
-   * this is the fee the send is built with; a signer's `approve` receives the
-   * same `fee` and `total`.
+   * arguments, before anything is signed. In 'both' and 'local' hashMode it
+   * is exact: the local formula, which the send then uses, and the same
+   * `fee` and `total` a signer's `approve` receives. In 'server' mode it is
+   * Spyglass's `/raw/fee` for an upper-bound size; the send asks again with
+   * the real nonce (unless the signer has `approve`), so treat it as an
+   * estimate there.
    */
   public quoteSendCoin = async (
     keypair: KeypairOrSigner,

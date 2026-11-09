@@ -255,7 +255,18 @@ export class RawTransactionService {
     // signer asks for approval, so the old pipeline is otherwise unchanged.
     if (!this.approved) {
       const wantsApproval = typeof this.signer.approve === 'function';
-      const quote = wantsApproval || this.hashMode !== 'server' ? await this.quote() : null;
+      let quote: { fee: number; total: number } | null = null;
+      if (wantsApproval || this.hashMode !== 'server') {
+        // A failed quote (a /raw/fee outage in 'server' mode) is a send that
+        // never started, so it keeps process()'s null contract; only the
+        // signer's own refusal below is thrown.
+        try {
+          quote = await this.quote();
+        } catch (error) {
+          console.error(`Error in process():`, error);
+          return null;
+        }
+      }
       await approveIntent(this.signer, {
         action: 'transaction',
         flowId: this.flowId,
