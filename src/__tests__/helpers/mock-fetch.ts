@@ -4,7 +4,7 @@
  * installFetch({'/url/substring/': handler}) replaces global.fetch with a
  * router that matches the first handler whose pattern is a substring of the
  * requested URL. Handlers may return a plain value (JSON-encoded at 200), or
- * a Response for full control. Every request is captured in `calls` for
+ * a Response for full control, or a Promise of either. Every request is captured in `calls` for
  * assertion. Unmatched URLs throw, so tests fail loudly on unexpected
  * network activity.
  */
@@ -48,7 +48,8 @@ export function installFetch(handlers: Record<string, FetchHandler>): { calls: C
 
     for (const [pattern, handler] of Object.entries(handlers)) {
       if (url.includes(pattern)) {
-        const result = handler(url, init);
+        // Awaited, so an async handler can delay its answer like a slow server.
+        const result = await handler(url, init);
         if (result instanceof Response) return result;
         return jsonResponse(result);
       }

@@ -117,9 +117,10 @@ describe('Greptile review fixes', () => {
         inFlight -= 1;
         return { hash: url, height: 1990 };
       },
-    } as never);
+    });
     const live = await new VfxClient('testnet').getLiveResumableWithdrawals(token(rows), 'xMe');
     expect(live).toHaveLength(3);
+    // Sequential lookups would never have more than one in flight.
     expect(peak).toBe(3);
   });
 });
