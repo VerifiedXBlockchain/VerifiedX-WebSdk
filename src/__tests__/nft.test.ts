@@ -382,6 +382,18 @@ describe('ownership proofs and reads', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('basic TOKEN');
     expect(JSON.parse(init.body as string)).toEqual({ media_map: { 'art.png': 'https://m/art.png' } });
   });
+
+  test('a dry run refuses the media writes before signing or uploading', async () => {
+    const { calls } = installFetch({});
+    const { signer, requests } = recordingSigner();
+    const client = new VfxClient('testnet', true);
+    await expect(
+      client.associateNftMedia(signer, { scIdentifier: SC, mediaMap: { 'art.png': 'https://m/art.png' } }),
+    ).rejects.toThrow(/dryRun/);
+    await expect(client.uploadNftAsset(new Blob(['x']), 'art.png')).rejects.toThrow(/dryRun/);
+    expect(requests).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
 });
 
 describe('reading the contract Spyglass reports', () => {

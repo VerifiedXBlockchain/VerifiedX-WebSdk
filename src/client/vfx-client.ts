@@ -2823,6 +2823,9 @@ export class VfxClient {
    * asset to pass as `asset` or in `additionalAssets`.
    */
   public uploadNftAsset = async (file: Blob, fileName: string): Promise<NftAssetInput> => {
+    if (this.dryRun) {
+      throw new Error('uploadNftAsset does not support dryRun mode: Spyglass stores the file for real');
+    }
     const named = typeof File !== 'undefined' && file instanceof File ? file : new File([file], fileName);
     const result = await this.mediaApiClient.uploadAsset(named);
     if (!result?.url) {
@@ -3155,6 +3158,9 @@ export class VfxClient {
     params: { scIdentifier: string; mediaMap: Record<string, string> },
   ): Promise<void> => {
     const resolved = this.resolve(signer);
+    if (this.dryRun) {
+      throw new Error("associateNftMedia does not support dryRun mode: it replaces the NFT's live media URLs");
+    }
     const message = `${generateRandomStringSecure(16, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
     const signature = await resolved.sign(message, { kind: 'spyglass-auth', flowId: newFlowId(), message });
     const { token } = await this.authApiClient.signToken(resolved.address, message, signature);
