@@ -78,3 +78,36 @@ describe('throwOnRefusal on sends', () => {
     );
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('prepared vBTC sends honour the client option, keeping the prepared hash and reason', async () => {
+    installFetch({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'PREPARED_HASH', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: false, message: 'Insufficient vBTC balance' }),
+    });
+    await expect(
+      new VfxClient('testnet', { throwOnRefusal: true }).transferVbtc({
+        scIdentifier: 'sc-1',
+        fromAddress: keypair.address,
+        toAddress: RECIPIENT,
+        amount: 1,
+        privateKey,
+      }),
+    ).rejects.toMatchObject({
+      name: 'TransactionRefusedError',
+      hash: 'PREPARED_HASH',
+      reason: 'Insufficient vBTC balance',
+    });
+
+    // Without the option the same refusal is the historical plain Error.
+    await expect(
+      new VfxClient('testnet').transferVbtc({
+        scIdentifier: 'sc-1',
+        fromAddress: keypair.address,
+        toAddress: RECIPIENT,
+        amount: 1,
+        privateKey,
+      }),
+    ).rejects.toThrow(/transferVbtc:send failed/);
+  });
+});

@@ -18,6 +18,7 @@ import {
   PreSignCheckError,
   RawTransactionService,
   TransactionDispatchError,
+  TransactionRefusedError,
 } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
@@ -312,6 +313,9 @@ export interface VfxClientOptions {
    * node's reason, when the node refuses it, instead of resolving to null.
    * Default false (the historical null). Per call, `sendCoin` takes it too.
    * Calls that already throw on refusal (multi-vault withdrawals) keep doing so.
+   * It covers the prepared vBTC sends (transfer, create, withdrawal request,
+   * cancel, completion record) too: an explicit refusal there throws
+   * TransactionRefusedError with the prepared hash, instead of a plain Error.
    */
   throwOnRefusal?: boolean;
 }
@@ -2636,13 +2640,21 @@ export class VfxClient {
     // Spyglass also returns when its own call to the node times out) leaves it
     // unknown whether the transaction was accepted. A plain error here would
     // read as "not sent" and invite a resend, so it carries the hash instead.
-    // An explicit `success: false` body is a definite refusal and is left to
-    // assertSent.
+    // An explicit `success: false` body is a definite refusal: left to
+    // assertSent, or with throwOnRefusal raised here as
+    // TransactionRefusedError carrying the prepared hash and the reason.
+    let sent: SentTransactionResponse;
     try {
-      return await sendFn({ hash, signature, public_key: signer.publicKey });
+      sent = await sendFn({ hash, signature, public_key: signer.publicKey });
     } catch (error) {
       throw new TransactionDispatchError(hash, error);
     }
+    if (this.throwOnRefusal && sent?.success === false) {
+      const body = sent as unknown as { message?: unknown; Message?: unknown };
+      const reason = [body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as string | undefined;
+      throw new TransactionRefusedError(hash, reason ?? null);
+    }
+    return sent;
   }
 
   /**
