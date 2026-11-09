@@ -170,9 +170,13 @@ describe('pullNftBeaconAssets', () => {
     expect(calls.some((c) => c.url.includes('/raw/beacon-assets/'))).toBe(false);
   });
 
-  test('missing locators, a node refusal and dry run throw', async () => {
-    installFetch({ '/raw/locators/': () => ({}) });
-    await expect(new VfxClient('testnet').pullNftBeaconAssets(owner, SC)).rejects.toThrow(/no beacon locators/);
+  test('no locators from the node means nothing to pull; a node refusal and dry run throw', async () => {
+    // Testnet answers this for an NFT that was never transferred.
+    const { calls } = installFetch({
+      '/raw/locators/': () => ({ Result: 'Success', Message: 'Locators Found.', Locators: null }),
+    });
+    expect(await new VfxClient('testnet').pullNftBeaconAssets(owner, SC)).toEqual({ locators: null, pulled: false });
+    expect(calls.some((c) => c.url.includes('/raw/beacon-assets/'))).toBe(false);
     installFetch({ '/raw/locators/': () => ({ Locators: 'L' }), '/raw/beacon-assets/': () => ({ success: false }) });
     await expect(new VfxClient('testnet').pullNftBeaconAssets(owner, SC)).rejects.toThrow(
       /Beacon assets request failed/,

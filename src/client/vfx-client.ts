@@ -3109,24 +3109,24 @@ export class VfxClient {
    * After receiving an NFT with media, ask the node to fetch the files from
    * the beacons the sender pushed them to (the wallet does this when the
    * transfer lands). The new owner signs the contract id. Returns the
-   * locators used, or `pulled: false` for an NFT without media (locator
-   * "NA"), which has nothing to fetch. Spyglass shows the new media URLs
-   * about 30 s after a pull.
+   * locators used, or `pulled: false` when there is nothing to fetch: an
+   * NFT without media (locator "NA"), or one the node has no beacon
+   * locators for (`locators: null`; a freshly minted NFT never transferred).
+   * Spyglass shows the new media URLs about 30 s after a pull.
    */
   public pullNftBeaconAssets = async (
     signer: KeypairOrSigner,
     scIdentifier: string,
-  ): Promise<{ locators: string; pulled: boolean }> => {
+  ): Promise<{ locators: string | null; pulled: boolean }> => {
     const resolved = this.resolve(signer);
     if (this.dryRun) {
       throw new Error('pullNftBeaconAssets does not support dryRun mode: the node fetches the files for real');
     }
+    // A failed request throws; the node answering with no locators means
+    // no beacon holds files for this NFT, so there is nothing to fetch.
     const locators = await this.rawTransactionApiClient.getLocators(scIdentifier);
-    if (!locators) {
-      throw new Error(`pullNftBeaconAssets: the node has no beacon locators for ${scIdentifier}`);
-    }
-    if (locators === 'NA') {
-      return { locators, pulled: false };
+    if (!locators || locators === 'NA') {
+      return { locators: locators || null, pulled: false };
     }
     const signature = await resolved.sign(scIdentifier, {
       kind: 'nft-beacon-download',
