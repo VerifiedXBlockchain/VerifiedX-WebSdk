@@ -58,6 +58,7 @@ import {
   signMessages,
 } from '../signer';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
+import { NftAssetInput, NftMintParams, nftMintPayload, nftOwnershipProof } from '../services/nft-data';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
@@ -116,6 +117,9 @@ import { AdnrApiClient } from './adnr-client';
 import { BlockApiClient } from './block-api-client';
 import { RawTransactionApiClient } from './raw-transaction-api-client';
 import { TokenApiClient } from './token-api-client';
+import { NftApiClient, NftListQuery, VfxNft, nftIsMedialess } from './nft-api-client';
+import { MediaApiClient } from './media-api-client';
+import { AuthApiClient } from './auth-api-client';
 import { TransactionApiClient } from './transaction-api.client';
 import {
   BroadcastResponse,
@@ -336,6 +340,28 @@ interface ApprovedFlow {
   flowId: string;
 }
 
+const OWNERSHIP_NONCE_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
+
+/**
+ * Thrown by `mintNfts` when one mint fails. `minted` holds the NFTs minted
+ * before it, in order; `index` is the failed item.
+ */
+export class NftBulkMintError extends Error {
+  readonly index: number;
+  readonly minted: Array<{ transactionHash: string; scIdentifier: string }>;
+  readonly cause: unknown;
+
+  constructor(index: number, minted: Array<{ transactionHash: string; scIdentifier: string }>, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`mintNfts: item ${index} failed after ${minted.length} were minted: ${detail}`);
+    this.name = 'NftBulkMintError';
+    this.index = index;
+    this.minted = minted;
+    this.cause = cause;
+    Object.setPrototypeOf(this, NftBulkMintError.prototype);
+  }
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
@@ -350,6 +376,9 @@ export class VfxClient {
   private vbtcV2ApiClient: VbtcV2ApiClient;
   private tokenApiClient: TokenApiClient;
   private blockApiClient: BlockApiClient;
+  private nftApiClient: NftApiClient;
+  private mediaApiClient: MediaApiClient;
+  private authApiClient: AuthApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
   /** Clock offset and next-nonce cache shared by every send from this client. */
@@ -379,6 +408,9 @@ export class VfxClient {
     this.vbtcV2ApiClient = new VbtcV2ApiClient(networkEnum, this.apiOptions);
     this.tokenApiClient = new TokenApiClient(networkEnum, this.apiOptions);
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
+    this.nftApiClient = new NftApiClient(networkEnum, this.apiOptions);
+    this.mediaApiClient = new MediaApiClient(networkEnum, this.apiOptions);
+    this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
   }
@@ -2129,6 +2161,304 @@ export class VfxClient {
       vote: params.vote,
     });
     return this.sendTokenTx(resolved, ownerAddress, data, params.unlockHours);
+  };
+
+  // ---------------------------------------------------------------------------
+  // NFTs (VFX10 smart contracts)
+  //
+  // The node builds every NFT transaction's Data (compile, transfer, evolve,
+  // burn) through Spyglass, and the SDK signs and sends it like any other
+  // transaction, so local hashing and every key source apply. Each method is
+  // one approved action for a signer with `approve`.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Upload a media file to Spyglass for use in `mintNft`. Resolves to the
+   * asset to pass as `asset` or in `additionalAssets`.
+   */
+  public uploadNftAsset = async (file: Blob, fileName: string): Promise<NftAssetInput> => {
+    const named = typeof File !== 'undefined' && file instanceof File ? file : new File([file], fileName);
+    const result = await this.mediaApiClient.uploadAsset(named);
+    if (!result?.url) {
+      throw new Error(`uploadNftAsset: Spyglass did not store ${fileName}`);
+    }
+    const dot = fileName.lastIndexOf('.');
+    return {
+      url: result.url,
+      name: fileName,
+      extension: dot > 0 ? fileName.slice(dot + 1) : '',
+      fileSize: file.size,
+    };
+  };
+
+  /** Mint an NFT owned by the signer. Resolves to the mint hash and the new contract id. */
+  public mintNft = async (
+    signer: KeypairOrSigner,
+    params: NftMintParams,
+  ): Promise<{ transactionHash: string; scIdentifier: string } | null> => {
+    const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'mintNft');
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-mint',
+      minterAddress: resolved.address,
+      names: [params.name],
+    });
+    return this.mintOneNft(resolved, params, flowId);
+  };
+
+  /**
+   * Mint several NFTs, one transaction each, in order, under one approval.
+   * Stops at the first one that fails and throws NftBulkMintError carrying
+   * the ones already minted.
+   */
+  public mintNfts = async (
+    signer: KeypairOrSigner,
+    items: NftMintParams[],
+  ): Promise<Array<{ transactionHash: string; scIdentifier: string }>> => {
+    const resolved = this.resolve(signer);
+    this.assertNotReserve(resolved, 'mintNfts');
+    if (items.length === 0) {
+      return [];
+    }
+    // Every payload is checked before anything is approved or sent.
+    for (const item of items) {
+      nftMintPayload({ ...item, minterAddress: resolved.address });
+    }
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-mint',
+      minterAddress: resolved.address,
+      names: items.map((item) => item.name),
+    });
+    const minted: Array<{ transactionHash: string; scIdentifier: string }> = [];
+    for (const [index, item] of items.entries()) {
+      let result: { transactionHash: string; scIdentifier: string } | null;
+      try {
+        result = await this.mintOneNft(resolved, item, flowId);
+      } catch (error) {
+        throw new NftBulkMintError(index, minted, error);
+      }
+      if (!result) {
+        throw new NftBulkMintError(index, minted, new Error('the mint was rejected before it reached the node'));
+      }
+      minted.push(result);
+    }
+    return minted;
+  };
+
+  private async mintOneNft(
+    signer: ResolvedSigner,
+    params: NftMintParams,
+    flowId: string,
+  ): Promise<{ transactionHash: string; scIdentifier: string } | null> {
+    const payload = nftMintPayload({ ...params, minterAddress: signer.address });
+    const data = await this.rawTransactionApiClient.getSmartContractDeployData(payload);
+    const scIdentifier = data[0].ContractUID as string;
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: signer.address,
+      amount: 0,
+      txType: TxType.NftMint,
+      data,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    const transactionHash = await txBuilder.process(this.dryRun);
+    return transactionHash ? { transactionHash, scIdentifier } : null;
+  }
+
+  /**
+   * Transfer an NFT the signer owns. From a vault (xRBX) the transfer waits
+   * `unlockHours` (24 minimum) and can be called back until then.
+   *
+   * The node hands the media to the recipient through a beacon: the owner
+   * signs the contract id and the node pushes the files. An NFT without
+   * media skips that (locator "NA"). Pass `locator` to use one already
+   * obtained.
+   */
+  public transferNft = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; toAddress: string; locator?: string } & ReserveSendOptions,
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const toAddress = await this.resolveRecipient(params.toAddress, 'transferNft');
+    assertRecipientOnNetwork(toAddress, this.network, 'transferNft toAddress');
+    const unlockTime = this.unlockTimeFor(resolved, params.unlockHours);
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-transfer',
+      scIdentifier: params.scIdentifier,
+      fromAddress: resolved.address,
+      toAddress,
+      unlockHours: unlockTime === null ? null : params.unlockHours ?? RESERVE_MIN_UNLOCK_HOURS,
+    });
+
+    let locator = params.locator;
+    if (!locator) {
+      const nft = await this.nftApiClient.getNft(params.scIdentifier);
+      if (nft.owner_address && nft.owner_address !== resolved.address) {
+        throw new Error(
+          `transferNft: ${params.scIdentifier} is owned by ${nft.owner_address}, not ${resolved.address}`,
+        );
+      }
+      if (nftIsMedialess(nft)) {
+        locator = 'NA';
+      } else {
+        const beaconSignature = await resolved.sign(params.scIdentifier, {
+          kind: 'nft-beacon-upload',
+          flowId,
+          message: params.scIdentifier,
+          scIdentifier: params.scIdentifier,
+          toAddress,
+        });
+        locator = await this.rawTransactionApiClient.beaconUploadRequest(
+          params.scIdentifier,
+          toAddress,
+          beaconSignature,
+        );
+      }
+    }
+
+    const data = await this.rawTransactionApiClient.getNftTransferData(params.scIdentifier, toAddress, locator);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress,
+      amount: 0,
+      txType: TxType.NftTx,
+      data,
+      unlockTime,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * Move an evolving NFT to `stage` (1 is the first phase; a lower stage
+   * than the current one devolves it). Only the minter can do this, for an
+   * NFT wherever it is held; the transaction goes to the current owner,
+   * read from Spyglass unless `ownerAddress` is given.
+   */
+  public evolveNft = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; stage: number; ownerAddress?: string },
+  ): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    if (!Number.isInteger(params.stage) || params.stage < 0) {
+      throw new Error('evolveNft: stage must be a whole number, 0 or more');
+    }
+    const ownerAddress = params.ownerAddress ?? (await this.nftApiClient.getNft(params.scIdentifier)).owner_address;
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-evolve',
+      scIdentifier: params.scIdentifier,
+      minterAddress: resolved.address,
+      ownerAddress,
+      stage: params.stage,
+    });
+    const data = await this.rawTransactionApiClient.getNftEvolveData(params.scIdentifier, ownerAddress, params.stage);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: ownerAddress,
+      amount: 0,
+      txType: TxType.NftTx,
+      data,
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /** Burn an NFT the signer owns. */
+  public burnNft = async (signer: KeypairOrSigner, params: { scIdentifier: string }): Promise<string | null> => {
+    const resolved = this.resolve(signer);
+    const flowId = await this.approveFlow(resolved, {
+      action: 'nft-burn',
+      scIdentifier: params.scIdentifier,
+      ownerAddress: resolved.address,
+    });
+    const data = await this.rawTransactionApiClient.getNftBurnData(params.scIdentifier, resolved.address);
+    const txBuilder = new RawTransactionService({
+      network: this.network,
+      signer: resolved,
+      toAddress: resolved.address,
+      amount: 0,
+      txType: TxType.NftBurn,
+      data,
+      unlockTime: this.unlockTimeFor(resolved),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+      flowId,
+      approved: true,
+    });
+    return txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * A proof that the signer owns `scIdentifier`, in the wallet's format
+   * (`address<>message<>signature<>scIdentifier`), for anyone to check with
+   * `verifyNftOwnership`. The message is a random string and the time.
+   */
+  public proveNftOwnership = async (signer: KeypairOrSigner, scIdentifier: string): Promise<string> => {
+    const resolved = this.resolve(signer);
+    const message = `${generateRandomStringSecure(8, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
+    const signature = await resolved.sign(message, {
+      kind: 'nft-ownership-proof',
+      flowId: newFlowId(),
+      message,
+      scIdentifier,
+    });
+    return nftOwnershipProof(resolved.address, message, signature, scIdentifier);
+  };
+
+  /** Whether the node accepts an ownership proof from `proveNftOwnership` (or the wallet). */
+  public verifyNftOwnership = async (proof: string): Promise<boolean> => {
+    if (proof.split('<>').length !== 4) {
+      throw new Error('verifyNftOwnership: expected address<>message<>signature<>scIdentifier');
+    }
+    return this.nftApiClient.verifyOwnership(proof);
+  };
+
+  /**
+   * Replace the URLs Spyglass serves an NFT's media from, as its owner. The
+   * signer signs a session message for a Spyglass token first.
+   */
+  public associateNftMedia = async (
+    signer: KeypairOrSigner,
+    params: { scIdentifier: string; mediaMap: Record<string, string> },
+  ): Promise<void> => {
+    const resolved = this.resolve(signer);
+    const message = `${generateRandomStringSecure(16, OWNERSHIP_NONCE_CHARSET)}.${Math.round(Date.now() / 1000)}`;
+    const signature = await resolved.sign(message, { kind: 'spyglass-auth', flowId: newFlowId(), message });
+    const { token } = await this.authApiClient.signToken(resolved.address, message, signature);
+    await this.mediaApiClient.associateMedia(params.scIdentifier, params.mediaMap, token);
+  };
+
+  /** NFTs by owner and/or minter, newest first, as Spyglass indexes them. */
+  public listNfts = async (query: NftListQuery = {}): Promise<PaginatedResponse<VfxNft>> => {
+    return this.nftApiClient.listNfts(query);
+  };
+
+  /** NFTs owned by any of these addresses (a main account and its vault, say). */
+  public listNftsForAddresses = async (
+    addresses: string[],
+    query: Omit<NftListQuery, 'ownerAddress' | 'minterAddress'> = {},
+  ): Promise<PaginatedResponse<VfxNft>> => {
+    return this.nftApiClient.listNftsForAddresses(addresses, query);
+  };
+
+  public getNft = async (scIdentifier: string): Promise<VfxNft> => {
+    return this.nftApiClient.getNft(scIdentifier);
+  };
+
+  public getNftHistory = async (scIdentifier: string): Promise<unknown> => {
+    return this.nftApiClient.getNftHistory(scIdentifier);
   };
 
   // -- Internal helpers --------------------------------------------------------

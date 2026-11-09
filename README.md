@@ -321,6 +321,42 @@ Two behaviours worth knowing before wiring these into anything automated:
 `ticker` and `name` ride in every token transaction for indexers and wallets;
 pass them to skip the Spyglass lookup the SDK otherwise makes.
 
+#### NFTs (VFX10)
+
+The node builds each NFT transaction's Data through Spyglass; the SDK signs
+and sends it like any other transaction, so every key source (`Signer`,
+`approve`, local hashing) applies. Each write is one approved action.
+
+```typescript
+// Media: upload to Spyglass, then mint. Omit `asset` for an NFT without media.
+const asset = await client.uploadNftAsset(fileBlob, 'art.png');
+const { scIdentifier } = await client.mintNft(signer, {
+  name: 'Lighthouse',
+  description: 'First light',
+  minterName: 'Mintwood',
+  asset,
+  additionalAssets: [],                                   // more media files
+  properties: { rarity: 'rare' },
+  royalty: { type: 'percent', amount: 0.05, payToAddress: signer.address },
+  evolve: { type: 'manual', phases: [{ name: 'Day', description: 'd' }, { name: 'Night', description: 'n' }] },
+});
+await client.mintNfts(signer, [item1, item2]);            // bulk: one approval, one tx each
+
+await client.transferNft(signer, { scIdentifier, toAddress });          // media goes via a beacon
+await client.transferNft(vault, { scIdentifier, toAddress, unlockHours: 48 }); // from a vault
+await client.evolveNft(minter, { scIdentifier, stage: 2 });             // minter only; lower = devolve
+await client.burnNft(signer, { scIdentifier });
+
+const proof = await client.proveNftOwnership(signer, scIdentifier);    // address<>message<>signature<>id
+await client.verifyNftOwnership(proof);                                 // true / false
+
+await client.listNfts({ ownerAddress, page: 1 });
+await client.listNftsForAddresses([main.address, vault.address]);
+const nft = await client.getNft(scIdentifier);
+nftCurrentStage(nft); nftEvolveStages(nft); nftIsMedialess(nft);       // parse smart_contract_data
+await client.associateNftMedia(owner, { scIdentifier, mediaMap });      // replace media URLs (owner)
+```
+
 #### Reserve (Vault) Accounts
 
 A reserve account is an `xRBX…` address whose outgoing sends wait behind an

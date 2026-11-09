@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
+- **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
+
+### Changed (breaking)
+
+- `registerReserveAccount(vault, { recoveryAddress })` requires the recovery address and refuses the one the legacy web-wallet scheme derives from the vault key.
+- The derived vault scheme is renamed to `restoreLegacyWebWalletVault`, `restoreLegacyWebWalletVaultFromVaultKey` and `restoreLegacyWebWalletVaultFromDerivationText` (were `reserveKeypairFromPrivateKey`, `reserveKeypairFromReservePrivateKey`, `reserveKeypairFromDerivationText`) and documented as giving no theft protection. `generateReserveKeypair` is removed; use `newVaultKeypair` plus a recovery key.
+
+### Fixed
+
+- Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
+- Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
+
 ## Unreleased (9.1.0)
 
 ### Added
