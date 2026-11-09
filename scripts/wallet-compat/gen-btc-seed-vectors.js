@@ -16,7 +16,9 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const guiPath = path.resolve(process.argv[2] || process.env.VFX_GUI_PATH || path.resolve(__dirname, '../../../vfx-gui'));
+const guiPath = path.resolve(
+  process.argv[2] || process.env.VFX_GUI_PATH || path.resolve(__dirname, '../../../vfx-gui'),
+);
 const bundle = path.join(guiPath, 'assets/js/keygen-v3.js');
 if (!fs.existsSync(bundle)) {
   console.error(`wallet keygen bundle not found at ${bundle}; pass the vfx-gui checkout path`);
