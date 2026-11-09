@@ -1,4 +1,5 @@
 import type { Network } from 'bitcoinjs-lib';
+import type { BtcSigner } from './signer';
 
 // Core interfaces for BTC functionality
 export interface IBtcKeypair {
@@ -161,6 +162,11 @@ export interface IBtcClient {
     addressFromWif: (wif: string) => IBtcKeypair;
     getSignature: (message: string, privateKey: string) => string;
     getSignatureFromWif: (message: string, wif: string) => string;
+    getSignatureWithSigner: (
+      message: string,
+      signer: BtcSigner,
+      purpose?: 'btc-name-claim' | 'btc-name-transfer-acceptance' | 'message',
+    ) => Promise<string>;
 
     // Account and address info
     getAddressInfo: (address: string, inSatoshis?: boolean) => Promise<IAccountInfo>;
@@ -169,13 +175,18 @@ export interface IBtcClient {
     // Transaction operations
     getFeeRates: () => Promise<IFeeRates | null>;
     createTransaction: (
-      senderWif: string,
+      sender: string | BtcSigner,
       recipientAddress: string,
       amount: number,
       feeRate?: number,
     ) => Promise<ICreateTxResponse>;
     broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
-    sendBtc: (senderWif: string, recipientAddress: string, amount: number, feeRate?: number) => Promise<string | null>;
+    sendBtc: (
+      sender: string | BtcSigner,
+      recipientAddress: string,
+      amount: number,
+      feeRate?: number,
+    ) => Promise<string | null>;
     checkBroadcast: (signedTxHex: string) => Promise<IBroadcastCheck>;
 
     // Utility functions
