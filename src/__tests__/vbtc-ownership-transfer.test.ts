@@ -12,7 +12,7 @@ const privateKey = '47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b126
 const owner = service.addressFromPrivate(privateKey);
 const RECIPIENT = 'xRecipient00000000000000000000000';
 const SC = 'vault-sc:1700000000';
-const TX_DATA = [{ Function: 'VBTCOwnershipTransfer()', ContractUID: SC, ToAddress: RECIPIENT }];
+const TX_DATA = [{ Function: 'Transfer()', ContractUID: SC, ToAddress: RECIPIENT, Locators: 'LOC123' }];
 
 function install(overrides: Record<string, (url: string, init?: RequestInit) => unknown> = {}) {
   return installFetch({
@@ -155,5 +155,42 @@ describe('vbtcContractHasNoMedia', () => {
     expect(vbtcContractHasNoMedia({ primary_asset_name: 'art.png', primary_asset_size: 0 })).toBe(false);
     expect(vbtcContractHasNoMedia({ primary_asset_name: 'vbtc_v2_token', primary_asset_size: 12 })).toBe(false);
     expect(vbtcContractHasNoMedia(null)).toBe(false);
+  });
+});
+
+describe('Greptile review fixes', () => {
+  test.each([
+    ['another vault', [{ Function: 'Transfer()', ContractUID: 'other-sc:1', ToAddress: RECIPIENT }]],
+    [
+      'another recipient',
+      [{ Function: 'Transfer()', ContractUID: SC, ToAddress: 'xAttacker0000000000000000000000000' }],
+    ],
+    ['another function', [{ Function: 'Burn()', ContractUID: SC, ToAddress: RECIPIENT }]],
+    [
+      'an extra instruction',
+      [
+        { Function: 'Transfer()', ContractUID: SC, ToAddress: RECIPIENT },
+        { Function: 'Transfer()', ContractUID: 'other-sc:1', ToAddress: RECIPIENT },
+      ],
+    ],
+  ])('transfer data naming %s is refused before signing', async (_label, txData) => {
+    const requests: SigningRequest[] = [];
+    const { calls } = install({ '/btc/vbtc-v2/ownership-transfer/': () => ({ success: true, tx_data: txData }) });
+    await expect(
+      new VfxClient('testnet').transferVbtcOwnership({
+        scIdentifier: SC,
+        toAddress: RECIPIENT,
+        signer: signer([], requests),
+      }),
+    ).rejects.toThrow(/nothing was signed/);
+    expect(requests.map((r) => r.kind)).toEqual(['vbtc-beacon-upload']);
+    expect(sent(calls)).toBeUndefined();
+  });
+
+  test('only an explicit zero size counts as no media', () => {
+    for (const size of ['', ' ', false, [], null, undefined, 'abc']) {
+      expect(vbtcContractHasNoMedia({ primary_asset_name: 'vbtc_v2_token', primary_asset_size: size })).toBe(false);
+    }
+    expect(vbtcContractHasNoMedia({ primary_asset_name: 'vbtc_v2_token', primary_asset_size: '0' })).toBe(true);
   });
 });

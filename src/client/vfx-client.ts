@@ -902,6 +902,21 @@ export class VfxClient {
     }
 
     const data = await this.vbtcV2ApiClient.getOwnershipTransferData(params.scIdentifier, toAddress, locator);
+    // The node builds the instruction; the signer approved this vault and this
+    // recipient, so anything else (another contract, another recipient, a
+    // different function, extra entries) is refused before signing.
+    const instruction = data.length === 1 ? data[0] : null;
+    if (
+      !instruction ||
+      instruction.Function !== 'Transfer()' ||
+      instruction.ContractUID !== params.scIdentifier ||
+      instruction.ToAddress !== toAddress
+    ) {
+      throw new Error(
+        `transferVbtcOwnership: the node's transfer data does not match ${params.scIdentifier} to ${toAddress}; ` +
+          `nothing was signed: ${JSON.stringify(data)}`,
+      );
+    }
     const txBuilder = new RawTransactionService({
       network: this.network,
       signer,

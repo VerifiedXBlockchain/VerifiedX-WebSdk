@@ -12,7 +12,11 @@
 export function vbtcContractHasNoMedia(nft: unknown): boolean {
   if (!nft || typeof nft !== 'object') return false;
   const record = nft as { primary_asset_size?: unknown; primary_asset_name?: unknown };
-  if (Number(record.primary_asset_size) !== 0 || record.primary_asset_size === null) return false;
+  // Only an explicit zero counts: a blank, missing or non-numeric size is
+  // not evidence that there is no file.
+  const size = record.primary_asset_size;
+  const isZero = size === 0 || (typeof size === 'string' && /^\s*0+(\.0+)?\s*$/.test(size));
+  if (!isZero) return false;
   const name = typeof record.primary_asset_name === 'string' ? record.primary_asset_name.trim().toLowerCase() : '';
   if (name === '') return false;
   return name === 'vbtc_v2_token' || name.startsWith('defaultvbtc');
