@@ -127,6 +127,42 @@ export type SigningIntent =
       withdrawalRequestHash: string;
     }
   | {
+      action: 'vbtc-transfer';
+      flowId: string;
+      scIdentifier: string;
+      fromAddress: string;
+      toAddress: string;
+      amount: number;
+    }
+  | {
+      /** A Type 27 request; the completion that follows (FROST and the Type 28 record) shares its flow. */
+      action: 'vbtc-withdrawal-request';
+      flowId: string;
+      ownerAddress: string;
+      btcAddress: string;
+      amount: number;
+      feeRate: number;
+      inputs: Array<{ scIdentifier: string; amount: number }>;
+    }
+  | {
+      action: 'vbtc-withdrawal-cancel';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
+      withdrawalRequestHash: string;
+    }
+  | {
+      /** Recording (Type 28) a withdrawal whose Bitcoin transaction was already broadcast. */
+      action: 'vbtc-withdrawal-record';
+      flowId: string;
+      scIdentifier: string;
+      ownerAddress: string;
+      withdrawalRequestHash: string;
+      btcTransactionHash: string;
+      amount: number;
+      btcDestination: string;
+    }
+  | {
       action: 'reserve-recovery';
       flowId: string;
       reserveAddress: string;

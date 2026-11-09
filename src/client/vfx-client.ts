@@ -49,6 +49,7 @@ import {
   KeypairOrSigner,
   ResolvedSigner,
   Signer,
+  SigningIntent,
   SigningRequest,
   SigningTransaction,
   approveIntent,
@@ -297,6 +298,43 @@ export interface VfxClientOptions {
    */
   preflight?: boolean;
 }
+
+type CompleteWithdrawalParams = {
+  scIdentifier: string;
+  requestorAddress: string;
+  withdrawalRequestHash: string;
+  btcAddress: string;
+  amount: number;
+  feeRate: number;
+  /** Local key to sign with. Pass either this or `signer`. */
+  privateKey?: string;
+  /** External signer (HSM, MPC) to sign with instead of a local key. */
+  signer?: Signer;
+  onProgress?: (event: VbtcProgressEvent) => void;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+};
+
+type RecordWithdrawalCompletionParams = {
+  scIdentifier: string;
+  requestorAddress: string;
+  withdrawalRequestHash: string;
+  btcTransactionHash: string;
+  amount: number;
+  btcDestination: string;
+  /** Local key to sign with. Pass either this or `signer`. */
+  privateKey?: string;
+  /** External signer (HSM, MPC) to sign with instead of a local key. */
+  signer?: Signer;
+  onProgress?: (event: VbtcProgressEvent) => void;
+};
+
+/** A user action the signer already approved; its signatures share `flowId`. */
+interface ApprovedFlow {
+  flowId: string;
+}
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
   private network: Network;
@@ -818,6 +856,13 @@ export class VfxClient {
     const signer = this.signerFor(params, 'transferVbtc');
     const toAddress = await this.resolveRecipient(params.toAddress, 'transferVbtc');
     assertRecipientOnNetwork(toAddress, this.network, 'transferVbtc toAddress');
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-transfer',
+      scIdentifier: params.scIdentifier,
+      fromAddress: params.fromAddress,
+      toAddress,
+      amount: params.amount,
+    });
     const prepared = await this.vbtcV2ApiClient.prepareTransfer({
       sc_identifier: params.scIdentifier,
       from_address: params.fromAddress,
@@ -826,7 +871,7 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'transferVbtc:prepare');
 
-    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendTransfer(body));
+    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendTransfer(body), flowId);
     this.assertSent(sent, 'transferVbtc:send');
 
     return { transactionHash: sent.Hash };
@@ -932,11 +977,9 @@ export class VfxClient {
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 4000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
-    const flowId = newFlowId();
     // Approved before the ceremony is prepared: its messages carry timestamps.
-    await approveIntent(signer, {
+    const flowId = await this.approveFlow(signer, {
       action: 'vbtc-create',
-      flowId,
       ownerAddress: params.ownerAddress,
       name: params.name,
       description: params.description,
@@ -1087,6 +1130,16 @@ export class VfxClient {
       `Withdrawal from vault ${params.scIdentifier}`,
     );
     if (floor) throw new Error(`requestWithdrawal: ${floor}`);
+    // One approval covers the request and its completion: declining after the
+    // request is on chain would strand it.
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-withdrawal-request',
+      ownerAddress: params.requestorAddress,
+      btcAddress: params.btcAddress,
+      amount: params.amount,
+      feeRate: params.feeRate,
+      inputs: [{ scIdentifier: params.scIdentifier, amount: params.amount }],
+    });
 
     // Step 1: Request (Type 27)
     const requestPrep = await this.vbtcV2ApiClient.prepareWithdrawRequest({
@@ -1098,8 +1151,11 @@ export class VfxClient {
     });
     this.assertPrepared(requestPrep, 'requestWithdrawal:request:prepare');
 
-    const requestSent = await this.signAndSend(requestPrep, signer, (body) =>
-      this.vbtcV2ApiClient.sendWithdrawRequest(body),
+    const requestSent = await this.signAndSend(
+      requestPrep,
+      signer,
+      (body) => this.vbtcV2ApiClient.sendWithdrawRequest(body),
+      flowId,
     );
     this.assertSent(requestSent, 'requestWithdrawal:request:send');
 
@@ -1120,7 +1176,7 @@ export class VfxClient {
     // chain but its hash lives only in this frame. Carrying it on the error
     // is what keeps the resume path reachable.
     try {
-      return await this.completeWithdrawal({ ...params, withdrawalRequestHash });
+      return await this.completeWithdrawalInFlow({ ...params, withdrawalRequestHash }, { flowId });
     } catch (error) {
       // A post-broadcast failure already carries the txid and the correct
       // (do-not-re-sign) recovery instruction. Re-wrapping it as merely
@@ -1151,36 +1207,32 @@ export class VfxClient {
    * getWithdrawalPin, or call this again. It throws VbtcWithdrawalClosedError
    * if the withdrawal closed unpaid.
    */
-  public completeWithdrawal = async (params: {
-    scIdentifier: string;
-    requestorAddress: string;
-    withdrawalRequestHash: string;
-    btcAddress: string;
-    amount: number;
-    feeRate: number;
-    /** Local key to sign with. Pass either this or `signer`. */
-    privateKey?: string;
-    /** External signer (HSM, MPC) to sign with instead of a local key. */
-    signer?: Signer;
-    onProgress?: (event: VbtcProgressEvent) => void;
-    pollIntervalMs?: number;
-    timeoutMs?: number;
-  }): Promise<VbtcWithdrawalResult> => {
+  public completeWithdrawal = async (params: CompleteWithdrawalParams): Promise<VbtcWithdrawalResult> => {
+    return this.completeWithdrawalInFlow(params);
+  };
+
+  /** `completeWithdrawal` inside a user action that was already approved (`flow`), or on its own. */
+  private completeWithdrawalInFlow = async (
+    params: CompleteWithdrawalParams,
+    flow?: ApprovedFlow,
+  ): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('completeWithdrawal');
     const signer = this.signerFor(params, 'completeWithdrawal');
     const onProgress = params.onProgress ?? (() => undefined);
     const pollIntervalMs = params.pollIntervalMs ?? 5000;
     const timeoutMs = params.timeoutMs ?? 3 * 60 * 1000;
     const withdrawalRequestHash = params.withdrawalRequestHash;
-    const flowId = newFlowId();
     // Approved before FROST is prepared: its start and share messages carry timestamps.
-    await approveIntent(signer, {
-      action: 'vbtc-withdrawal-complete',
-      flowId,
-      scIdentifier: params.scIdentifier,
-      ownerAddress: params.requestorAddress,
-      withdrawalRequestHash,
-    });
+    const flowId = await this.approveFlow(
+      signer,
+      {
+        action: 'vbtc-withdrawal-complete',
+        scIdentifier: params.scIdentifier,
+        ownerAddress: params.requestorAddress,
+        withdrawalRequestHash,
+      },
+      flow,
+    );
 
     // Step 2: Prepare FROST
     onProgress({ phase: 'frost_preparing', message: 'Preparing FROST signing ceremony' });
@@ -1390,19 +1442,22 @@ export class VfxClient {
     // same kind of failure as anything above it: the caller must record the
     // completion for the txid we already have, never re-run the ceremony.
     try {
-      return await this.recordWithdrawalCompletion({
-        scIdentifier: params.scIdentifier,
-        requestorAddress: params.requestorAddress,
-        withdrawalRequestHash,
-        btcTransactionHash: broadcast.txid,
-        // Caller's real values — frostPrep echoes are 0/"" when prepare raced
-        // the node's processing of the Type 27 block (same trap as execute).
-        amount: params.amount,
-        btcDestination: params.btcAddress,
-        privateKey: params.privateKey,
-        signer: params.signer,
-        onProgress,
-      });
+      return await this.recordWithdrawalCompletionInFlow(
+        {
+          scIdentifier: params.scIdentifier,
+          requestorAddress: params.requestorAddress,
+          withdrawalRequestHash,
+          btcTransactionHash: broadcast.txid,
+          // Caller's real values — frostPrep echoes are 0/"" when prepare raced
+          // the node's processing of the Type 27 block (same trap as execute).
+          amount: params.amount,
+          btcDestination: params.btcAddress,
+          privateKey: params.privateKey,
+          signer: params.signer,
+          onProgress,
+        },
+        { flowId },
+      );
     } catch (error) {
       throw new VbtcWithdrawalUnrecordedError(withdrawalRequestHash, broadcast.txid, error);
     }
@@ -1490,19 +1545,17 @@ export class VfxClient {
    * process after a crash, reload, or device switch, provided the txid was
    * persisted.
    */
-  public recordWithdrawalCompletion = async (params: {
-    scIdentifier: string;
-    requestorAddress: string;
-    withdrawalRequestHash: string;
-    btcTransactionHash: string;
-    amount: number;
-    btcDestination: string;
-    /** Local key to sign with. Pass either this or `signer`. */
-    privateKey?: string;
-    /** External signer (HSM, MPC) to sign with instead of a local key. */
-    signer?: Signer;
-    onProgress?: (event: VbtcProgressEvent) => void;
-  }): Promise<VbtcWithdrawalResult> => {
+  public recordWithdrawalCompletion = async (
+    params: RecordWithdrawalCompletionParams,
+  ): Promise<VbtcWithdrawalResult> => {
+    return this.recordWithdrawalCompletionInFlow(params);
+  };
+
+  /** `recordWithdrawalCompletion` inside a user action that was already approved (`flow`), or on its own. */
+  private recordWithdrawalCompletionInFlow = async (
+    params: RecordWithdrawalCompletionParams,
+    flow?: ApprovedFlow,
+  ): Promise<VbtcWithdrawalResult> => {
     this.assertNotDryRun('recordWithdrawalCompletion');
     const signer = this.signerFor(params, 'recordWithdrawalCompletion');
     const onProgress = params.onProgress ?? (() => undefined);
@@ -1510,6 +1563,19 @@ export class VfxClient {
     if (!params.btcTransactionHash) {
       throw new Error('recordWithdrawalCompletion requires the broadcast btcTransactionHash');
     }
+    const flowId = await this.approveFlow(
+      signer,
+      {
+        action: 'vbtc-withdrawal-record',
+        scIdentifier: params.scIdentifier,
+        ownerAddress: params.requestorAddress,
+        withdrawalRequestHash: params.withdrawalRequestHash,
+        btcTransactionHash: params.btcTransactionHash,
+        amount: params.amount,
+        btcDestination: params.btcDestination,
+      },
+      flow,
+    );
 
     const completionPrep = await this.vbtcV2ApiClient.prepareWithdrawCompleteTx({
       sc_identifier: params.scIdentifier,
@@ -1521,8 +1587,11 @@ export class VfxClient {
     });
     this.assertPrepared(completionPrep, 'recordWithdrawalCompletion:prepare');
 
-    const completionSent = await this.signAndSend(completionPrep, signer, (body) =>
-      this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
+    const completionSent = await this.signAndSend(
+      completionPrep,
+      signer,
+      (body) => this.vbtcV2ApiClient.sendWithdrawCompleteTx(body),
+      flowId,
     );
     this.assertSent(completionSent, 'recordWithdrawalCompletion:send');
 
@@ -1618,8 +1687,17 @@ export class VfxClient {
       throw new Error(`${label}: no vault to withdraw from`);
     }
 
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-withdrawal-request',
+      ownerAddress: signer.address,
+      btcAddress: params.btcAddress,
+      amount: params.totalAmount,
+      feeRate: params.feeRate,
+      inputs: inputs.map((input) => ({ scIdentifier: input.scIdentifier, amount: input.amount })),
+    });
+
     if (inputs.length === 1) {
-      return this.requestSingleShare(signer, params, inputs[0], maxFee, label);
+      return this.requestSingleShare(signer, params, inputs[0], maxFee, label, flowId);
     }
 
     // Throws for anything the node would refuse (cap, duplicates, decimals,
@@ -1642,6 +1720,8 @@ export class VfxClient {
       data,
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      flowId,
+      approved: true,
       throwOnRefusal: true,
       beforeSign: (tx) => {
         const txData = tx.Data as Record<string, unknown>;
@@ -1763,6 +1843,12 @@ export class VfxClient {
   }): Promise<VbtcCancelResult> => {
     this.assertNotDryRun('cancelWithdrawal');
     const signer = this.signerFor(params, 'cancelWithdrawal');
+    const flowId = await this.approveFlow(signer, {
+      action: 'vbtc-withdrawal-cancel',
+      scIdentifier: params.scIdentifier,
+      ownerAddress: params.ownerAddress,
+      withdrawalRequestHash: params.withdrawalRequestHash,
+    });
     const prepared = await this.vbtcV2ApiClient.prepareWithdrawCancel({
       sc_identifier: params.scIdentifier,
       owner_address: params.ownerAddress,
@@ -1770,7 +1856,12 @@ export class VfxClient {
     });
     this.assertPrepared(prepared, 'cancelWithdrawal:prepare');
 
-    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawCancel(body));
+    const sent = await this.signAndSend(
+      prepared,
+      signer,
+      (body) => this.vbtcV2ApiClient.sendWithdrawCancel(body),
+      flowId,
+    );
     this.assertSent(sent, 'cancelWithdrawal:send');
 
     return { transactionHash: sent.Hash };
@@ -2280,6 +2371,7 @@ export class VfxClient {
     input: VbtcAllocationInput,
     maxFee: number,
     label: string,
+    flowId: string,
   ): Promise<VbtcMultiWithdrawalResult> {
     const floor = withdrawalFeeFloorError(input.amount, params.feeRate, `Withdrawal from vault ${input.scIdentifier}`);
     if (floor) throw new Error(`${label}: ${floor}`);
@@ -2295,7 +2387,12 @@ export class VfxClient {
     if (!(fee > 0) || fee > maxFee) {
       throw new PreSignCheckError(`${label}: refused to sign: fee ${prepared.Fee} VFX (limit ${maxFee})`);
     }
-    const sent = await this.signAndSend(prepared, signer, (body) => this.vbtcV2ApiClient.sendWithdrawRequest(body));
+    const sent = await this.signAndSend(
+      prepared,
+      signer,
+      (body) => this.vbtcV2ApiClient.sendWithdrawRequest(body),
+      flowId,
+    );
     this.assertSent(sent, `${label}:send`);
     return {
       withdrawalRequestHash: sent.Hash,
@@ -2499,10 +2596,14 @@ export class VfxClient {
     prepared: PreparedTransactionResponse,
     signer: ResolvedSigner,
     sendFn: SendFn,
-    flowId: string = newFlowId(),
+    flowId: string,
   ): Promise<SentTransactionResponse> {
     const hash = prepared.Hash;
     const signature = await signer.sign(hash, this.preparedSigningRequest(prepared, flowId));
+    // The prepare endpoint chose this transaction's nonce, so the session's
+    // cached next nonce for the sender can no longer be trusted, whatever the
+    // send's outcome.
+    this.txBuildSession.forgetNonce(signer.address);
     // Same contract as RawTransactionService.process(): a failure once the
     // send request has gone out (a lost response, a timeout, or a 5xx that
     // Spyglass also returns when its own call to the node times out) leaves it
@@ -2515,6 +2616,24 @@ export class VfxClient {
     } catch (error) {
       throw new TransactionDispatchError(hash, error);
     }
+  }
+
+  /**
+   * Ask the signer to approve one user action and return its flow id. Inside
+   * a flow that was already approved (`flow`), returns that flow's id
+   * without asking again.
+   */
+  private async approveFlow(
+    signer: ResolvedSigner,
+    intent: DistributiveOmit<SigningIntent, 'flowId'>,
+    flow?: ApprovedFlow,
+  ): Promise<string> {
+    if (flow) {
+      return flow.flowId;
+    }
+    const flowId = newFlowId();
+    await approveIntent(signer, { ...intent, flowId } as SigningIntent);
+    return flowId;
   }
 
   /**

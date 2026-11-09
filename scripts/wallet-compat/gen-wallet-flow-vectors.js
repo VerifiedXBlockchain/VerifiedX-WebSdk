@@ -15,7 +15,7 @@
  *     - imported-key text handling (private_key_text.dart, copied unmodified
  *       into dart/lib at run time): canonical key, derivation text
  *       candidates, Bitcoin email/password, `privateCorrected`
- *   JS (vfx-gui/assets/js):
+ *   JS (vfx-gui/assets/js at the same ref, read with git show):
  *     - keygen-v3.js: seedToPrivate, importPrivateKey, the reserve loop
  *     - btc.js: btcKeypairFromEmailPassword (KeypairService)
  *
@@ -40,7 +40,8 @@ const guiRef = process.env.GUI_REF || 'origin/testnet';
 const dart = process.env.DART || path.join(os.homedir(), 'fvm/versions/3.7.12/bin/dart');
 const dartDir = path.join(__dirname, 'dart');
 
-const git = (...args) => execFileSync('git', ['-C', guiPath, ...args], { encoding: 'utf8' });
+const git = (...args) =>
+  execFileSync('git', ['-C', guiPath, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const guiCommit = git('rev-parse', '--short', guiRef).trim();
 
 // The Dart half reads the wallet's own utility files, unmodified.
@@ -60,9 +61,16 @@ if (seedBlock(authUtils) !== seedBlock(mainDart)) {
   throw new Error('auth_utils.dart email seed changed; update dart/bin/main.dart from the wallet first');
 }
 
+// The JS bundles come from the same ref as the Dart, never the working tree,
+// so the vectors are one wallet revision end to end.
+const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wallet-compat-bundles-'));
 global.window = global;
-require(path.join(guiPath, 'assets/js/keygen-v3.js'));
-require(path.join(guiPath, 'assets/js/btc.js'));
+for (const bundle of ['keygen-v3.js', 'btc.js']) {
+  const bundlePath = path.join(bundleDir, bundle);
+  fs.writeFileSync(bundlePath, git('show', `${guiRef}:assets/js/${bundle}`));
+  require(bundlePath);
+}
+fs.rmSync(bundleDir, { recursive: true, force: true });
 /* global btc */
 const btcServices = { testnet: new btc.KeypairService(true), mainnet: new btc.KeypairService(false) };
 const isTestNet = { testnet: true, mainnet: false };
@@ -108,7 +116,11 @@ for (let i = 0; i < 30; i++) {
   const alphabet = pick(`email-alpha:${i}`, PASSWORD_ALPHABETS);
   const length = 1 + (parseInt(sha256(`email-len:${i}`).slice(0, 4), 16) % 40);
   emailCases.push({
-    email: `${generatedText(`email-user:${i}`, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+', 4 + (i % 12))}@example${i % 5}.com`,
+    email: `${generatedText(
+      `email-user:${i}`,
+      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+',
+      4 + (i % 12),
+    )}@example${i % 5}.com`,
     password: generatedText(`email-pass:${i}`, alphabet, length),
   });
 }
@@ -124,7 +136,8 @@ for (let i = 0; i < 30; i++) {
 // Typed and pasted forms the wallet normalises before checking.
 const base12 = bip39.entropyToMnemonic(sha256('mnemonic-messy:12').slice(0, 32));
 const base24 = bip39.entropyToMnemonic(sha256('mnemonic-messy:24').slice(0, 64));
-const fullWidth = (text) => Array.from(text, (c) => (/[a-z]/.test(c) ? String.fromCharCode(c.charCodeAt(0) + 0xfee0) : c)).join('');
+const fullWidth = (text) =>
+  Array.from(text, (c) => (/[a-z]/.test(c) ? String.fromCharCode(c.charCodeAt(0) + 0xfee0) : c)).join('');
 for (const [base, words] of [
   [base12, 12],
   [base24, 24],
@@ -189,7 +202,16 @@ function walletReserve(reserveSeedFor, network) {
     const [address, publicKey, privateKey] = primary.split(':');
     if (address.startsWith('xRBX')) {
       const [recoveryAddress, recoveryPublicKey, recoveryPrivateKey] = recovery.split(':');
-      return { attempt, address, publicKey, privateKey, recoveryAddress, recoveryPublicKey, recoveryPrivateKey, restoreCode };
+      return {
+        attempt,
+        address,
+        publicKey,
+        privateKey,
+        recoveryAddress,
+        recoveryPublicKey,
+        recoveryPrivateKey,
+        restoreCode,
+      };
     }
   }
   throw new Error('reserve loop did not find an xRBX address');
@@ -203,7 +225,9 @@ function walletBtc(email, password, network) {
 // The wallet's private key text for every email and phrase login, so the
 // Dart half can turn it into the Bitcoin derivation text (privateCorrected).
 const emailPrivates = phase1.email.map((c) => window.seedToPrivate(c.seed));
-const mnemonicPrivates = phase1.mnemonic.map((c) => (c.privateKey ? importPrivateKey(c.privateKey, 'testnet').private : null));
+const mnemonicPrivates = phase1.mnemonic.map((c) =>
+  c.privateKey ? importPrivateKey(c.privateKey, 'testnet').private : null,
+);
 const phase2 = runDart({
   email: [],
   mnemonic: [],
@@ -216,7 +240,11 @@ const correctedByPrivate = new Map(phase2.privateCorrected.map((c) => [c.private
 // and its Bitcoin account on both networks, as the wallet derives them.
 function accountsFromPrivate(privateText) {
   const corrected = correctedByPrivate.get(privateText);
-  const out = { derivationText: corrected.derivationText, btcEmail: corrected.btcEmail, btcPassword: corrected.btcPassword };
+  const out = {
+    derivationText: corrected.derivationText,
+    btcEmail: corrected.btcEmail,
+    btcPassword: corrected.btcPassword,
+  };
   let reserveInput = privateText;
   if (reserveInput.startsWith('00')) reserveInput = reserveInput.substring(2);
   for (const network of ['testnet', 'mainnet']) {

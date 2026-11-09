@@ -433,3 +433,201 @@ describe('RawTransactionService hash modes', () => {
     expect(paths(calls)).toContain('/raw/fee');
   });
 });
+
+describe('every prepared vBTC action is approved before it is prepared', () => {
+  const frostMocks = {
+    '/btc/vbtc-v2/withdraw/complete/prepare/': () => ({
+      success: true,
+      SessionId: 'SES_W',
+      StartMessage: 'FROST_START',
+      StartTimestamp: 100,
+      ShareDistributionMessage: 'FROST_SHARE',
+      ShareDistributionTimestamp: 101,
+      Amount: 0.001,
+      BTCDestination: 'bc1qBTC',
+      FeeRate: 10,
+    }),
+    '/btc/vbtc-v2/withdraw/complete/execute/': () => ({ success: true, job_id: 'JOB_F' }),
+    '/btc/vbtc-v2/withdraw/complete/status/JOB_F/': () => ({
+      success: true,
+      status: 'complete',
+      signed_btc_tx_hex: 'DEADBEEF',
+      sc_identifier: 'sc-1',
+      withdrawal_request_hash: 'WR_HASH',
+    }),
+    '/btc/broadcast/': () => ({ success: true, txid: 'BTC_TXID' }),
+    '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+    '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+  };
+
+  /** A signer that records when approve ran (as a count of requests made so far) and every request's flow. */
+  function approvingSigner(calls: Array<{ url: string }>, decline = false) {
+    const approvals: Array<{ intent: SigningIntent; requestsBefore: number }> = [];
+    const requests: SigningRequest[] = [];
+    const signer: Signer = {
+      address,
+      publicKey,
+      approve(intent: SigningIntent) {
+        approvals.push({ intent, requestsBefore: calls.length });
+        if (decline) throw new Error('declined');
+      },
+      signDigest(digestHex: string, request?: SigningRequest) {
+        requests.push(request as SigningRequest);
+        return derSign(digestHex);
+      },
+    };
+    return { signer, approvals, requests };
+  }
+
+  test.each<{
+    name: string;
+    action: SigningIntent['action'];
+    mocks: Record<string, () => unknown>;
+    run: (client: VfxClient, signer: Signer) => Promise<unknown>;
+  }>([
+    {
+      name: 'transferVbtc',
+      action: 'vbtc-transfer',
+      mocks: {
+        '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'H', Fee: 1 }),
+        '/btc/vbtc-v2/transfer/send/': () => ({ success: true, Hash: 'S' }),
+      },
+      run: (client: VfxClient, signer: Signer) =>
+        client.transferVbtc({ scIdentifier: 'sc-1', fromAddress: address, toAddress: RECIPIENT, amount: 1, signer }),
+    },
+    {
+      name: 'cancelWithdrawal',
+      action: 'vbtc-withdrawal-cancel',
+      mocks: {
+        '/btc/vbtc-v2/withdraw/cancel/prepare/': () => ({ success: true, Hash: 'H', Fee: 1 }),
+        '/btc/vbtc-v2/withdraw/cancel/send/': () => ({ success: true, Hash: 'S' }),
+      },
+      run: (client: VfxClient, signer: Signer) =>
+        client.cancelWithdrawal({ scIdentifier: 'sc-1', ownerAddress: address, withdrawalRequestHash: 'WR', signer }),
+    },
+    {
+      name: 'recordWithdrawalCompletion',
+      action: 'vbtc-withdrawal-record',
+      mocks: {
+        '/btc/vbtc-v2/withdraw/complete/tx/prepare/': () => ({ success: true, Hash: 'CP', Fee: 1 }),
+        '/btc/vbtc-v2/withdraw/complete/tx/send/': () => ({ success: true, Hash: 'COMPLETION_HASH' }),
+      },
+      run: (client: VfxClient, signer: Signer) =>
+        client.recordWithdrawalCompletion({
+          scIdentifier: 'sc-1',
+          requestorAddress: address,
+          withdrawalRequestHash: 'WR',
+          btcTransactionHash: 'BTC_TXID',
+          amount: 0.001,
+          btcDestination: 'bc1qBTC',
+          signer,
+        }),
+    },
+  ])('$name asks first, and a decline sends nothing', async ({ action, mocks, run }) => {
+    const { calls } = installFetch(mocks);
+    const { signer, approvals, requests } = approvingSigner(calls);
+    await run(new VfxClient('testnet'), signer);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({ intent: { action }, requestsBefore: 0 });
+    expect(requests.every((r) => r.flowId === approvals[0].intent.flowId)).toBe(true);
+
+    const declined = installFetch(mocks);
+    await expect(run(new VfxClient('testnet'), approvingSigner(declined.calls, true).signer)).rejects.toThrow(
+      'declined',
+    );
+    expect(declined.calls).toHaveLength(0);
+  });
+
+  test('requestWithdrawal is one approval and one flow, through FROST and the completion record', async () => {
+    const { calls } = installFetch({
+      '/btc/vbtc-v2/withdraw/request/prepare/': () => ({ success: true, Hash: 'REQ', Fee: 1 }),
+      '/btc/vbtc-v2/withdraw/request/send/': () => ({ success: true, Hash: 'WR_HASH' }),
+      ...frostMocks,
+    });
+    const { signer, approvals, requests } = approvingSigner(calls);
+    await new VfxClient('testnet').requestWithdrawal({
+      scIdentifier: 'sc-1',
+      requestorAddress: address,
+      btcAddress: 'bc1qBTC',
+      amount: 0.001,
+      feeRate: 10,
+      signer,
+      pollIntervalMs: 1,
+      timeoutMs: 2000,
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({
+      intent: { action: 'vbtc-withdrawal-request', amount: 0.001 },
+      requestsBefore: 0,
+    });
+    // Request, FROST start and share, completion record: all in the approved flow.
+    expect(requests.map((r) => r.kind)).toEqual(['transaction', 'frost-withdrawal', 'frost-withdrawal', 'transaction']);
+    expect(new Set(requests.map((r) => r.flowId))).toEqual(new Set([approvals[0].intent.flowId]));
+  });
+
+  test('completeWithdrawal carries its approved flow into the completion record', async () => {
+    const { calls } = installFetch(frostMocks);
+    const { signer, approvals, requests } = approvingSigner(calls);
+    await new VfxClient('testnet').completeWithdrawal({
+      scIdentifier: 'sc-1',
+      requestorAddress: address,
+      withdrawalRequestHash: 'WR_HASH',
+      btcAddress: 'bc1qBTC',
+      amount: 0.001,
+      feeRate: 10,
+      signer,
+      pollIntervalMs: 1,
+      timeoutMs: 2000,
+    });
+    expect(approvals.map((a) => a.intent.action)).toEqual(['vbtc-withdrawal-complete']);
+    expect(requests.at(-1)).toMatchObject({ kind: 'transaction', message: 'CP' });
+    expect(new Set(requests.map((r) => r.flowId))).toEqual(new Set([approvals[0].intent.flowId]));
+  });
+});
+
+describe("'local' never reuses a nonce that may be spent", () => {
+  const keypair = { privateKey, publicKey, address };
+  const nonceCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes('/raw/nonce/')).length;
+
+  test('a send whose response was lost makes the next send ask for the nonce', async () => {
+    let lose = false;
+    const { calls } = installRawPipeline({
+      '/raw/send/': () => {
+        if (lose) {
+          lose = false;
+          throw new Error('socket hang up');
+        }
+        return { Result: 'Success' };
+      },
+    });
+    const client = new VfxClient('testnet', { hashMode: 'local' });
+    await client.sendCoin(keypair, RECIPIENT, 1); // primes the cache
+    await expect(client.sendCoin(keypair, RECIPIENT, 1)).resolves.toBeTruthy();
+    expect(nonceCalls(calls)).toBe(1);
+
+    lose = true;
+    await expect(client.sendCoin(keypair, RECIPIENT, 1)).rejects.toMatchObject({ name: 'TransactionDispatchError' });
+    const before = nonceCalls(calls);
+    await client.sendCoin(keypair, RECIPIENT, 1);
+    expect(nonceCalls(calls)).toBe(before + 1);
+  });
+
+  test('a prepared vBTC send makes the next raw send ask for the nonce', async () => {
+    const { calls } = installRawPipeline({
+      '/btc/vbtc-v2/transfer/prepare/': () => ({ success: true, Hash: 'H', Fee: 1 }),
+      '/btc/vbtc-v2/transfer/send/': () => ({ success: true, Hash: 'S' }),
+    });
+    const client = new VfxClient('testnet', { hashMode: 'local' });
+    await client.sendCoin(keypair, RECIPIENT, 1);
+    await client.transferVbtc({
+      scIdentifier: 'sc-1',
+      fromAddress: address,
+      toAddress: RECIPIENT,
+      amount: 1,
+      privateKey,
+    });
+    const before = nonceCalls(calls);
+    await client.sendCoin(keypair, RECIPIENT, 1);
+    expect(nonceCalls(calls)).toBe(before + 1);
+  });
+});

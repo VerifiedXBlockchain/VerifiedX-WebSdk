@@ -244,7 +244,6 @@ export class RawTransactionService {
         const verdict = await client.verifyTransactionResult(txData);
 
         if (!verdict.valid) {
-          this.session.forgetNonce(this.fromAddress);
           if (this.throwOnRefusal) {
             throw new TransactionRefusedError(hash, verdict.message);
           }
@@ -269,13 +268,15 @@ export class RawTransactionService {
       }
 
       if (!success) {
-        this.session.forgetNonce(this.fromAddress);
         throw new Error('Transaction failed to send');
       }
 
       this.session.recordSent(this.fromAddress, this.nonce as number);
       return hash;
     } catch (error) {
+      // Whatever went wrong, the cached next nonce is no longer known to be
+      // right: a dispatch whose answer was lost may have consumed it.
+      this.session.forgetNonce(this.fromAddress);
       if (
         error instanceof TransactionDispatchError ||
         error instanceof TransactionRefusedError ||
