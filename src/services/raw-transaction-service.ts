@@ -41,7 +41,8 @@ export interface IRawTransactionServiceOptions {
   apiOptions?: { baseUrl?: string; timeoutMs?: number };
   /**
    * Throw TransactionRefusedError, carrying the node's reason, when the node
-   * refuses the transaction at verification, instead of resolving to null.
+   * refuses the transaction (at verification, or at the send itself),
+   * instead of resolving to null.
    */
   throwOnRefusal?: boolean;
   /**
@@ -260,15 +261,22 @@ export class RawTransactionService {
       // ambiguous: the node may have accepted the transaction and only the
       // response was lost. Reporting that as a clean failure invites the caller
       // to resend and double-spend, so it is surfaced instead of swallowed.
-      let success: boolean;
+      let sendResult: { sent: boolean; message: string | null };
       try {
-        success = await client.sendTransaction(txData);
+        sendResult = await client.sendTransactionResult(txData);
       } catch (error) {
         throw new TransactionDispatchError(hash, error);
       }
 
-      if (!success) {
-        throw new Error('Transaction failed to send');
+      if (!sendResult.sent) {
+        // The node answered and refused: nothing was sent, so this is a
+        // definite failure, carried as TransactionRefusedError when asked.
+        if (this.throwOnRefusal) {
+          throw new TransactionRefusedError(hash, sendResult.message);
+        }
+        throw new Error(
+          sendResult.message ? `Transaction failed to send: ${sendResult.message}` : 'Transaction failed to send',
+        );
       }
 
       this.session.recordSent(this.fromAddress, this.nonce as number);

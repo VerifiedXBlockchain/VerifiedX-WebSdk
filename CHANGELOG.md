@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **The node's refusal reason reaches the app.** `new VfxClient(network, { throwOnRefusal: true })` makes every send from the client throw `TransactionRefusedError` (with `reason`) when the node refuses it, and `sendCoin(…, { throwOnRefusal })` sets it per call. A refusal at the send itself (as in `'local'` mode, which skips `/raw/verify`) now carries the node's message too. `RawTransactionApiClient.sendTransactionResult` returns it. Default unchanged: a refusal still resolves to null.
+
 ## Unreleased (9.1.0)
 
 ### Added

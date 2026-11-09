@@ -147,6 +147,16 @@ export interface ReserveSendOptions {
   unlockHours?: number;
 }
 
+/** Per-call options for `sendCoin`. */
+export interface SendCoinOptions extends ReserveSendOptions {
+  /**
+   * Throw TransactionRefusedError, with the node's reason, when the node
+   * refuses this send, instead of resolving to null. Overrides the client's
+   * `throwOnRefusal` for this call.
+   */
+  throwOnRefusal?: boolean;
+}
+
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
 
 /**
@@ -297,6 +307,13 @@ export interface VfxClientOptions {
    * refuses a bad transaction with the same reason either way.
    */
   preflight?: boolean;
+  /**
+   * Make every send from this client throw TransactionRefusedError, with the
+   * node's reason, when the node refuses it, instead of resolving to null.
+   * Default false (the historical null). Per call, `sendCoin` takes it too.
+   * Calls that already throw on refusal (multi-vault withdrawals) keep doing so.
+   */
+  throwOnRefusal?: boolean;
 }
 
 type CompleteWithdrawalParams = {
@@ -350,6 +367,7 @@ export class VfxClient {
   private blockApiClient: BlockApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
+  private throwOnRefusal: boolean;
   /** Clock offset and next-nonce cache shared by every send from this client. */
   private txBuildSession = new TxBuildSession();
 
@@ -379,14 +397,22 @@ export class VfxClient {
     this.blockApiClient = new BlockApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
   }
 
   /** The transaction-building options every RawTransactionService this client makes shares. */
-  private get txBuildOptions(): { hashMode: HashMode; preflight?: boolean; session: TxBuildSession } {
+  private get txBuildOptions(): {
+    hashMode: HashMode;
+    preflight?: boolean;
+    session: TxBuildSession;
+    throwOnRefusal?: boolean;
+  } {
     return {
       hashMode: this.hashMode,
       session: this.txBuildSession,
       ...(this.preflight !== undefined && { preflight: this.preflight }),
+      // Only ever switched on here, so a call that sets it itself is not overridden.
+      ...(this.throwOnRefusal && { throwOnRefusal: true }),
     };
   }
 
@@ -514,7 +540,7 @@ export class VfxClient {
     keypair: KeypairOrSigner,
     toAddress: string,
     amount: number,
-    options: ReserveSendOptions = {},
+    options: SendCoinOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
@@ -526,6 +552,7 @@ export class VfxClient {
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...(options.throwOnRefusal !== undefined && { throwOnRefusal: options.throwOnRefusal }),
     });
     return await txBuilder.process(this.dryRun);
   };

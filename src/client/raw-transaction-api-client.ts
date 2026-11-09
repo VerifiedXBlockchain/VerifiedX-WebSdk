@@ -80,9 +80,15 @@ export class RawTransactionApiClient extends BaseApiClient {
   }
 
   async sendTransaction(txData: Record<string, unknown>): Promise<boolean> {
+    return (await this.sendTransactionResult(txData)).sent;
+  }
+
+  /** Send a signed transaction; the node's verdict, with its reason when it refuses. */
+  async sendTransactionResult(txData: Record<string, unknown>): Promise<{ sent: boolean; message: string | null }> {
     const params = { transaction: txData };
     const response = await this.makeJsonRequest('/send/', 'POST', params);
-
-    return response?.Result === 'Success';
+    const sent = response?.Result === 'Success';
+    const message = typeof response?.Message === 'string' && response.Message ? response.Message : null;
+    return { sent, message: sent ? null : message };
   }
 }
