@@ -198,6 +198,22 @@ export class KeypairService {
     }
     return '00' + child.privateKey.toString('hex');
   }
+  /**
+   * The VFX key the Flutter web wallet signs in with when a user imports a
+   * Bitcoin key (auth_utils.dart handleImportWithBtcPrivateKey): the key
+   * text exactly as typed, 64 hex characters or a 52-character WIF, seeds
+   * `privateKeyFromSeedString` with its first and last 16 characters. The
+   * text is not normalized, as the wallet does not normalize it: the same
+   * key in upper-case hex, or as a WIF, gives a different VFX key.
+   */
+  public privateKeyFromBtcKey(btcPrivateKeyOrWif: string): string {
+    if (btcPrivateKeyOrWif.length !== 64 && btcPrivateKeyOrWif.length !== 52) {
+      throw new Error(
+        `privateKeyFromBtcKey: expected a 64-character hex key or a 52-character WIF, got ${btcPrivateKeyOrWif.length} characters`,
+      );
+    }
+    return this.privateKeyFromSeedString(`${btcPrivateKeyOrWif.slice(0, 16)}${btcPrivateKeyOrWif.slice(-16)}`);
+  }
 
   /**
    * Build the full reserve keypair from the reserve account's own private

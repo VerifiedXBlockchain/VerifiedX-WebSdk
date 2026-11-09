@@ -34,6 +34,16 @@ export class BrowserKeypairService {
     return this.inner.generateMnemonic(words);
   }
 
+  /** See KeypairService.privateKeyFromSeedString. */
+  public privateKeyFromSeedString(seed: string, index = 0): string {
+    return this.inner.privateKeyFromSeedString(seed, index);
+  }
+
+  /** See KeypairService.privateKeyFromBtcKey. */
+  public privateKeyFromBtcKey(btcPrivateKeyOrWif: string): string {
+    return this.inner.privateKeyFromBtcKey(btcPrivateKeyOrWif);
+  }
+
   /**
    * Derives via BIP32 m/0'/0'/index' — identical to the canonical
    * privateKeyFromMneumonic and to the Node/CLI/web-wallet derivation.
