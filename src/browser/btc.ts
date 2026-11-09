@@ -44,3 +44,7 @@ export class BrowserBtcClient extends OriginalBtcClient {
 // Export the browser-compatible client as both named and default export
 export { BrowserBtcClient as BtcClient };
 export default BrowserBtcClient;
+
+// Address types a key can spend from
+export { addressForSpendType } from '../btc/address-types';
+export type { BtcSpendType } from '../btc/address-types';

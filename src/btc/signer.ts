@@ -2,6 +2,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
 import { ECPairFactory } from 'ecpair';
 import { derSignatureToBytes, encodeDerSignature, newFlowId, parseDerSignature } from '../signer';
+import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
 
 const ECPair = ECPairFactory(ecc);
 const SECP256K1_N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
@@ -18,8 +19,18 @@ const SECP256K1_HALF_N = SECP256K1_N >> BigInt(1);
  * `request` still works.
  */
 export interface BtcSigner {
-  /** The P2WPKH (bc1q / tb1q) address the key controls. Checked against `publicKey`. */
+  /**
+   * The address the key spends from, checked against `publicKey`: its P2WPKH
+   * (bc1q / tb1q) address unless `addressType` says otherwise.
+   */
   address: string;
+  /**
+   * Which of the key's addresses `address` is: 'p2wpkh' (default),
+   * 'p2sh-p2wpkh', 'p2pkh' or key-path 'p2tr'. Inputs of the last three must
+   * come back from `signPsbt` with their signatures still partial
+   * (`partialSig`, or `tapKeySig` for Taproot) so the SDK can verify them.
+   */
+  addressType?: BtcSpendType;
   /** Compressed secp256k1 public key, 33 bytes as hex. */
   publicKey: string;
   /**
@@ -46,6 +57,8 @@ export type BtcSigningRequest =
       flowId: string;
       network: 'mainnet' | 'testnet';
       fromAddress: string;
+      /** The type of `fromAddress`; absent means 'p2wpkh'. */
+      addressType?: BtcSpendType;
       inputs: Array<{ txid: string; vout: number; valueSats: number }>;
       /** Every output, the change back to `fromAddress` marked `isChange`. */
       outputs: Array<{ address: string; valueSats: number; isChange: boolean }>;
@@ -91,13 +104,16 @@ export function isBtcSigner(value: unknown): value is BtcSigner {
   );
 }
 
-/** Throws unless `signer.address` is the P2WPKH address of `signer.publicKey` on `network`. */
+/**
+ * Throws unless `signer.address` is the `signer.addressType` (default P2WPKH)
+ * address of `signer.publicKey` on `network`.
+ */
 export function assertBtcSignerAddress(signer: BtcSigner, network: bitcoin.Network): Buffer {
   const pubkey = Buffer.from(signer.publicKey, 'hex');
   if (pubkey.length !== 33 || !ecc.isPoint(pubkey)) {
     throw new Error('BtcSigner.publicKey must be a 33-byte compressed secp256k1 key as hex');
   }
-  const derived = bitcoin.payments.p2wpkh({ pubkey, network }).address;
+  const derived = addressForSpendType(pubkey, signer.addressType ?? 'p2wpkh', network);
   if (derived !== signer.address) {
     throw new Error(
       `BtcSigner address ${signer.address} does not match its public key (which derives ${derived} on this network)`,
@@ -171,16 +187,23 @@ function resolveBitcoinNetwork(network: bitcoin.Network | 'mainnet' | 'testnet' 
 export function btcSignerFromWif(
   wif: string,
   networkOrName: bitcoin.Network | 'mainnet' | 'testnet' | { name: string },
+  addressType: BtcSpendType = 'p2wpkh',
 ): BtcSigner {
   const network = resolveBitcoinNetwork(networkOrName);
   const keyPair = ECPair.fromWIF(wif, network);
-  const address = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network }).address as string;
+  const address = addressForSpendType(keyPair.publicKey, addressType, network) as string;
+  // A BIP 86 key path signs with the key tweaked by its own x-only key.
+  const psbtKey =
+    addressType === 'p2tr-bip86'
+      ? keyPair.tweak(bitcoin.crypto.taggedHash('TapTweak', toXOnly(keyPair.publicKey)))
+      : keyPair;
   return {
     address,
     publicKey: keyPair.publicKey.toString('hex'),
+    ...(addressType !== 'p2wpkh' && { addressType }),
     signPsbt: (psbtBase64: string) => {
       const psbt = bitcoin.Psbt.fromBase64(psbtBase64, { network });
-      psbt.signAllInputs(keyPair);
+      psbt.signAllInputs(psbtKey);
       return psbt.toBase64();
     },
     signDigest: (digestHex: string) => {

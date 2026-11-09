@@ -1,5 +1,6 @@
 import type { Network } from 'bitcoinjs-lib';
 import type { BtcSigner } from './signer';
+import type { BtcSpendType } from './address-types';
 
 // Core interfaces for BTC functionality
 export interface IBtcKeypair {
@@ -179,6 +180,7 @@ export interface IBtcClient {
       recipientAddress: string,
       amount: number,
       feeRate?: number,
+      options?: { addressType?: BtcSpendType },
     ) => Promise<ICreateTxResponse>;
     broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
     sendBtc: (
@@ -186,6 +188,7 @@ export interface IBtcClient {
       recipientAddress: string,
       amount: number,
       feeRate?: number,
+      options?: { addressType?: BtcSpendType },
     ) => Promise<string | null>;
     checkBroadcast: (signedTxHex: string) => Promise<IBroadcastCheck>;
 

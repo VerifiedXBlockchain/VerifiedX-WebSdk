@@ -7,6 +7,7 @@ import { BTC_TO_SATOSHI_MULTIPLIER, defaultApiBaseUrl } from './constants';
 import { BtcBroadcastUnknownError } from './errors';
 import type { IBroadcastCheck as BroadcastCheck } from './types';
 import { BtcSigner, assertBtcSignerAddress } from './signer';
+import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
 import { newFlowId } from '../signer';
 
 const ECPair = ECPairFactory(ecc);
@@ -15,6 +16,15 @@ const TESTNET = bitcoin.networks.testnet;
 const MAINNET = bitcoin.networks.bitcoin;
 const P2WPKH_INPUT_SIZE = 68;
 const P2WPKH_OUTPUT_SIZE = 31;
+
+/** Virtual size of one input and of one change output, per spend type (key-path Taproot). */
+const SPEND_SIZES: Record<Exclude<BtcSpendType, 'p2wpkh'>, { input: number; output: number }> = {
+  'p2sh-p2wpkh': { input: 91, output: 32 },
+  p2pkh: { input: 148, output: 34 },
+  p2tr: { input: 58, output: 43 },
+  'p2tr-bip86': { input: 58, output: 43 },
+};
+
 // Conservative dust limit: change below this is folded into the fee rather
 // than creating an output relay policy may reject.
 const DUST_THRESHOLD = 546;
@@ -114,22 +124,34 @@ export default class TransactionService {
     recipientAddress: string,
     amount: number,
     feeRate = 0,
+    options: { addressType?: BtcSpendType } = {},
   ): Promise<CreateTxResponse> {
     const keyPair: ECPairInterface = ECPair.fromWIF(senderWif, this.network);
+    const spendType = options.addressType ?? 'p2wpkh';
 
-    const { address } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network: this.network });
+    const address = addressForSpendType(keyPair.publicKey, spendType, this.network);
 
     if (address == null) {
       return this._buildCreateResponse(false, null, 'Could not get address');
     }
 
-    const built = await this.buildPayment(address, recipientAddress, amount, feeRate);
+    const built = await this.buildPayment(address, recipientAddress, amount, feeRate, {
+      type: spendType,
+      pubkey: keyPair.publicKey,
+    });
     if (!built.psbt) {
       return this._buildCreateResponse(false, null, built.error);
     }
     const psbt = built.psbt;
 
-    psbt.signAllInputs(keyPair);
+    // A BIP 86 Taproot spend signs with the key tweaked by its own x-only
+    // public key (no script tree). The SDK's own `p2tr` address uses the key
+    // itself as the output key, so it signs untweaked, like every other type.
+    const signingKey =
+      spendType === 'p2tr-bip86'
+        ? keyPair.tweak(bitcoin.crypto.taggedHash('TapTweak', toXOnly(keyPair.publicKey)))
+        : keyPair;
+    psbt.signAllInputs(signingKey);
     psbt.finalizeAllInputs();
 
     const transactionHex = psbt.extractTransaction().toHex();
@@ -152,6 +174,7 @@ export default class TransactionService {
     flowId: string = newFlowId(),
   ): Promise<CreateTxResponse> {
     const pubkey = assertBtcSignerAddress(signer, this.network);
+    const spendType = signer.addressType ?? 'p2wpkh';
     const amountSats = Math.round(amount * BTC_TO_SATOSHI_MULTIPLIER);
     await signer.approve?.({
       action: 'btc-send',
@@ -162,7 +185,10 @@ export default class TransactionService {
       feeRate,
     });
 
-    const built = await this.buildPayment(signer.address, recipientAddress, amount, feeRate);
+    const built = await this.buildPayment(signer.address, recipientAddress, amount, feeRate, {
+      type: spendType,
+      pubkey,
+    });
     if (!built.psbt) {
       return this._buildCreateResponse(false, null, built.error);
     }
@@ -173,6 +199,7 @@ export default class TransactionService {
       flowId,
       network: this.network === TESTNET ? 'testnet' : 'mainnet',
       fromAddress: signer.address,
+      addressType: spendType,
       inputs: built.inputs,
       outputs: built.outputs,
       feeSats: built.feeSats,
@@ -187,6 +214,32 @@ export default class TransactionService {
     }
     for (let index = 0; index < signed.data.inputs.length; index++) {
       const input = signed.data.inputs[index];
+      if (spendType !== 'p2wpkh') {
+        // Finalized inputs are checked only for P2WPKH; other types must come
+        // back with their signatures still partial, so they can be verified.
+        if (input.finalScriptWitness || input.finalScriptSig) {
+          return this._buildCreateResponse(
+            false,
+            null,
+            `BtcSigner finalized input ${index}; return ${spendType} inputs unfinalized`,
+          );
+        }
+        const valid =
+          spendType === 'p2tr' || spendType === 'p2tr-bip86'
+            ? !!input.tapKeySig &&
+              (input.tapKeySig.length === 64 || input.tapKeySig[64] === bitcoin.Transaction.SIGHASH_ALL) &&
+              signed.validateSignaturesOfInput(index, schnorrValidator)
+            : !!input.partialSig?.some(
+                (sig) =>
+                  sig.pubkey.equals(pubkey) &&
+                  bitcoin.script.signature.decode(sig.signature).hashType === bitcoin.Transaction.SIGHASH_ALL,
+              ) && signed.validateSignaturesOfInput(index, ecdsaValidator, pubkey);
+        if (!valid) {
+          return this._buildCreateResponse(false, null, `BtcSigner did not sign input ${index} with its key`);
+        }
+        signed.finalizeInput(index);
+        continue;
+      }
       if (input.finalScriptWitness) {
         if (!finalWitnessIsValid(signed, index, pubkey)) {
           return this._buildCreateResponse(false, null, `BtcSigner input ${index} is not signed by its key`);
@@ -215,6 +268,7 @@ export default class TransactionService {
     recipientAddress: string,
     amount: number,
     feeRate: number,
+    spend: { type: BtcSpendType; pubkey: Buffer } = { type: 'p2wpkh', pubkey: Buffer.alloc(0) },
   ): Promise<
     | {
         psbt: bitcoin.Psbt;
@@ -250,20 +304,43 @@ export default class TransactionService {
     let inputSum = 0;
     let inputSize = 0;
 
-    utxos.forEach((utxo: any) => {
-      psbt.addInput({
-        hash: utxo.txid,
-        index: utxo.vout,
-        sequence: 0xfffffffd,
-        witnessUtxo: {
-          script: bitcoin.address.toOutputScript(address, this.network),
-          value: utxo.value, // satoshis
-        },
-      });
+    const outputScript = bitcoin.address.toOutputScript(address, this.network);
+    for (const utxo of utxos as any[]) {
+      const base = { hash: utxo.txid, index: utxo.vout, sequence: 0xfffffffd };
+      const witnessUtxo = { script: outputScript, value: utxo.value }; // satoshis
+      switch (spend.type) {
+        case 'p2wpkh':
+          psbt.addInput({ ...base, witnessUtxo });
+          inputSize += P2WPKH_INPUT_SIZE;
+          break;
+        case 'p2sh-p2wpkh':
+          psbt.addInput({
+            ...base,
+            witnessUtxo,
+            redeemScript: bitcoin.payments.p2wpkh({ pubkey: spend.pubkey, network: this.network }).output,
+          });
+          inputSize += SPEND_SIZES['p2sh-p2wpkh'].input;
+          break;
+        case 'p2pkh':
+          // A legacy input signs over the whole previous transaction.
+          psbt.addInput({ ...base, nonWitnessUtxo: await this.getRawTx(utxo.txid) });
+          inputSize += SPEND_SIZES.p2pkh.input;
+          break;
+        case 'p2tr':
+          // The output key is the key itself. bitcoinjs signs a key-path input
+          // only when it carries tapInternalKey, and signs with whichever key
+          // matches the output key, which here is the untweaked key.
+          psbt.addInput({ ...base, witnessUtxo, tapInternalKey: toXOnly(spend.pubkey) });
+          inputSize += SPEND_SIZES.p2tr.input;
+          break;
+        case 'p2tr-bip86':
+          psbt.addInput({ ...base, witnessUtxo, tapInternalKey: toXOnly(spend.pubkey) });
+          inputSize += SPEND_SIZES['p2tr-bip86'].input;
+          break;
+      }
       inputs.push({ txid: utxo.txid, vout: utxo.vout, valueSats: utxo.value });
       inputSum += utxo.value;
-      inputSize += P2WPKH_INPUT_SIZE;
-    });
+    }
 
     psbt.addOutput({
       address: recipientAddress,
@@ -274,9 +351,16 @@ export default class TransactionService {
     // Fee is estimated for the tx shape actually produced: with a change
     // output when the change is worth keeping, without one when the
     // remainder is dust (in which case it is folded into the fee).
+    // P2WPKH keeps the historical estimate exactly; the other types count
+    // the recipient's real output script and their own change output.
     const overhead = 10;
-    const feeWithChange = Math.ceil((inputSize + 2 * P2WPKH_OUTPUT_SIZE + overhead) * feeRate);
-    const feeWithoutChange = Math.ceil((inputSize + P2WPKH_OUTPUT_SIZE + overhead) * feeRate);
+    const recipientOutputSize =
+      spend.type === 'p2wpkh'
+        ? P2WPKH_OUTPUT_SIZE
+        : 9 + bitcoin.address.toOutputScript(recipientAddress, this.network).length;
+    const changeOutputSize = spend.type === 'p2wpkh' ? P2WPKH_OUTPUT_SIZE : SPEND_SIZES[spend.type].output;
+    const feeWithChange = Math.ceil((inputSize + recipientOutputSize + changeOutputSize + overhead) * feeRate);
+    const feeWithoutChange = Math.ceil((inputSize + recipientOutputSize + overhead) * feeRate);
 
     const change = inputSum - amountSats - feeWithChange;
 
@@ -464,6 +548,9 @@ export function classifyBroadcastFailure(status: number, body: string): 'already
 const ecdsaValidator = (pubkey: Buffer, msghash: Buffer, signature: Buffer): boolean =>
   ecc.verify(msghash, pubkey, signature);
 
+const schnorrValidator = (pubkey: Buffer, msghash: Buffer, signature: Buffer): boolean =>
+  ecc.verifySchnorr(msghash, pubkey, signature);
+
 /** A PSBT from a signer, which may answer in base64 or hex. */
 function parsePsbt(text: string, network: bitcoin.Network): bitcoin.Psbt {
   const trimmed = String(text ?? '').trim();
@@ -500,9 +587,23 @@ function sameTransactionProblem(built: bitcoin.Psbt, signed: bitcoin.Psbt): stri
  */
 function sameSpentOutputsProblem(built: bitcoin.Psbt, signed: bitcoin.Psbt): string | null {
   for (let i = 0; i < built.data.inputs.length; i++) {
-    const a = built.data.inputs[i].witnessUtxo;
-    const b = signed.data.inputs[i].witnessUtxo;
-    if (!a || !b || a.value !== b.value || !a.script.equals(b.script)) return `spent output of input ${i}`;
+    const builtInput = built.data.inputs[i];
+    const signedInput = signed.data.inputs[i];
+    if (builtInput.witnessUtxo) {
+      const a = builtInput.witnessUtxo;
+      const b = signedInput.witnessUtxo;
+      if (!b || a.value !== b.value || !a.script.equals(b.script)) return `spent output of input ${i}`;
+    } else if (builtInput.nonWitnessUtxo) {
+      // A legacy input commits to the whole previous transaction.
+      const b = signedInput.nonWitnessUtxo;
+      if (!b || !builtInput.nonWitnessUtxo.equals(b)) return `spent output of input ${i}`;
+    }
+    if (
+      (builtInput.redeemScript || signedInput.redeemScript) &&
+      !(builtInput.redeemScript && signedInput.redeemScript && builtInput.redeemScript.equals(signedInput.redeemScript))
+    ) {
+      return `redeem script of input ${i}`;
+    }
   }
   return null;
 }

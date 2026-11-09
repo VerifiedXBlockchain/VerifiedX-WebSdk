@@ -29,3 +29,7 @@ export type { BtcClientOptions } from './client';
 
 // Default export - the main client
 export default BtcClient;
+
+// Address types a key can spend from
+export { addressForSpendType } from './address-types';
+export type { BtcSpendType } from './address-types';
