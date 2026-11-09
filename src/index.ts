@@ -70,6 +70,8 @@ export type {
   DeployTokenResult,
   ReserveKeypair,
   VaultKeypair,
+  LegacyVaultSource,
+  LegacyRecoveryLookup,
 } from './types';
 
 // External signing (HSM / MPC)

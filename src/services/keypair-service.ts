@@ -16,7 +16,7 @@ import {
   wordArrayToByteArray,
 } from '../utils';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
-import { Keypair, ReserveKeypair, VaultKeypair } from '../types';
+import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../types';
 import { parseVfxSignature } from './vfx-signature';
 
 // Curve context construction is the expensive part of elliptic — build once.
@@ -306,6 +306,28 @@ export class KeypairService {
       }
     }
     throw new Error('recoveryKeyFromPasskeyPrf: could not derive a valid key');
+  }
+
+  /**
+   * LEGACY. The recovery key the Flutter web wallet (and so Core's
+   * restore-from-key path) derives for a vault: `seedToPrivate` of the first
+   * 32 hex characters of the vault key. Anyone holding the vault key holds
+   * this key too, so it protects nothing against theft. Only for restoring
+   * vaults that were registered with it; see `findLegacyRecovery`.
+   */
+  public deriveLegacyRecoveryKey(source: LegacyVaultSource): Keypair & { vaultAddress: string } {
+    const vault =
+      'vaultPrivateKey' in source
+        ? this.restoreLegacyWebWalletVaultFromVaultKey(source.vaultPrivateKey)
+        : 'derivationText' in source
+        ? this.restoreLegacyWebWalletVaultFromDerivationText(source.derivationText)
+        : this.restoreLegacyWebWalletVault(source.mainPrivateKey);
+    return {
+      privateKey: vault.recoveryPrivateKey,
+      publicKey: vault.recoveryPublicKey,
+      address: vault.recoveryAddress,
+      vaultAddress: vault.address,
+    };
   }
 
   /**

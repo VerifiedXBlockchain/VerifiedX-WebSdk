@@ -6,6 +6,7 @@
 
 - **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
 - **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
+- **Legacy vault restore, gated on activity**: `deriveLegacyRecoveryKey` (the Flutter wallet's derivation, unchanged) and `findLegacyRecovery`, which reports whether Spyglass shows the legacy vault or its recovery address in use. `listTransactionsForAddress` takes `{ strict: true }`.
 
 ### Changed (breaking)
 

@@ -337,6 +337,8 @@ and NFT sends, and refuses fungible-token transfers and burns from a vault.
 - `reserveKeypairFromRestoreCode(code)` — from `base64("<privateKey>//<recoveryPrivateKey>")`, the code the CLI prints and the wallet backs up. The recovery key in the code is used as-is.
 - `restoreLegacyWebWalletVault(mainPrivateKey)` → `ReserveKeypair` — **legacy, no theft protection.** The vault the Flutter web wallet pairs with a main account (seed from the first 32 hex characters plus a counter, retried until the address is `xRBX`; recovery key seeded from the vault key). For finding existing web-wallet vaults only. Pinned against the wallet by the compat tests.
 - `restoreLegacyWebWalletVaultFromVaultKey(vaultPrivateKey)` / `restoreLegacyWebWalletVaultFromDerivationText(text)` — **legacy, no theft protection**: the same scheme from the vault key or a key's derivation text.
+- `deriveLegacyRecoveryKey({ mainPrivateKey } | { vaultPrivateKey } | { derivationText })` → `Keypair & { vaultAddress }` — **legacy**: the recovery key the Flutter wallet derived for that vault.
+- `findLegacyRecovery(source, { includeKey? })` → `{ address, vaultAddress, hasActivity, summary, recoveryKey? }` — **legacy**: derives the legacy vault and recovery address and asks Spyglass (`/addresses/{address}/`, `/transaction/address/{address}/` for both). Activity is a balance or any transaction on either address, an activated vault, or a `Register()` from the vault naming the recovery address. Outages throw. The key is returned only with `includeKey: true`. Show "Restore legacy vault" only when `hasActivity` is true.
 - `reserveAddressFromPublic(publicKeyHex)` — the `xRBX` address of a public key, for HSM-held vault keys.
 
 Sign with the `ReserveKeypair` object itself. Its private key on its own

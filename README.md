@@ -382,9 +382,13 @@ client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM ke
 
 // Finding vaults the Flutter web wallet made. LEGACY: their recovery key is
 // derived from the main key, so they have NO theft protection; move funds to
-// a new vault with an independent recovery key.
-client.restoreLegacyWebWalletVault(mainPrivateKey)
-client.restoreLegacyWebWalletVaultFromVaultKey(vaultKey)
+// a new vault with an independent recovery key. Offer the restore only when
+// Spyglass shows the legacy vault or its recovery address was ever used.
+const legacy = await client.findLegacyRecovery({ mainPrivateKey });   // { address, vaultAddress, hasActivity, summary }
+if (legacy.hasActivity) {
+  const vault = client.restoreLegacyWebWalletVault(mainPrivateKey);   // vault + derived recovery key
+}
+client.deriveLegacyRecoveryKey({ vaultPrivateKey })                    // the derived recovery key itself
 
 // Lifecycle. Fund the vault first (5 VFX covers activation plus the 0.5 floor).
 await client.sendCoin(main, vault.address, 5);

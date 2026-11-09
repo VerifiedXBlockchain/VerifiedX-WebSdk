@@ -409,6 +409,34 @@ export interface DeployTokenResult {
  * can sweep it. `restoreCode` is `base64("<privateKey>//<recoveryPrivateKey>")`,
  * the format the CLI and web wallet both restore from.
  */
+/**
+ * What a legacy (Flutter web wallet) vault and its derived recovery key are
+ * computed from: the main account key, the vault key itself, or an imported
+ * key's derivation text (see `derivationTextCandidates`).
+ */
+export type LegacyVaultSource = { mainPrivateKey: string } | { vaultPrivateKey: string } | { derivationText: string };
+
+/** What `findLegacyRecovery` found for a legacy vault's derived recovery address. */
+export interface LegacyRecoveryLookup {
+  /** The derived recovery address. */
+  address: string;
+  /** The legacy vault (xRBX) address it belongs to. */
+  vaultAddress: string;
+  /** True when Spyglass shows anything for the recovery address or the vault that uses it. */
+  hasActivity: boolean;
+  summary: {
+    recoveryBalance: number;
+    recoveryTransactionCount: number;
+    vaultBalance: number;
+    vaultTransactionCount: number;
+    vaultActivated: boolean;
+    /** A Register() from the vault names this recovery address. */
+    registeredWithThisRecovery: boolean;
+  };
+  /** The derived recovery key, only when asked for with `includeKey: true`. */
+  recoveryKey?: Keypair;
+}
+
 /** A vault (xRBX) key on its own. Its recovery key lives elsewhere; only the recovery address is registered. */
 export type VaultKeypair = Keypair;
 

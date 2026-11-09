@@ -3,7 +3,7 @@ import * as bip39 from 'bip39';
 import KeypairService from '../../services/keypair-service';
 import { isValidPrivateKey } from '../utils';
 import { Network } from '../../constants';
-import { Keypair, ReserveKeypair, VaultKeypair } from '../../types';
+import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../../types';
 
 /**
  * Browser-facing keypair service.
@@ -167,6 +167,10 @@ export class BrowserKeypairService {
 
   public vaultKeypairFromPrivateKey(vaultPrivateKey: string): VaultKeypair {
     return this.inner.vaultKeypairFromPrivateKey(vaultPrivateKey);
+  }
+
+  public deriveLegacyRecoveryKey(source: LegacyVaultSource): Keypair & { vaultAddress: string } {
+    return this.inner.deriveLegacyRecoveryKey(source);
   }
 
   public newRecoveryKey(): Keypair {

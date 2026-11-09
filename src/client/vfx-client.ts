@@ -84,6 +84,8 @@ import {
   FungibleTokenBalance,
   FungibleTokenDetail,
   Keypair,
+  LegacyRecoveryLookup,
+  LegacyVaultSource,
   PaginatedResponse,
   ReserveKeypair,
   TokenVotingTopic,
@@ -362,6 +364,26 @@ export class NftBulkMintError extends Error {
   }
 }
 
+/** The larger of an address's available and total balance; 0 when Spyglass has neither. */
+function largestBalance(details: { balance: number; balanceTotal: number } | null): number {
+  const finite = (value: number) => (Number.isFinite(value) ? value : 0);
+  return details ? Math.max(finite(details.balance), finite(details.balanceTotal)) : 0;
+}
+
+/** A transaction's Data as Spyglass returns it (JSON text, an object, or a one-element array). */
+function parseTxData(data: unknown): Record<string, unknown> | null {
+  let value = data;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) value = value[0];
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 export class VfxClient {
@@ -490,6 +512,73 @@ export class VfxClient {
   /** A recovery key from a dedicated passkey's PRF output (see KeypairService for the rp_id caveat). */
   public recoveryKeyFromPasskeyPrf = (prfOutput: Uint8Array | ArrayBuffer): Keypair => {
     return this.keypairService.recoveryKeyFromPasskeyPrf(prfOutput);
+  };
+
+  /**
+   * LEGACY. The recovery key the Flutter web wallet derived for a vault (from
+   * the main key, the vault key, or an imported key's derivation text). Never
+   * use it for a new vault; it falls with the vault key.
+   */
+  public deriveLegacyRecoveryKey = (source: LegacyVaultSource): Keypair & { vaultAddress: string } => {
+    return this.keypairService.deriveLegacyRecoveryKey(source);
+  };
+
+  /**
+   * LEGACY. Whether an account has a legacy web-wallet vault worth restoring:
+   * derives the legacy vault and recovery address (as the Flutter wallet and
+   * Core do) and asks Spyglass about them. Activity is any of:
+   *
+   *   - a balance or any transaction on the recovery address
+   *     (`/addresses/{address}/`, `/transaction/address/{address}/`);
+   *   - a balance, any transaction, or an activated vault record on the
+   *     vault address (same two endpoints);
+   *   - a `Register()` from the vault naming this recovery address (read from
+   *     the vault's transactions to `Reserve_Base`).
+   *
+   * Lookups are strict: an outage throws rather than reading as "nothing
+   * there". The key is returned only with `includeKey: true`; a wallet
+   * shows "Restore legacy vault" when `hasActivity` is true.
+   */
+  public findLegacyRecovery = async (
+    source: LegacyVaultSource,
+    opts: { includeKey?: boolean } = {},
+  ): Promise<LegacyRecoveryLookup> => {
+    const derived = this.keypairService.deriveLegacyRecoveryKey(source);
+    const [recoveryDetails, vaultDetails, recoveryTxs, vaultTxs] = await Promise.all([
+      this.addressApiClient.getAddressDetails(derived.address, { strict: true }),
+      this.addressApiClient.getAddressDetails(derived.vaultAddress, { strict: true }),
+      this.transactionApiClient.listTransactionsForAddress(derived.address, 1, 1, { strict: true }),
+      this.transactionApiClient.listTransactionsForAddress(derived.vaultAddress, 1, 50, { strict: true }),
+    ]);
+    const registeredWithThisRecovery = (vaultTxs?.results ?? []).some((tx) => {
+      if (tx.to_address !== RESERVE_BASE_ADDRESS || tx.from_address !== derived.vaultAddress) return false;
+      const data = parseTxData(tx.data);
+      return data?.Function === 'Register()' && data?.RecoveryAddress === derived.address;
+    });
+    const summary = {
+      recoveryBalance: largestBalance(recoveryDetails),
+      recoveryTransactionCount: recoveryTxs?.count ?? 0,
+      vaultBalance: largestBalance(vaultDetails),
+      vaultTransactionCount: vaultTxs?.count ?? 0,
+      vaultActivated: vaultDetails?.activated === true,
+      registeredWithThisRecovery,
+    };
+    const hasActivity =
+      summary.recoveryBalance > 0 ||
+      summary.recoveryTransactionCount > 0 ||
+      summary.vaultBalance > 0 ||
+      summary.vaultTransactionCount > 0 ||
+      summary.vaultActivated ||
+      registeredWithThisRecovery;
+    return {
+      address: derived.address,
+      vaultAddress: derived.vaultAddress,
+      hasActivity,
+      summary,
+      ...(opts.includeKey && {
+        recoveryKey: { privateKey: derived.privateKey, publicKey: derived.publicKey, address: derived.address },
+      }),
+    };
   };
 
   /** LEGACY, NO THEFT PROTECTION: the vault the Flutter web wallet pairs with this main private key. */
