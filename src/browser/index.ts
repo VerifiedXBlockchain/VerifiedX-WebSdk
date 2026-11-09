@@ -63,6 +63,7 @@ export type {
   DeployTokenParams,
   DeployTokenResult,
   ReserveKeypair,
+  VaultKeypair,
 } from '../types';
 
 // External signing (HSM / MPC)

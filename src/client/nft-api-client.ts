@@ -127,8 +127,9 @@ export function nftCurrentStage(nft: Pick<VfxNft, 'smart_contract_data'>): numbe
 
 /**
  * Whether the NFT has no media files: its primary asset is the 'default'
- * placeholder of size 0 and it has no additional assets. Such an NFT
- * transfers with locator "NA" and needs no beacon.
+ * placeholder of size 0, it has no additional assets, and no evolve stage
+ * carries an asset of its own. Such an NFT transfers with locator "NA" and
+ * needs no beacon.
  */
 export function nftIsMedialess(
   nft: Pick<VfxNft, 'smart_contract_data' | 'primary_asset_name' | 'primary_asset_size'>,
@@ -139,5 +140,9 @@ export function nftIsMedialess(
   const size = Number(asset?.FileSize ?? nft.primary_asset_size ?? 0);
   const features = contract?.Features;
   const hasMoreMedia = Array.isArray(features) && features.some((feature) => feature?.FeatureName === 2);
-  return name === 'default' && size === 0 && !hasMoreMedia;
+  const stageHasMedia = nftEvolveStages(nft).some((stage) => {
+    const stageAsset = stage.SmartContractAsset as { Name?: unknown; FileSize?: unknown } | null | undefined;
+    return !!stageAsset && !(stageAsset.Name === 'default' && Number(stageAsset.FileSize ?? 0) === 0);
+  });
+  return name === 'default' && size === 0 && !hasMoreMedia && !stageHasMedia;
 }

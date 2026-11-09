@@ -376,3 +376,56 @@ describe('reading the contract Spyglass reports', () => {
     expect(nftContract({ smart_contract_data: 'not json' })).toBeNull();
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('an NFT whose only media sits on an evolve stage is not media-less', () => {
+    const withStageMedia = {
+      primary_asset_name: 'default',
+      primary_asset_size: 0,
+      smart_contract_data: JSON.stringify({
+        SmartContractMain: {
+          SmartContractAsset: { Name: 'default', FileSize: 0 },
+          Features: [
+            {
+              FeatureName: 0,
+              FeatureFeatures: [
+                { EvolutionState: 1, Name: 'a', Description: 'a', IsCurrentState: false, SmartContractAsset: null },
+                {
+                  EvolutionState: 2,
+                  Name: 'b',
+                  Description: 'b',
+                  IsCurrentState: false,
+                  SmartContractAsset: { Name: 'night.png', FileSize: 900 },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    };
+    expect(nftIsMedialess(withStageMedia)).toBe(false);
+  });
+
+  test('a dry-run transfer of an NFT with media never requests a beacon upload', async () => {
+    const { calls } = installPipeline({
+      [`/nft/${encodeURIComponent(SC)}/`]: () => ({
+        identifier: SC,
+        owner_address: owner.address,
+        primary_asset_name: 'art.png',
+        primary_asset_size: 1234,
+        smart_contract_data: JSON.stringify({
+          SmartContractMain: { SmartContractAsset: { Name: 'art.png', FileSize: 1234 } },
+        }),
+      }),
+      '/raw/beacon/upload/': () => ({ success: true, locator: 'BEACON_LOC' }),
+    });
+    const client = new VfxClient('testnet', { dryRun: true });
+    await expect(client.transferNft(owner, { scIdentifier: SC, toAddress: RECIPIENT })).rejects.toThrow(
+      /needs a `locator`/,
+    );
+    expect(calls.some((c) => c.url.includes('/beacon/upload/'))).toBe(false);
+    // With a locator a dry run builds and verifies, sending nothing.
+    await client.transferNft(owner, { scIdentifier: SC, toAddress: RECIPIENT, locator: 'BEACON_LOC' });
+    expect(calls.some((c) => c.url.includes('/raw/send/'))).toBe(false);
+  });
+});

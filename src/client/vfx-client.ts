@@ -2304,6 +2304,12 @@ export class VfxClient {
       }
       if (nftIsMedialess(nft)) {
         locator = 'NA';
+      } else if (this.dryRun) {
+        // The beacon upload pushes the files to the recipient for real, so a
+        // dry run must not trigger it.
+        throw new Error(
+          'transferNft: a dry run of an NFT with media needs a `locator`; requesting one would push the files',
+        );
       } else {
         const beaconSignature = await resolved.sign(params.scIdentifier, {
           kind: 'nft-beacon-upload',

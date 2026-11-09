@@ -43,19 +43,17 @@ async function waitFor<T>(label: string, read: () => Promise<T>, done: (value: T
 
 (run ? describe : describe.skip)('NFT lifecycle on testnet', () => {
   const client = new VfxClient(Network.Testnet);
-  const minter = {
-    privateKey: privateKey as string,
-    publicKey: client.publicFromPrivate(privateKey as string),
-    address: client.addressFromPrivate(privateKey as string),
-  };
-  const holderKey = client.generatePrivateKey();
-  const holder = {
-    privateKey: holderKey,
-    publicKey: client.publicFromPrivate(holderKey),
-    address: client.addressFromPrivate(holderKey),
-  };
+  // Built in the test, not while Jest collects it, so a run without
+  // PRIVATE_KEY skips cleanly.
+  const account = (key: string) => ({
+    privateKey: key,
+    publicKey: client.publicFromPrivate(key),
+    address: client.addressFromPrivate(key),
+  });
 
   test('mint -> evolve -> transfer -> burn', async () => {
+    const minter = account(privateKey as string);
+    const holder = account(client.generatePrivateKey());
     const minted = await client.mintNft(minter, {
       name: `SDK lifecycle ${Date.now()}`,
       description: 'vfx-web-sdk integration test\nsecond line',
