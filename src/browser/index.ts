@@ -107,6 +107,12 @@ export {
   withdrawalFeeFloorError,
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
+export {
+  canCallBackReserveTransaction,
+  vaultBackupCode,
+  vaultKeyFromBackupCode,
+  reserveRestoreCode,
+} from '../services/vault-helpers';
 export { vbtcContractHasNoMedia } from '../services/vbtc-media';
 export {
   VBTC_WITHDRAWAL_EXPIRY_BLOCKS,

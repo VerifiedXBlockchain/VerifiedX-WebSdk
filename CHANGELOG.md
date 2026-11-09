@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Vault extras**: `fundAndRegisterVault(funder, vault, { recoveryAddress })` funds 5 VFX, waits for it, then registers (the Flutter wallet's fund-then-activate); `canCallBackReserveTransaction(tx, vault, { vaultHistory })` (the Flutter call-back rules); `vaultBackupCode` / `vaultKeyFromBackupCode` (a checksummed backup of a vault key alone) and `reserveRestoreCode(vaultKey, recoveryKey)` (the CLI/Flutter restore code). A restore code with more than two parts is read like Core reads it.
+
+### Changed (vault API)
+
+- `unlockHours` below 24 is raised to 24, as the Flutter wallet does, instead of throwing.
+
 - **NFTs (VFX10)**: `uploadNftAsset`, `mintNft`, `mintNfts` (bulk, one approval, `NftBulkMintError` with the ones minted), `transferNft` (beacon upload or locator "NA" for an NFT without media; from a vault with `unlockHours`), `evolveNft` (to any stage, so also devolve), `burnNft`, `proveNftOwnership` / `verifyNftOwnership`, `associateNftMedia`, `listNfts`, `listNftsForAddresses`, `getNft`, `getNftHistory`, and the parsers `nftContract`, `nftEvolveStages`, `nftCurrentStage`, `nftIsMedialess`. New intents `nft-mint`, `nft-transfer`, `nft-evolve`, `nft-burn` and requests `nft-beacon-upload`, `nft-ownership-proof`, `spyglass-auth`. Proven on testnet by an opt-in lifecycle test.
 - **Vaults with independent recovery keys**: `newVaultKeypair`, `vaultKeypairFromPrivateKey`, `newRecoveryKey`, `recoveryKeyFromPasskeyPrf` (HKDF-SHA256 of a dedicated passkey's PRF output).
 - **Legacy vault restore, gated on activity**: `deriveLegacyRecoveryKey` (the Flutter wallet's derivation, unchanged) and `findLegacyRecovery`, which reports whether Spyglass shows the legacy vault or its recovery address in use. `listTransactionsForAddress` takes `{ strict: true }`.

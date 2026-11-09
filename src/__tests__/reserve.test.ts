@@ -156,13 +156,21 @@ describe('sends from a reserve account carry an unlock time', () => {
     expect(tx.UnlockTime as number).toBeGreaterThanOrEqual(now + 48 * 3600);
   });
 
-  test('a delay under 24 hours, or a delay on an ordinary account, is refused before any request', async () => {
+  test('a delay under 24 hours is raised to 24, as the Flutter wallet does', async () => {
+    const { calls } = installPipeline();
+    await client.sendCoin(vault, RECIPIENT, 1, { unlockHours: 12 });
+    const tx = sentTransaction(calls);
+    expect(tx.UnlockTime as number).toBeGreaterThanOrEqual(now + 24 * 3600);
+    expect(tx.UnlockTime as number).toBeLessThanOrEqual(now + 24 * 3600 + 5);
+  });
+
+  test('a delay on an ordinary account, or a non-numeric one, is refused before any request', async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as unknown as typeof fetch;
-    await expect(client.sendCoin(vault, RECIPIENT, 1, { unlockHours: 12 })).rejects.toThrow(/at least 24 hours/);
     await expect(client.sendCoin(main, RECIPIENT, 1, { unlockHours: 24 })).rejects.toThrow(
       /only to sends from a reserve/,
     );
+    await expect(client.sendCoin(vault, RECIPIENT, 1, { unlockHours: NaN })).rejects.toThrow(/must be a number/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
