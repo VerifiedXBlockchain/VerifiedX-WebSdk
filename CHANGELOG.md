@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Fee before signing.** A transaction's fee is quoted before `approve`, which now receives `fee` and `total` (amount + fee), and the transaction is built with exactly that fee. In `'server'` mode the quote (`/raw/fee`) is made only for signers with `approve`, so the call order is otherwise unchanged. `RawTransactionService.quote()`, `VfxClient.quoteSendCoin` and the offline `VfxClient.estimateTransactionFee` expose it.
+
 ## Unreleased (9.1.0)
 
 ### Added

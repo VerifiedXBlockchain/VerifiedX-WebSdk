@@ -63,6 +63,7 @@ import {
   HashMode,
   TransactionHashMismatchError,
   TxBuildSession,
+  localTransactionFee,
 } from '../services/tx-build-session';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
@@ -528,6 +529,56 @@ export class VfxClient {
       ...this.txBuildOptions,
     });
     return await txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * The fee and total (amount + fee) `sendCoin` would take with these
+   * arguments, before anything is signed. In 'both' and 'local' hashMode
+   * this is the fee the send is built with; a signer's `approve` receives the
+   * same `fee` and `total`.
+   */
+  public quoteSendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<{ fee: number; amount: number; total: number }> => {
+    const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'quoteSendCoin');
+    return new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: recipient,
+      amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+    }).quote();
+  };
+
+  /**
+   * An offline upper bound on any transaction's fee from Core's size
+   * formula (the node only checks that a fee is above its floor). For a
+   * send, `quoteSendCoin` gives the exact fee it will carry.
+   */
+  public estimateTransactionFee = (tx: {
+    fromAddress: string;
+    toAddress: string;
+    amount?: number;
+    txType?: number;
+    data?: unknown;
+    unlockTime?: number | null;
+  }): number => {
+    return localTransactionFee({
+      FromAddress: tx.fromAddress,
+      ToAddress: tx.toAddress,
+      Amount: tx.amount ?? 0,
+      TransactionType: tx.txType ?? TxType.RbxTransfer,
+      Data: tx.data ?? null,
+      UnlockTime: tx.unlockTime ?? null,
+      Timestamp: Math.floor(Date.now() / 1000) + 3600,
+      Nonce: 999_999_999_999,
+    });
   };
 
   public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {
