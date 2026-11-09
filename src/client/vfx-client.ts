@@ -678,6 +678,16 @@ export class VfxClient {
     return this.keypairService.privateKeyFromMneumonic(mnemonic, index);
   };
 
+  /** BIP32 m/0'/0'/index' seeded with a string's UTF-8 bytes: the web wallet's `seedToPrivate`. */
+  public privateKeyFromSeedString = (seed: string, index = 0): string => {
+    return this.keypairService.privateKeyFromSeedString(seed, index);
+  };
+
+  /** The VFX key the web wallet signs in with for an imported Bitcoin key; see KeypairService.privateKeyFromBtcKey. */
+  public privateKeyFromBtcKey = (btcPrivateKeyOrWif: string): string => {
+    return this.keypairService.privateKeyFromBtcKey(btcPrivateKeyOrWif);
+  };
+
   public publicFromPrivate = (privateKey: string): string => {
     return this.keypairService.publicFromPrivate(privateKey);
   };
