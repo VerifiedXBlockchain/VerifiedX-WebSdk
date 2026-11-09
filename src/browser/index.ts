@@ -100,6 +100,12 @@ export {
   withdrawalFeeFloorError,
 } from '../services/vbtc-multi-withdrawal';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from '../services/recipient';
+export {
+  canCallBackReserveTransaction,
+  vaultBackupCode,
+  vaultKeyFromBackupCode,
+  reserveRestoreCode,
+} from '../services/vault-helpers';
 // NFTs (VFX10)
 export { NftBulkMintError } from '../client/vfx-client';
 export { nftContract, nftEvolveStages, nftCurrentStage, nftIsMedialess } from '../client/nft-api-client';

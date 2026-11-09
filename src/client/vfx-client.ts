@@ -6,6 +6,7 @@ import {
   DOMAIN_TRANSFER_COST,
   Network,
   RESERVE_ACTIVATION_COST,
+  RESERVE_MIN_REMAINING_BALANCE,
   RESERVE_ADDRESS_PREFIX,
   RESERVE_BASE_ADDRESS,
   RESERVE_MIN_UNLOCK_HOURS,
@@ -385,6 +386,9 @@ function parseTxData(data: unknown): Record<string, unknown> | null {
   if (Array.isArray(value)) value = value[0];
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
+
+/** What fundAndRegisterVault sends by default: the Flutter wallet's VAULT_ACTIVATION_AMOUNT. */
+const VAULT_FUND_AND_ACTIVATE_AMOUNT = 5;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -2672,6 +2676,50 @@ export class VfxClient {
   };
 
   /**
+   * Fund a new vault and activate it, the Flutter wallet's "fund then
+   * activate": `funder` sends `amount` VFX (default 5: the 4 VFX Register()
+   * plus the 0.5 VFX floor and the fee) to the vault, the call waits until
+   * Spyglass shows the vault holding it, then the vault registers with
+   * `recoveryAddress`. Throws on timeout (default 30 minutes, the wallet's
+   * auto-activation window) with the funding hash, so the activation can be
+   * sent later with registerReserveAccount.
+   */
+  public fundAndRegisterVault = async (
+    funder: KeypairOrSigner,
+    vault: KeypairOrSigner,
+    params: { recoveryAddress: string; amount?: number; pollIntervalMs?: number; timeoutMs?: number },
+  ): Promise<{ fundingHash: string; registrationHash: string | null }> => {
+    const amount = params.amount ?? VAULT_FUND_AND_ACTIVATE_AMOUNT;
+    if (!(amount >= RESERVE_ACTIVATION_COST + RESERVE_MIN_REMAINING_BALANCE)) {
+      throw new Error(
+        `fundAndRegisterVault: the vault needs at least ${
+          RESERVE_ACTIVATION_COST + RESERVE_MIN_REMAINING_BALANCE
+        } VFX ` + 'plus the fee to register',
+      );
+    }
+    const resolvedVault = this.resolveReserve(vault, 'fundAndRegisterVault');
+    const fundingHash = await this.sendCoin(funder, resolvedVault.address, amount);
+    if (!fundingHash) {
+      throw new Error('fundAndRegisterVault: the funding send was refused; nothing was sent');
+    }
+    const pollIntervalMs = params.pollIntervalMs ?? 10_000;
+    const deadline = Date.now() + (params.timeoutMs ?? 30 * 60 * 1000);
+    for (;;) {
+      const details = await this.addressApiClient.getAddressDetails(resolvedVault.address).catch(() => null);
+      if (details && details.balance >= amount) break;
+      if (Date.now() + pollIntervalMs > deadline) {
+        throw new Error(
+          `fundAndRegisterVault: funding ${fundingHash} has not reached ${resolvedVault.address} yet; ` +
+            'call registerReserveAccount once it has',
+        );
+      }
+      await sleep(pollIntervalMs);
+    }
+    const registrationHash = await this.registerReserveAccount(vault, { recoveryAddress: params.recoveryAddress });
+    return { fundingHash, registrationHash };
+  };
+
+  /**
    * Cancel a pending send from the vault before its unlock time. `hash` is
    * the hash of the send being called back; the node refuses once it has
    * settled, and only the vault that sent it can call it back.
@@ -2803,12 +2851,13 @@ export class VfxClient {
       }
       return null;
     }
-    const hours = unlockHours ?? RESERVE_MIN_UNLOCK_HOURS;
-    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < RESERVE_MIN_UNLOCK_HOURS) {
-      throw new Error(
-        `A send from a reserve account must wait at least ${RESERVE_MIN_UNLOCK_HOURS} hours, got ${hours}`,
-      );
+    const requested = unlockHours ?? RESERVE_MIN_UNLOCK_HOURS;
+    if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+      throw new Error(`unlockHours must be a number of hours, got ${requested}`);
     }
+    // Below the network's minimum is raised to it, as the Flutter wallet does
+    // (send_form_provider.dart), rather than refused.
+    const hours = Math.max(requested, RESERVE_MIN_UNLOCK_HOURS);
     return Math.round(Date.now() / 1000) + Math.round(hours * 3600);
   }
 

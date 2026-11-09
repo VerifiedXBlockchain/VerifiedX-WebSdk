@@ -392,8 +392,10 @@ export class KeypairService {
    */
   public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
     const decoded = Buffer.from(restoreCode.trim(), 'base64').toString('utf-8');
+    // Core reads the first two parts and ignores any after them
+    // (ReserveAccount.RestoreReserveAccount), so this does too.
     const parts = decoded.split('//');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    if (parts.length < 2 || !parts[0] || !parts[1]) {
       throw new Error('Invalid restore code: expected base64 of "<privateKey>//<recoveryPrivateKey>"');
     }
     const privateKey = normalizePrivateKey(parts[0].replace(/\s/g, '').toLowerCase());
