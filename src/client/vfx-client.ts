@@ -82,10 +82,12 @@ import {
   FungibleToken,
   FungibleTokenBalance,
   FungibleTokenDetail,
+  Keypair,
   PaginatedResponse,
   ReserveKeypair,
   TokenVotingTopic,
   Transaction,
+  VaultKeypair,
   VbtcCancelResult,
   VbtcMultiTransferResult,
   VbtcMultiWithdrawalResult,
@@ -429,35 +431,57 @@ export class VfxClient {
     return this.keypairService.addressFromPublic(publicKeyHex);
   };
 
-  // Reserve (Vault) account keys — see KeypairService for the derivation.
+  // Reserve (Vault) account keys — see KeypairService.
+  //
+  // A new vault: `newVaultKeypair()` for the vault key, a recovery key kept
+  // apart from it (`newRecoveryKey()`, `recoveryKeyFromPasskeyPrf()`, or an
+  // address from another wallet), then `registerReserveAccount(vault, {
+  // recoveryAddress })`. The `restoreLegacyWebWallet*` functions exist only to
+  // find vaults the Flutter web wallet made; those vaults have NO theft
+  // protection, because their recovery key is derived from the main key.
 
-  /** The vault the web wallet pairs with this main private key. */
-  public reserveKeypairFromPrivateKey = (mainPrivateKey: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromPrivateKey(mainPrivateKey);
+  /** A new vault key (xRBX) from the CSPRNG, with no recovery key attached. */
+  public newVaultKeypair = (): VaultKeypair => {
+    return this.keypairService.newVaultKeypair();
+  };
+
+  /** The vault for a vault private key, without inventing a recovery key for it. */
+  public vaultKeypairFromPrivateKey = (vaultPrivateKey: string): VaultKeypair => {
+    return this.keypairService.vaultKeypairFromPrivateKey(vaultPrivateKey);
+  };
+
+  /** A new random recovery key. Store it apart from the wallet; register only its address. */
+  public newRecoveryKey = (): Keypair => {
+    return this.keypairService.newRecoveryKey();
+  };
+
+  /** A recovery key from a dedicated passkey's PRF output (see KeypairService for the rp_id caveat). */
+  public recoveryKeyFromPasskeyPrf = (prfOutput: Uint8Array | ArrayBuffer): Keypair => {
+    return this.keypairService.recoveryKeyFromPasskeyPrf(prfOutput);
+  };
+
+  /** LEGACY, NO THEFT PROTECTION: the vault the Flutter web wallet pairs with this main private key. */
+  public restoreLegacyWebWalletVault = (mainPrivateKey: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVault(mainPrivateKey);
   };
 
   /**
-   * The vault the web wallet derives from a key's derivation text (an
+   * LEGACY, NO THEFT PROTECTION: the vault the web wallet derives from a key's derivation text (an
    * imported key's historical text forms each give their own vault; see
    * `derivationTextCandidates`).
    */
-  public reserveKeypairFromDerivationText = (derivationText: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromDerivationText(derivationText);
+  public restoreLegacyWebWalletVaultFromDerivationText = (derivationText: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVaultFromDerivationText(derivationText);
   };
 
-  /** A vault from its own private key; the recovery key is derived from it. */
-  public reserveKeypairFromReservePrivateKey = (reservePrivateKey: string): ReserveKeypair => {
-    return this.keypairService.reserveKeypairFromReservePrivateKey(reservePrivateKey);
+  /** LEGACY, NO THEFT PROTECTION: a web-wallet vault from its own key, with the recovery key derived from it. */
+  public restoreLegacyWebWalletVaultFromVaultKey = (reservePrivateKey: string): ReserveKeypair => {
+    return this.keypairService.restoreLegacyWebWalletVaultFromVaultKey(reservePrivateKey);
   };
 
   /** Restore a vault from the CLI / web wallet restore code. */
   public reserveKeypairFromRestoreCode = (restoreCode: string): ReserveKeypair => {
     return this.keypairService.reserveKeypairFromRestoreCode(restoreCode);
-  };
-
-  /** A standalone vault on a fresh key, not tied to a main account. */
-  public generateReserveKeypair = (): ReserveKeypair => {
-    return this.keypairService.generateReserveKeypair();
   };
 
   /** The xRBX address for a public key — how an HSM-held vault key's address is obtained. */
@@ -2154,27 +2178,47 @@ export class VfxClient {
   // unlock time (24 hours minimum) and can be called back until it settles;
   // recoverReserveAccount sweeps pending sends and the balance to the
   // recovery address if the vault key is ever compromised. The node applies
-  // the delay to VFX, vBTC and NFT sends; a fungible-token transfer from a
-  // vault carries the unlock time the node insists on but settles at once.
+  // the delay to VFX, vBTC and NFT sends. It refuses fungible-token
+  // transfers and burns from a vault (LedgerIntegrityRules.ReserveTokenTransfer),
+  // since those would move at once and could not be called back.
   // ---------------------------------------------------------------------------
 
   /**
    * Activate a funded reserve account on the network: a 4 VFX Register()
    * naming the recovery address. The vault must already hold the 4 VFX plus
    * the fee plus the 0.5 VFX floor the node keeps on reserve accounts.
-   * `recoveryAddress` is taken from a ReserveKeypair; a Signer must supply it.
+   *
+   * `recoveryAddress` is always given explicitly and is the address of a key
+   * kept apart from the vault's: `newRecoveryKey()`,
+   * `recoveryKeyFromPasskeyPrf()`, or an account in another wallet. The SDK
+   * never makes the recovery key here. It refuses the recovery address the
+   * Flutter web wallet would have derived from this vault key, since that
+   * key falls with the vault key.
    */
   public registerReserveAccount = async (
     signer: KeypairOrSigner,
-    params: { recoveryAddress?: string } = {},
+    params: { recoveryAddress: string },
   ): Promise<string | null> => {
     const resolved = this.resolveReserve(signer, 'registerReserveAccount');
-    const recoveryAddress = params.recoveryAddress ?? (signer as Partial<ReserveKeypair>).recoveryAddress;
+    const recoveryAddress = params?.recoveryAddress;
     if (!recoveryAddress) {
-      throw new Error('registerReserveAccount requires a recoveryAddress when the signer is not a ReserveKeypair');
+      throw new Error(
+        'registerReserveAccount requires a recoveryAddress: the address of a recovery key kept apart from the vault key',
+      );
     }
     if (recoveryAddress === resolved.address || recoveryAddress.startsWith(RESERVE_ADDRESS_PREFIX)) {
       throw new Error('recoveryAddress must be an ordinary account, not a reserve account');
+    }
+    assertRecipientOnNetwork(recoveryAddress, this.network, 'registerReserveAccount recoveryAddress');
+    const vaultPrivateKey = (signer as Partial<Keypair>).privateKey;
+    if (
+      vaultPrivateKey &&
+      this.keypairService.restoreLegacyWebWalletVaultFromVaultKey(vaultPrivateKey).recoveryAddress === recoveryAddress
+    ) {
+      throw new Error(
+        'recoveryAddress is derived from the vault key (the legacy web-wallet scheme), so it gives no protection ' +
+          'against theft; use newRecoveryKey(), recoveryKeyFromPasskeyPrf() or another wallet',
+      );
     }
     return this.sendReserveTx(
       resolved,

@@ -409,6 +409,13 @@ export interface DeployTokenResult {
  * can sweep it. `restoreCode` is `base64("<privateKey>//<recoveryPrivateKey>")`,
  * the format the CLI and web wallet both restore from.
  */
+/** A vault (xRBX) key on its own. Its recovery key lives elsewhere; only the recovery address is registered. */
+export type VaultKeypair = Keypair;
+
+/**
+ * A vault together with its recovery key, as a restore code or the legacy
+ * web-wallet derivation yields it.
+ */
 export interface ReserveKeypair extends Keypair {
   recoveryPrivateKey: string;
   recoveryPublicKey: string;

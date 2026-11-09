@@ -326,26 +326,37 @@ pass them to skip the Spyglass lookup the SDK otherwise makes.
 A reserve account is an `xRBX…` address whose outgoing sends wait behind an
 unlock time (24 hours minimum) and can be called back until they settle, with
 a recovery key that can sweep the vault if its key is compromised. The
-network applies the delay to VFX, vBTC and NFT sends. A fungible-token
-transfer from a vault must carry the unlock time but settles immediately, so
-a vault protects treasury, not fund tokens.
+network applies the delay to VFX, vBTC and NFT sends, and refuses
+fungible-token transfers and burns from a vault, so a vault protects
+treasury, not fund tokens.
+
+The recovery key only protects the vault if a thief who takes the vault key
+cannot compute it, so a new vault's recovery key is made on its own and only
+its address is registered. The SDK never derives one.
 
 ```typescript
-// Keys. The vault the web wallet pairs with a main key is derived from it, so
-// the same wallet account gives the same vault here (pinned by golden vectors).
-const vault = client.reserveKeypairFromPrivateKey(mainPrivateKey); // ReserveKeypair
-client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code
-client.reserveKeypairFromReservePrivateKey(key)     // from the vault key alone
-client.generateReserveKeypair()                     // standalone vault
+// Keys for a new vault: the vault key, and a recovery key kept somewhere else.
+const vault = client.newVaultKeypair();                       // { privateKey, publicKey, address: 'xRBX…' }
+const recovery = client.newRecoveryKey();                     // random; store it apart (a backup code)
+// or: client.recoveryKeyFromPasskeyPrf(prfOutput)           // a dedicated passkey's PRF output (HKDF)
+// or: the address of an account in another wallet / hardware wallet
+client.vaultKeypairFromPrivateKey(key)              // an existing vault key
+client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code (both keys)
 client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM key
+
+// Finding vaults the Flutter web wallet made. LEGACY: their recovery key is
+// derived from the main key, so they have NO theft protection; move funds to
+// a new vault with an independent recovery key.
+client.restoreLegacyWebWalletVault(mainPrivateKey)
+client.restoreLegacyWebWalletVaultFromVaultKey(vaultKey)
 
 // Lifecycle. Fund the vault first (5 VFX covers activation plus the 0.5 floor).
 await client.sendCoin(main, vault.address, 5);
-await client.registerReserveAccount(vault);                            // 4 VFX Register()
+await client.registerReserveAccount(vault, { recoveryAddress: recovery.address }); // 4 VFX Register()
 await client.sendCoin(vault, toAddress, 100);                          // settles in 24h
 await client.sendCoin(vault, toAddress, 100, { unlockHours: 72 });     // or longer
 await client.callBackReserveTransaction(vault, { hash });             // before it settles
-await client.recoverReserveAccount(vault);                             // sweep to the recovery address
+await client.recoverReserveAccount(vault, { recoverySigner: recovery }); // sweep to the recovery address
 
 // With an HSM: the vault Signer presents the xRBX address; recovery needs
 // its own signer (or keypair) for the second signature.
@@ -355,8 +366,10 @@ await client.recoverReserveAccount(vaultSigner, { recoverySigner });
 
 `getAddressDetails` reports `activated` (a Register() exists), `deactivated`
 (a Recover() exists) and `balanceLocked` (sends still waiting to settle).
-Pass the `ReserveKeypair` object itself when signing: its private key on its
+Pass the vault keypair object itself when signing: its private key on its
 own resolves to the key's ordinary address, not the vault.
+`registerReserveAccount` refuses the recovery address the legacy scheme would
+derive from the vault key.
 
 #### Address Operations
 
