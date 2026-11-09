@@ -47,4 +47,4 @@ export default BrowserBtcClient;
 
 // Address types a key can spend from
 export { addressForSpendType } from '../btc/address-types';
-export type { BtcSpendType } from '../btc/address-types';
+export type { BtcSpendType, BitcoinNetworkInput } from '../btc/address-types';

@@ -20,8 +20,34 @@ export type BtcSpendType = 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh' | 'p2tr' | 'p2tr-b
 /** The 32-byte x-only form of a public key, as Taproot uses it. */
 export const toXOnly = (pubkey: Buffer): Buffer => (pubkey.length === 33 ? pubkey.subarray(1, 33) : pubkey);
 
+/**
+ * A bitcoinjs network from a real one, a name, or the browser namespace's
+ * `networks` placeholders (`{ name: 'testnet' }`), which carry no
+ * parameters of their own.
+ */
+export function resolveBitcoinNetwork(
+  network: bitcoin.Network | 'mainnet' | 'testnet' | { name: string },
+): bitcoin.Network {
+  if (typeof network === 'object' && 'bech32' in network) {
+    return network as bitcoin.Network;
+  }
+  const name = typeof network === 'string' ? network : network.name;
+  if (name === 'testnet') return bitcoin.networks.testnet;
+  if (name === 'mainnet' || name === 'bitcoin') return bitcoin.networks.bitcoin;
+  if (name === 'regtest') return bitcoin.networks.regtest;
+  throw new Error(`Unknown Bitcoin network: ${String(name)}`);
+}
+
+/** A Bitcoin network as a bitcoinjs network, a name, or a browser `btc.networks` placeholder. */
+export type BitcoinNetworkInput = bitcoin.Network | 'mainnet' | 'testnet' | { name: string };
+
 /** The address of `pubkey` for a spend type. */
-export function addressForSpendType(pubkey: Buffer, type: BtcSpendType, network: bitcoin.Network): string | undefined {
+export function addressForSpendType(
+  pubkey: Buffer,
+  type: BtcSpendType,
+  networkInput: BitcoinNetworkInput,
+): string | undefined {
+  const network = resolveBitcoinNetwork(networkInput);
   switch (type) {
     case 'p2wpkh':
       return bitcoin.payments.p2wpkh({ pubkey, network }).address;

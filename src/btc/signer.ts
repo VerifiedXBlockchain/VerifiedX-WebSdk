@@ -2,7 +2,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
 import { ECPairFactory } from 'ecpair';
 import { derSignatureToBytes, encodeDerSignature, newFlowId, parseDerSignature } from '../signer';
-import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
+import { BtcSpendType, addressForSpendType, resolveBitcoinNetwork, toXOnly } from './address-types';
 
 const ECPair = ECPairFactory(ecc);
 const SECP256K1_N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
@@ -160,22 +160,6 @@ export async function signBtcMessage(
     throw new Error('BtcSigner returned a message signature that does not verify against its public key');
   }
   return `${derHex}.${signer.publicKey.toLowerCase()}`;
-}
-
-/**
- * A bitcoinjs network from a real one, a name, or the browser namespace's
- * `networks` placeholders (`{ name: 'testnet' }`), which carry no
- * parameters of their own.
- */
-function resolveBitcoinNetwork(network: bitcoin.Network | 'mainnet' | 'testnet' | { name: string }): bitcoin.Network {
-  if (typeof network === 'object' && 'bech32' in network) {
-    return network as bitcoin.Network;
-  }
-  const name = typeof network === 'string' ? network : network.name;
-  if (name === 'testnet') return bitcoin.networks.testnet;
-  if (name === 'mainnet' || name === 'bitcoin') return bitcoin.networks.bitcoin;
-  if (name === 'regtest') return bitcoin.networks.regtest;
-  throw new Error(`Unknown Bitcoin network: ${String(name)}`);
 }
 
 /**

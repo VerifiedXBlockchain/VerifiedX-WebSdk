@@ -129,6 +129,14 @@ export interface ITransactionService {
     recipientAddress: string,
     amount: number,
     feeRate?: number,
+    options?: { addressType?: BtcSpendType },
+  ): Promise<ICreateTxResponse>;
+  createTransactionWithSigner(
+    signer: BtcSigner,
+    recipientAddress: string,
+    amount: number,
+    feeRate?: number,
+    flowId?: string,
   ): Promise<ICreateTxResponse>;
   broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>;
   checkBroadcast(signedTxHex: string): Promise<IBroadcastCheck>;

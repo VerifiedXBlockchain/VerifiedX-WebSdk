@@ -32,4 +32,4 @@ export default BtcClient;
 
 // Address types a key can spend from
 export { addressForSpendType } from './address-types';
-export type { BtcSpendType } from './address-types';
+export type { BtcSpendType, BitcoinNetworkInput } from './address-types';

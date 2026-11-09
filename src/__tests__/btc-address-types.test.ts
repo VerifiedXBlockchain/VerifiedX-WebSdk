@@ -186,3 +186,30 @@ describe('WIF for the .btc name flows', () => {
     expect(dataOf(withWif.calls)).toEqual(dataOf(withHex.calls));
   });
 });
+
+describe('Greptile review fixes', () => {
+  test('a P2PKH UTXO whose reported amount differs from its previous transaction stops the payment', async () => {
+    const from = addressForSpendType(keyPair.publicKey, 'p2pkh', TESTNET) as string;
+    const prev = fund(from);
+    const real = global.fetch as jest.Mock;
+    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/utxo')) {
+        // The API under-reports the amount: legacy signatures would not catch it.
+        return new Response(JSON.stringify([{ txid: prev.getId(), vout: 0, value: VALUE - 50_000 }]));
+      }
+      return real(input, init);
+    }) as unknown as typeof fetch;
+    const result = await new TransactionService(true).createTransaction(WIF, RECIPIENT, 0.0001, 2, {
+      addressType: 'p2pkh',
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/does not match its previous transaction/);
+  });
+
+  test("addressForSpendType takes 'testnet' or the browser namespace's network placeholder", async () => {
+    const { networks: browserNetworks } = await import('../browser/btc');
+    const expected = addressForSpendType(keyPair.publicKey, 'p2tr', TESTNET);
+    expect(addressForSpendType(keyPair.publicKey, 'p2tr', 'testnet')).toBe(expected);
+    expect(addressForSpendType(keyPair.publicKey, 'p2tr', browserNetworks.testnet)).toBe(expected);
+  });
+});

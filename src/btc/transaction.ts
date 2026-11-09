@@ -321,11 +321,27 @@ export default class TransactionService {
           });
           inputSize += SPEND_SIZES['p2sh-p2wpkh'].input;
           break;
-        case 'p2pkh':
-          // A legacy input signs over the whole previous transaction.
-          psbt.addInput({ ...base, nonWitnessUtxo: await this.getRawTx(utxo.txid) });
+        case 'p2pkh': {
+          // A legacy input signs over the whole previous transaction, not the
+          // amount, so the amount the change is computed from is read from
+          // that transaction: an API reporting less would otherwise turn the
+          // difference into fee. A mismatch stops the payment.
+          const previous = await this.getRawTx(utxo.txid);
+          const previousTx = bitcoin.Transaction.fromBuffer(previous);
+          if (previousTx.getId() !== utxo.txid) {
+            return { psbt: null, error: `The previous transaction for ${utxo.txid} does not match its id` };
+          }
+          const spent = previousTx.outs[utxo.vout];
+          if (!spent || spent.value !== utxo.value || !spent.script.equals(outputScript)) {
+            return {
+              psbt: null,
+              error: `UTXO ${utxo.txid}:${utxo.vout} does not match its previous transaction (amount or script)`,
+            };
+          }
+          psbt.addInput({ ...base, nonWitnessUtxo: previous });
           inputSize += SPEND_SIZES.p2pkh.input;
           break;
+        }
         case 'p2tr':
           // The output key is the key itself. bitcoinjs signs a key-path input
           // only when it carries tapInternalKey, and signs with whichever key
