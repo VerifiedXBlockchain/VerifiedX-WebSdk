@@ -19,6 +19,7 @@ import {
   PreSignCheckError,
   RawTransactionService,
   TransactionDispatchError,
+  TransactionRefusedError,
 } from '../services/raw-transaction-service';
 import { assertRecipientOnNetwork, isNameRecipient } from '../services/recipient';
 import {
@@ -162,6 +163,16 @@ export interface ReserveSendOptions {
    * sender can call it back. Setting it from an ordinary account is an error.
    */
   unlockHours?: number;
+}
+
+/** Per-call options for `sendCoin`. */
+export interface SendCoinOptions extends ReserveSendOptions {
+  /**
+   * Throw TransactionRefusedError, with the node's reason, when the node
+   * refuses this send, instead of resolving to null. Overrides the client's
+   * `throwOnRefusal` for this call.
+   */
+  throwOnRefusal?: boolean;
 }
 
 const VBTC_UNIQUE_ID_CHARSET = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789';
@@ -352,6 +363,16 @@ export interface VfxClientOptions {
    * refuses a bad transaction with the same reason either way.
    */
   preflight?: boolean;
+  /**
+   * Make every send from this client throw TransactionRefusedError, with the
+   * node's reason, when the node refuses it, instead of resolving to null.
+   * Default false (the historical null). Per call, `sendCoin` takes it too.
+   * Calls that already throw on refusal (multi-vault withdrawals) keep doing so.
+   * It covers the prepared vBTC sends (transfer, create, withdrawal request,
+   * cancel, completion record) too: an explicit refusal there throws
+   * TransactionRefusedError with the prepared hash, instead of a plain Error.
+   */
+  throwOnRefusal?: boolean;
 }
 
 type CompleteWithdrawalParams = {
@@ -492,6 +513,7 @@ export class VfxClient {
   private authApiClient: AuthApiClient;
   private hashMode: HashMode;
   private preflight: boolean | undefined;
+  private throwOnRefusal: boolean;
   /** Clock offset and next-nonce cache shared by every send from this client. */
   private txBuildSession = new TxBuildSession();
 
@@ -531,14 +553,22 @@ export class VfxClient {
     this.authApiClient = new AuthApiClient(networkEnum, this.apiOptions);
     this.hashMode = options.hashMode ?? DEFAULT_HASH_MODE;
     this.preflight = options.preflight;
+    this.throwOnRefusal = options.throwOnRefusal ?? false;
   }
 
   /** The transaction-building options every RawTransactionService this client makes shares. */
-  private get txBuildOptions(): { hashMode: HashMode; preflight?: boolean; session: TxBuildSession } {
+  private get txBuildOptions(): {
+    hashMode: HashMode;
+    preflight?: boolean;
+    session: TxBuildSession;
+    throwOnRefusal?: boolean;
+  } {
     return {
       hashMode: this.hashMode,
       session: this.txBuildSession,
       ...(this.preflight !== undefined && { preflight: this.preflight }),
+      // Only ever switched on here, so a call that sets it itself is not overridden.
+      ...(this.throwOnRefusal && { throwOnRefusal: true }),
     };
   }
 
@@ -769,7 +799,7 @@ export class VfxClient {
     keypair: KeypairOrSigner,
     toAddress: string,
     amount: number,
-    options: ReserveSendOptions = {},
+    options: SendCoinOptions = {},
   ): Promise<string | null> => {
     const signer = this.resolve(keypair);
     const recipient = await this.resolveRecipient(toAddress, 'sendCoin');
@@ -781,6 +811,7 @@ export class VfxClient {
       unlockTime: this.unlockTimeFor(signer, options.unlockHours),
       apiOptions: this.apiOptions,
       ...this.txBuildOptions,
+      ...(options.throwOnRefusal !== undefined && { throwOnRefusal: options.throwOnRefusal }),
     });
     return await txBuilder.process(this.dryRun);
   };
@@ -3553,13 +3584,21 @@ export class VfxClient {
     // Spyglass also returns when its own call to the node times out) leaves it
     // unknown whether the transaction was accepted. A plain error here would
     // read as "not sent" and invite a resend, so it carries the hash instead.
-    // An explicit `success: false` body is a definite refusal and is left to
-    // assertSent.
+    // An explicit `success: false` body is a definite refusal: left to
+    // assertSent, or with throwOnRefusal raised here as
+    // TransactionRefusedError carrying the prepared hash and the reason.
+    let sent: SentTransactionResponse;
     try {
-      return await sendFn({ hash, signature, public_key: signer.publicKey });
+      sent = await sendFn({ hash, signature, public_key: signer.publicKey });
     } catch (error) {
       throw new TransactionDispatchError(hash, error);
     }
+    if (this.throwOnRefusal && sent?.success === false) {
+      const body = sent as unknown as { message?: unknown; Message?: unknown };
+      const reason = [body.message, body.Message].find((m) => typeof m === 'string' && m !== '') as string | undefined;
+      throw new TransactionRefusedError(hash, reason ?? null);
+    }
+    return sent;
   }
 
   /**
