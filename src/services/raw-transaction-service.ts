@@ -67,6 +67,16 @@ export interface IRawTransactionServiceOptions {
   approved?: boolean;
 }
 
+/** Seconds added to the clock for a fee quote, so the timestamp digits never grow past it. */
+const QUOTE_TIMESTAMP_HEADROOM_SECONDS = 3600;
+/** A nonce longer than any real one, for the same reason. */
+const QUOTE_NONCE_UPPER_BOUND = 999_999_999_999;
+
+/** a + b in VFX without binary float noise (8 decimal places, as Core rounds fees). */
+function addVfx(a: number, b: number): number {
+  return Math.round((a + b) * 100_000_000) / 100_000_000;
+}
+
 export class RawTransactionService {
   private network: Network;
   private signer: ResolvedSigner;
@@ -91,6 +101,8 @@ export class RawTransactionService {
   private timestamp: number | null = null;
   private signature: string | null = null;
   private hashPreimage: string | null = null;
+  /** The fee shown in the approval, once quoted; the transaction is built with exactly this fee. */
+  private quotedFee: number | null = null;
 
   constructor(options: IRawTransactionServiceOptions) {
     this.network = options.network;
@@ -177,7 +189,7 @@ export class RawTransactionService {
     if (this.hashMode === 'server') {
       this.timestamp = await client.getTimestamp();
       this.nonce = await client.getNonce(this.fromAddress);
-      this.fee = await client.getFee(this.updateTransactionData());
+      this.fee = this.quotedFee ?? (await client.getFee(this.updateTransactionData()));
       this.hash = await client.getHash(this.updateTransactionData());
       return;
     }
@@ -185,7 +197,13 @@ export class RawTransactionService {
     this.timestamp = await this.session.timestamp(client);
     const cached = this.hashMode === 'local' ? this.session.cachedNonce(this.fromAddress) : undefined;
     this.nonce = cached ?? this.session.reconcileNonce(this.fromAddress, await client.getNonce(this.fromAddress));
-    this.fee = localTransactionFee(this.signingTransaction());
+    const needed = localTransactionFee(this.signingTransaction());
+    if (this.quotedFee !== null && needed > this.quotedFee) {
+      // Cannot happen with the quote's upper-bound timestamp and nonce; if it
+      // did, sending more than the person approved would be worse than failing.
+      throw new Error(`The fee rose from the approved ${this.quotedFee} to ${needed} VFX; nothing was signed`);
+    }
+    this.fee = this.quotedFee ?? needed;
     const fields = this.signingTransaction();
     this.hashPreimage = transactionHashPreimage(fields);
     this.hash = transactionHash(fields);
@@ -214,13 +232,64 @@ export class RawTransactionService {
     };
   }
 
+  /**
+   * The fee this transaction will carry, and the total it takes from the
+   * sender (amount + fee), before anything is signed. In 'both' and 'local'
+   * the quote is computed locally and is the exact fee the transaction is
+   * then built with. In 'server' mode it is Spyglass's `/raw/fee`, and is
+   * likewise reused as the fee. Quoting once fixes the fee for this
+   * service; call it again only to read the same values back.
+   */
+  async quote(): Promise<{ fee: number; amount: number; total: number }> {
+    if (this.quotedFee === null) {
+      this.quotedFee = await this.computeQuote(new RawTransactionApiClient(this.network, this.apiOptions));
+    }
+    return { fee: this.quotedFee, amount: this.amount, total: addVfx(this.amount, this.quotedFee) };
+  }
+
+  /**
+   * An upper bound on the size-based fee: the timestamp a little in the
+   * future and a nonce longer than any real one, so the transaction built
+   * later is never larger than the one quoted.
+   */
+  private async computeQuote(client: RawTransactionApiClient): Promise<number> {
+    const upperBound = {
+      ...this.signingTransaction(),
+      Timestamp: Math.floor(Date.now() / 1000) + QUOTE_TIMESTAMP_HEADROOM_SECONDS,
+      Nonce: QUOTE_NONCE_UPPER_BOUND,
+    };
+    if (this.hashMode === 'server') {
+      return client.getFee({
+        ...this.updateTransactionData(),
+        Timestamp: upperBound.Timestamp,
+        Nonce: upperBound.Nonce,
+      });
+    }
+    return localTransactionFee(upperBound);
+  }
+
   async process(dryRun = false): Promise<string | null> {
     const client = new RawTransactionApiClient(this.network, this.apiOptions);
 
     // Before anything is built, so the timestamp is taken after the person
     // approved. A signer that throws here cancels: the error reaches the
-    // caller, and nothing was built, signed or sent.
+    // caller, and nothing was built, signed or sent. The fee is quoted
+    // first so the approval can show it; in 'server' mode only when the
+    // signer asks for approval, so the old pipeline is otherwise unchanged.
     if (!this.approved) {
+      const wantsApproval = typeof this.signer.approve === 'function';
+      let quote: { fee: number; total: number } | null = null;
+      if (wantsApproval || this.hashMode !== 'server') {
+        // A failed quote (a /raw/fee outage in 'server' mode) is a send that
+        // never started, so it keeps process()'s null contract; only the
+        // signer's own refusal below is thrown.
+        try {
+          quote = await this.quote();
+        } catch (error) {
+          console.error(`Error in process():`, error);
+          return null;
+        }
+      }
       await approveIntent(this.signer, {
         action: 'transaction',
         flowId: this.flowId,
@@ -230,6 +299,7 @@ export class RawTransactionService {
         txType: this.txType,
         data: this.data,
         unlockTime: this.unlockTime,
+        ...(quote && { fee: quote.fee, total: quote.total }),
       });
       this.approved = true;
     }

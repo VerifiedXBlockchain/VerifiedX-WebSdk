@@ -125,6 +125,13 @@ export type SigningIntent =
       txType: number;
       data: unknown;
       unlockTime: number | null;
+      /**
+       * The fee the transaction will carry, and amount + fee: quoted before
+       * approval and then used as-is. Absent when no quote was made
+       * ('server' mode with a signer that has no `approve`).
+       */
+      fee?: number;
+      total?: number;
     }
   | {
       action: 'vbtc-create';
