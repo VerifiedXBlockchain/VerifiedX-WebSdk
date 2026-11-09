@@ -96,6 +96,8 @@ or `message`. Two optional methods go with it:
   is built, so the person approves first. Throw from it to cancel; nothing is
   signed or sent.
 
+For a transaction, `approve` also receives `fee` and `total` (amount + fee). The fee is quoted before approval and the transaction is then built with exactly that fee. In `'server'` mode this happens only for signers with `approve`, so other callers keep the old call order. `client.quoteSendCoin(keypair, to, amount)` returns the same `{ fee, amount, total }` without signing, and `client.estimateTransactionFee({ fromAddress, toAddress, amount, txType, data })` gives an offline upper bound for any transaction.
+
 A signer written for the one-argument `signDigest(digestHex)` keeps working
 unchanged. `client.signMessage(signerOrKeypair, message)` is the signer form of
 `getSignature`.

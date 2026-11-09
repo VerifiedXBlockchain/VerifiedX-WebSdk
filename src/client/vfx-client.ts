@@ -65,6 +65,7 @@ import {
   HashMode,
   TransactionHashMismatchError,
   TxBuildSession,
+  localTransactionFee,
 } from '../services/tx-build-session';
 import { VbtcAllocationInput, allocateVbtcInputs, vbtcMultiTransferData } from '../services/vbtc-multi';
 import {
@@ -690,6 +691,59 @@ export class VfxClient {
       ...this.txBuildOptions,
     });
     return await txBuilder.process(this.dryRun);
+  };
+
+  /**
+   * The fee and total (amount + fee) `sendCoin` would take with these
+   * arguments, before anything is signed. In 'both' and 'local' hashMode it
+   * is exact: the local formula, which the send then uses, and the same
+   * `fee` and `total` a signer's `approve` receives. In 'server' mode it is
+   * Spyglass's `/raw/fee` for an upper-bound size; the send asks again with
+   * the real nonce (unless the signer has `approve`), so treat it as an
+   * estimate there.
+   */
+  public quoteSendCoin = async (
+    keypair: KeypairOrSigner,
+    toAddress: string,
+    amount: number,
+    options: ReserveSendOptions = {},
+  ): Promise<{ fee: number; amount: number; total: number }> => {
+    const signer = this.resolve(keypair);
+    const recipient = await this.resolveRecipient(toAddress, 'quoteSendCoin');
+    return new RawTransactionService({
+      network: this.network,
+      signer,
+      toAddress: recipient,
+      amount,
+      unlockTime: this.unlockTimeFor(signer, options.unlockHours),
+      apiOptions: this.apiOptions,
+      ...this.txBuildOptions,
+    }).quote();
+  };
+
+  /**
+   * An offline upper bound on any transaction's fee from Core's size
+   * formula (the node only checks that a fee is above its floor). For a
+   * send, `quoteSendCoin` gives the exact fee it will carry.
+   */
+  public estimateTransactionFee = (tx: {
+    fromAddress: string;
+    toAddress: string;
+    amount?: number;
+    txType?: number;
+    data?: unknown;
+    unlockTime?: number | null;
+  }): number => {
+    return localTransactionFee({
+      FromAddress: tx.fromAddress,
+      ToAddress: tx.toAddress,
+      Amount: tx.amount ?? 0,
+      TransactionType: tx.txType ?? TxType.RbxTransfer,
+      Data: tx.data ?? null,
+      UnlockTime: tx.unlockTime ?? null,
+      Timestamp: Math.floor(Date.now() / 1000) + 3600,
+      Nonce: 999_999_999_999,
+    });
   };
 
   public lookupDomain = async (domain: string, opts: { strict?: boolean } = {}): Promise<string | null> => {

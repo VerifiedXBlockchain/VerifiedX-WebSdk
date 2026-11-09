@@ -18,6 +18,7 @@
 - Sends from a vault failed the local signature check in `hashMode` `'both'` and `'local'` and returned null before reaching the node.
 - Docs no longer say a token transfer from a vault settles at once: Core refuses token transfers and burns from a vault.
 - **`BtcSigner`**, the Bitcoin side of the external-signer seam, so a browser extension, hardware wallet or HSM can sign Bitcoin without handing over the key. `BtcClient.createTransaction` and `sendBtc` take a `BtcSigner` where they took a WIF: the SDK builds the PSBT, the signer gets a typed `btc-transaction` request, and the SDK checks the result is the same transaction, validly signed by the signer's key, before broadcasting. `getSignatureWithSigner`, `buyBtcDomain(…, btcSigner)` and `signBtcNameTransferAcceptanceWithSigner` cover message signing through `signDigest`. `btcSignerFromWif` wraps a local key. Optional `approve(intent)` runs first. Everything is additive: the WIF and private-key paths are unchanged and build the same transaction.
+- **Fee before signing.** A transaction's fee is quoted before `approve`, which now receives `fee` and `total` (amount + fee), and the transaction is built with exactly that fee. In `'server'` mode the quote (`/raw/fee`) is made only for signers with `approve`, so the call order is otherwise unchanged. `RawTransactionService.quote()`, `VfxClient.quoteSendCoin` and the offline `VfxClient.estimateTransactionFee` expose it.
 
 ## Unreleased (9.1.0)
 
