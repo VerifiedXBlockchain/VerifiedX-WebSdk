@@ -1,9 +1,9 @@
 import base58 from 'bs58';
-import CryptoJS from 'crypto-js';
 import { RESERVE_ADDRESS_PREFIX } from './constants';
 import KeypairService from './services/keypair-service';
 import { Keypair } from './types';
 import { getSecureRandomBytes } from './utils';
+import { sha256Hex as sha256HexOfUtf8 } from './crypto';
 
 /**
  * The fields of a VFX transaction as they are signed. `Hash` is the digest
@@ -382,7 +382,7 @@ export function stripPublicKeyPrefix(publicKeyHex: string): string {
 }
 
 export function sha256Hex(message: string): string {
-  return CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
+  return sha256HexOfUtf8(message);
 }
 
 function bytesToBigInt(bytes: Uint8Array): bigint {

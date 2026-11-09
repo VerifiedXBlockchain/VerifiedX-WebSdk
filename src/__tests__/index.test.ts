@@ -1,5 +1,4 @@
 import { VfxClient } from '../index';
-import CryptoJS from 'crypto-js';
 
 import dotenv from 'dotenv';
 import { isValidAddress, isValidPrivateKey, normalizePrivateKey } from '../utils';
@@ -23,8 +22,7 @@ describe('generate a private key', () => {
     expect(privateKey).toHaveLength(66);
     expect(privateKey.startsWith('00')).toBe(true);
     const normalized = normalizePrivateKey(privateKey);
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
-    expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
+    expect(isValidPrivateKey(normalized)).toBe(true);
   });
 });
 
@@ -68,8 +66,7 @@ describe('generate mnemonic and create private key', () => {
     expect(privateKey).toHaveLength(66);
     expect(privateKey.startsWith('00')).toBe(true);
     const normalized = normalizePrivateKey(privateKey);
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
-    expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
+    expect(isValidPrivateKey(normalized)).toBe(true);
   });
 
   test('address should be valid', () => {
@@ -95,8 +92,7 @@ describe('generate private key from email and password', () => {
     expect(privateKey).toHaveLength(66);
     expect(privateKey.startsWith('00')).toBe(true);
     const normalized = normalizePrivateKey(privateKey);
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(normalized);
-    expect(isValidPrivateKey(privateKeyWordArray)).toBe(true);
+    expect(isValidPrivateKey(normalized)).toBe(true);
   });
 
   test('address should be valid', () => {
