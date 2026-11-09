@@ -1,7 +1,7 @@
 import base58 from 'bs58';
-import CryptoJS from 'crypto-js';
+import { bytesToHex, sha256 } from '../crypto';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
-import { arrayToHex, byteArrayToWordArray } from '../utils';
+import { arrayToHex } from '../utils';
 
 /**
  * Recipient rules the node enforces when it admits a transaction, checked
@@ -34,8 +34,7 @@ function decodeBase58Check(address: string): Uint8Array | null {
     return null;
   }
   if (decoded.length !== 25 || base58.encode(decoded) !== address) return null;
-  const payload = byteArrayToWordArray(decoded.slice(0, 21));
-  const checksum = CryptoJS.SHA256(CryptoJS.SHA256(payload)).toString(CryptoJS.enc.Hex).slice(0, 8);
+  const checksum = bytesToHex(sha256(sha256(decoded.slice(0, 21)))).slice(0, 8);
   return arrayToHex(decoded.slice(21)) === checksum ? decoded : null;
 }
 

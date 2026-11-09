@@ -1,4 +1,3 @@
-import CryptoJS from 'crypto-js';
 import base58 from 'bs58';
 import EC from 'elliptic';
 import ecc from '@bitcoinerlab/secp256k1';
@@ -6,15 +5,13 @@ import * as bip39 from 'bip39';
 import { BIP32Factory } from 'bip32';
 import {
   arrayToHex,
-  byteArrayToWordArray,
   concatArrays,
   getSecureRandomBytes,
   hexStringToByteArray,
-  hexToString,
   isValidPrivateKey,
   normalizePrivateKey,
-  wordArrayToByteArray,
 } from '../utils';
+import { bytesToHex, hexToBytes, ripemd160, sha256, sha256Hex } from '../crypto';
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import { ReserveKeypair } from '../types';
 import { parseVfxSignature } from './vfx-signature';
@@ -38,16 +35,15 @@ export class KeypairService {
   }
 
   public generatePrivateKey(): string {
-    // Native CSPRNG only — CryptoJS.lib.WordArray.random (crypto-js 3.x) is
-    // seeded from Math.random and must never be used for key material.
-    let privateKey: CryptoJS.lib.WordArray;
+    // Native CSPRNG only, never Math.random.
+    let privateKey: Uint8Array;
 
     do {
-      privateKey = byteArrayToWordArray(getSecureRandomBytes(32));
+      privateKey = getSecureRandomBytes(32);
     } while (!isValidPrivateKey(privateKey));
 
     // Prepend 00 for CLI BigInteger compatibility
-    return '00' + privateKey.toString(CryptoJS.enc.Hex);
+    return '00' + bytesToHex(privateKey);
   }
 
   public generateMnemonic(words: 12 | 24 = 12): string {
@@ -87,7 +83,7 @@ export class KeypairService {
 
     // Hash the seed 50 times
     for (let i = 0; i <= 50; i++) {
-      seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+      seed = sha256Hex(seed);
     }
 
     // Derive private key from seed using BIP32 (treat seed string as UTF-8, not hex)
@@ -135,17 +131,14 @@ export class KeypairService {
   }
 
   private hashPublicKeyToAddress(publicKeyHex: string, prefixBytes: number[], truncateBy: number): string {
-    const pubKeySha = CryptoJS.SHA256(hexToString(publicKeyHex));
-    const pubKeyShaRipe = CryptoJS.RIPEMD160(pubKeySha);
+    const pubKeyShaRipe = ripemd160(sha256(hexToBytes(publicKeyHex)));
 
-    let preHashWNetworkData = concatArrays([new Uint8Array(prefixBytes), wordArrayToByteArray(pubKeyShaRipe)]);
+    let preHashWNetworkData = concatArrays([new Uint8Array(prefixBytes), pubKeyShaRipe]);
     if (truncateBy > 0) {
       preHashWNetworkData = preHashWNetworkData.slice(0, preHashWNetworkData.length - truncateBy);
     }
 
-    const publicHash = CryptoJS.SHA256(byteArrayToWordArray(preHashWNetworkData));
-    const publicHashHash = CryptoJS.SHA256(publicHash);
-    const checksum = publicHashHash.toString(CryptoJS.enc.Hex).slice(0, 8);
+    const checksum = bytesToHex(sha256(sha256(preHashWNetworkData))).slice(0, 8);
 
     return base58.encode(hexStringToByteArray(`${arrayToHex(preHashWNetworkData)}${checksum}`));
   }
@@ -303,7 +296,7 @@ export class KeypairService {
     // Normalize to handle both 64 and 66 char formats
     const normalized = normalizePrivateKey(privateKeyHex);
 
-    const data = CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex);
+    const data = sha256Hex(message);
 
     const privateKey = Buffer.from(normalized, 'hex');
     const dataBuffer = Buffer.from(data, 'hex');
@@ -365,7 +358,7 @@ export function verifySignature(message: string, signature: string, address: str
     if (verifierByNetwork[network].addressFromPublic(parsed.publicKey) !== address) {
       return false;
     }
-    const digest = Buffer.from(CryptoJS.SHA256(message).toString(CryptoJS.enc.Hex), 'hex');
+    const digest = Buffer.from(sha256(message));
     const publicKey = secp256k1Curve.keyFromPublic('04' + parsed.publicKey, 'hex');
     return secp256k1Curve.verify(digest, { r: parsed.r.toString(16), s: parsed.s.toString(16) }, publicKey);
   } catch {

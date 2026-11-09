@@ -1,7 +1,7 @@
-import CryptoJS from 'crypto-js';
 import * as bip39 from 'bip39';
 import KeypairService from '../../services/keypair-service';
 import { isValidPrivateKey } from '../utils';
+import { bytesToHex, sha256, sha256Hex } from '../../crypto';
 import { Network } from '../../constants';
 import { ReserveKeypair } from '../../types';
 
@@ -17,6 +17,20 @@ import { ReserveKeypair } from '../../types';
  * wired, produced a different signature encoding than the rest of the
  * ecosystem.
  */
+/**
+ * The bytes the pre-v3.1.0 browser derivations hashed. They passed a byte
+ * array to crypto-js's `WordArray.create`, which reads each element as a
+ * 32-bit word: every byte was hashed as 00 00 00 <byte>. Kept exactly, so
+ * keys made then can still be recovered.
+ */
+function legacyWordBytes(bytes: Uint8Array): Uint8Array {
+  const words = new Uint8Array(bytes.length * 4);
+  bytes.forEach((byte, i) => {
+    words[i * 4 + 3] = byte;
+  });
+  return words;
+}
+
 export class BrowserKeypairService {
   network: Network;
   private inner: KeypairService;
@@ -66,9 +80,8 @@ export class BrowserKeypairService {
     combined.set(seedArray);
     combined.set(indexBytes, seedArray.length);
 
-    const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
     // Prepend 00 for CLI BigInteger compatibility
-    return '00' + hash.toString(CryptoJS.enc.Hex);
+    return '00' + bytesToHex(sha256(legacyWordBytes(combined)));
   }
 
   /**
@@ -102,7 +115,7 @@ export class BrowserKeypairService {
     seed = `${seed}${seed}`;
 
     for (let i = 0; i <= 50; i++) {
-      seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+      seed = sha256Hex(seed);
     }
 
     const seedBytes = new TextEncoder().encode(seed);
@@ -117,11 +130,9 @@ export class BrowserKeypairService {
     combined.set(seedBytes);
     combined.set(indexBytes, seedBytes.length);
 
-    const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
-    const privateKey = hash.toString(CryptoJS.enc.Hex);
+    const privateKey = bytesToHex(sha256(legacyWordBytes(combined)));
 
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
-    if (!isValidPrivateKey(privateKeyWordArray)) {
+    if (!isValidPrivateKey(privateKey)) {
       throw new Error('Generated private key is invalid');
     }
 

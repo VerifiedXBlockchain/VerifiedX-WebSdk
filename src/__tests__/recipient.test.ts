@@ -4,12 +4,12 @@
  * first, before any request, so the caller sees why.
  */
 import base58 from 'bs58';
-import CryptoJS from 'crypto-js';
+import { createHash } from 'crypto';
 import { VfxClient, assertRecipientOnNetwork, isOtherNetworksAddress } from '../index';
 import KeypairService from '../services/keypair-service';
 import { RawTransactionService } from '../services/raw-transaction-service';
 import { Network } from '../constants';
-import { arrayToHex, byteArrayToWordArray, hexStringToByteArray } from '../utils';
+import { arrayToHex, hexStringToByteArray } from '../utils';
 import { installFetch, textResponse } from './helpers/mock-fetch';
 
 const privateKey = '47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5';
@@ -27,7 +27,8 @@ const mainnetKeypair = {
 function withVersionByte(address: string, versionByte: number): string {
   const payload = base58.decode(address).slice(0, 21);
   payload[0] = versionByte;
-  const checksum = CryptoJS.SHA256(CryptoJS.SHA256(byteArrayToWordArray(payload))).toString(CryptoJS.enc.Hex);
+  const sha256 = (data: Uint8Array) => createHash('sha256').update(data).digest();
+  const checksum = sha256(sha256(payload)).toString('hex');
   return base58.encode(hexStringToByteArray(`${arrayToHex(payload)}${checksum.slice(0, 8)}`));
 }
 
