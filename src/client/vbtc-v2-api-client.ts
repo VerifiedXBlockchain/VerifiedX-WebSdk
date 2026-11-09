@@ -1,5 +1,5 @@
 import { Network } from '../constants';
-import { PaginatedResponse, VbtcTransfer, VbtcV2Token, VbtcWithdrawalRequest } from '../types';
+import { PaginatedResponse, VbtcTransfer, VbtcV2ReadOptions, VbtcV2Token, VbtcWithdrawalRequest } from '../types';
 import { BaseApiClient, VfxApiError } from './base-api-client';
 
 export interface CeremonyPrepareResponse {
@@ -124,6 +124,11 @@ interface SignedSendBody {
   [key: string]: unknown;
 }
 
+/** Query parameters for a vBTC V2 read; none unless a view is asked for, so the default request is unchanged. */
+function viewParams(opts: VbtcV2ReadOptions): Record<string, unknown> | undefined {
+  return opts.view ? { view: opts.view } : undefined;
+}
+
 export class VbtcV2ApiClient extends BaseApiClient {
   constructor(network: Network, options: { baseUrl?: string; timeoutMs?: number } = {}) {
     super({ basePath: '/btc', network, ...options });
@@ -131,20 +136,48 @@ export class VbtcV2ApiClient extends BaseApiClient {
 
   // Reads
 
-  async listAllTokens(): Promise<VbtcV2Token[]> {
+  async listAllTokens(opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token[]> {
     const response: PaginatedResponse<VbtcV2Token> | { results: VbtcV2Token[] } = await this.makeJsonRequest(
       '/vbtc-v2/',
+      'GET',
+      viewParams(opts),
     );
     return response?.results ?? [];
   }
 
-  async getTokensForAddress(address: string): Promise<VbtcV2Token[]> {
-    const response: { results: VbtcV2Token[] } = await this.makeJsonRequest(`/vbtc-v2/${address}/`);
+  /**
+   * One page of every vBTC V2 token, in the wallet shape. Spyglass pages
+   * only with `view=wallet`; an older Spyglass ignores the page and sends
+   * every token, which comes back as a single page.
+   */
+  async listTokensPage(opts: { page?: number; limit?: number } = {}): Promise<PaginatedResponse<VbtcV2Token>> {
+    const response: Partial<PaginatedResponse<VbtcV2Token>> & { results?: VbtcV2Token[] } = await this.makeJsonRequest(
+      '/vbtc-v2/',
+      'GET',
+      {
+        view: 'wallet',
+        ...(opts.page !== undefined && { page: opts.page }),
+        ...(opts.limit !== undefined && { limit: opts.limit }),
+      },
+    );
+    const results = response?.results ?? [];
+    if (typeof response?.count === 'number') {
+      return response as PaginatedResponse<VbtcV2Token>;
+    }
+    return { count: results.length, page: 1, num_pages: 1, results } as PaginatedResponse<VbtcV2Token>;
+  }
+
+  async getTokensForAddress(address: string, opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token[]> {
+    const response: { results: VbtcV2Token[] } = await this.makeJsonRequest(
+      `/vbtc-v2/${address}/`,
+      'GET',
+      viewParams(opts),
+    );
     return response?.results ?? [];
   }
 
-  async getTokenDetail(scIdentifier: string): Promise<VbtcV2Token> {
-    return this.makeJsonRequest(`/vbtc-v2/detail/${scIdentifier}/`);
+  async getTokenDetail(scIdentifier: string, opts: VbtcV2ReadOptions = {}): Promise<VbtcV2Token> {
+    return this.makeJsonRequest(`/vbtc-v2/detail/${scIdentifier}/`, 'GET', viewParams(opts));
   }
 
   async getTransfers(scIdentifier: string): Promise<VbtcTransfer[]> {

@@ -115,6 +115,18 @@ export {
 } from './services/vbtc-multi-withdrawal';
 export type { VbtcAllocation, VbtcAllocationInput, VbtcAllocationFailure } from './services/vbtc-multi';
 export { isOtherNetworksAddress, assertRecipientOnNetwork } from './services/recipient';
+// Spyglass wallet reads and the relay's block_addresses event
+export { isBlockAddressesEvent, parseBlockAddressesEvent, blockAddressesTouching } from './services/socket-events';
+export { ADDRESS_ACTIVITY_MAX } from './client/address-api-client';
+export type {
+  AddressActivity,
+  AddressActivityPage,
+  BlockAddressesEvent,
+  DomainAvailability,
+  VbtcV2ReadOptions,
+  VbtcV2WalletNft,
+} from './types';
+
 export {
   canCallBackReserveTransaction,
   vaultBackupCode,
@@ -135,6 +147,7 @@ export {
 } from './services/vbtc-withdrawal-state';
 export type { WatchedWithdrawalRowState } from './services/vbtc-withdrawal-state';
 // NFTs (VFX10)
+export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
 export {
   nftContract,
   nftEvolveStages,
@@ -144,7 +157,6 @@ export {
 } from './client/nft-api-client';
 export { parseVfxShhMessage, formatVfxShhMessage, decryptVfxShh, encryptVfxShh } from './services/vfx-shh';
 export type { VfxShhMessage } from './services/vfx-shh';
-export { NftBulkMintError, VaultRegistrationError } from './client/vfx-client';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {
   nftMintPayload,
