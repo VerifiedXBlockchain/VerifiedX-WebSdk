@@ -1,12 +1,20 @@
 # Changelog
 
-## 9.1.1 (unreleased)
+## 9.1.1
+
+### Changed
+
+- **Crypto runs on @noble.** `crypto-js` and `elliptic` are no longer runtime dependencies: SHA-256, HMAC, RIPEMD-160, Keccak-256 and secp256k1 come from `@noble/hashes` and `@noble/curves` (`src/crypto.ts`). Keys, addresses, signatures and hashes are byte-identical (cross-checked against elliptic in the tests).
+
+### Fixed
+
+- A clean install failed to build after the @noble switch (`TS2307: Cannot find module 'crypto-js'`): `deriveBaseKeypair`, the vault backup check, VFX-SHH and the passkey recovery HKDF still used the removed libraries. All four now use `src/crypto.ts`; the Bfly vectors still pass.
 
 ### Added
 
 - **`deriveBaseKeypair(vfxPrivateKey)`**: the Base (EVM) account Bfly derives from a VFX key, ported from Bfly's `src/lib/baseWallet.ts` with its key normalizer unchanged. Resolves to `{ address, publicKey, privateKey }` (EIP-55 address, uncompressed `0x04` public key, `0x` private key), the same on both networks. No ethers dependency: build a `Wallet` from `privateKey` to sign. Pinned against Bfly's own output (14 keys, 9 refused inputs). In the Node and browser builds.
 
-## 9.1.0 (unreleased)
+## 9.1.0
 
 ### Added
 
