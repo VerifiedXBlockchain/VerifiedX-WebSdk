@@ -1,4 +1,4 @@
-import EC from 'elliptic';
+import { hexToBytes, publicKeyFromPrivate, randomPrivateKey, sharedPoint as ecdhPoint } from '../crypto';
 import { getSecureRandomBytes, normalizePrivateKey } from '../utils';
 import { hkdfSha256 } from './keypair-service';
 
@@ -26,7 +26,6 @@ export interface VfxShhMessage {
   rawMessage: string;
 }
 
-const secp256k1Curve = new EC.ec('secp256k1');
 
 const EPHEMERAL_KEY_BYTES = 65;
 const NONCE_BYTES = 16;
@@ -92,9 +91,8 @@ export async function decryptVfxShh(encryptedBase64: string, privateKeyHex: stri
 
   let sharedPoint: Uint8Array;
   try {
-    const ephemeral = secp256k1Curve.keyFromPublic(Buffer.from(ephemeralPublicKey)).getPublic();
-    const privateKey = secp256k1Curve.keyFromPrivate(normalizePrivateKey(privateKeyHex.replace(/^0x/, '')), 'hex');
-    sharedPoint = Uint8Array.from(ephemeral.mul(privateKey.getPrivate()).encode('array', false));
+    const privateKey = hexToBytes(normalizePrivateKey(privateKeyHex.replace(/^0x/, '')));
+    sharedPoint = ecdhPoint(privateKey, Uint8Array.from(ephemeralPublicKey));
   } catch (e) {
     throw new Error(`VFX-SHH ephemeral key or private key is invalid: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -120,10 +118,9 @@ export async function decryptVfxShh(encryptedBase64: string, privateKeyHex: stri
  * wallet read. Returns base64; wrap it with `formatVfxShhMessage`.
  */
 export async function encryptVfxShh(recipientPublicKeyHex: string, plaintext: string): Promise<string> {
-  const recipient = secp256k1Curve.keyFromPublic(recipientPublicKeyHex.replace(/^0x/, ''), 'hex').getPublic();
-  const ephemeral = secp256k1Curve.genKeyPair({ entropy: Array.from(getSecureRandomBytes(32)) });
-  const ephemeralPublicKey = Uint8Array.from(ephemeral.getPublic().encode('array', false));
-  const sharedPoint = Uint8Array.from(recipient.mul(ephemeral.getPrivate()).encode('array', false));
+  const ephemeral = randomPrivateKey();
+  const ephemeralPublicKey = publicKeyFromPrivate(ephemeral);
+  const sharedPoint = ecdhPoint(ephemeral, hexToBytes(recipientPublicKeyHex.replace(/^0x/, '')));
   const nonce = getSecureRandomBytes(NONCE_BYTES);
 
   const subtle = subtleCrypto();
