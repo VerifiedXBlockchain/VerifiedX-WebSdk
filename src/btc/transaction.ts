@@ -8,26 +8,13 @@ import { BtcBroadcastUnknownError } from './errors';
 import type { IBroadcastCheck as BroadcastCheck } from './types';
 import { BtcSigner, assertBtcSignerAddress } from './signer';
 import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
+import { planBtcPayment } from './payment-plan';
 import { newFlowId } from '../signer';
 
 const ECPair = ECPairFactory(ecc);
 
 const TESTNET = bitcoin.networks.testnet;
 const MAINNET = bitcoin.networks.bitcoin;
-const P2WPKH_INPUT_SIZE = 68;
-const P2WPKH_OUTPUT_SIZE = 31;
-
-/** Virtual size of one input and of one change output, per spend type (key-path Taproot). */
-const SPEND_SIZES: Record<Exclude<BtcSpendType, 'p2wpkh'>, { input: number; output: number }> = {
-  'p2sh-p2wpkh': { input: 91, output: 32 },
-  p2pkh: { input: 148, output: 34 },
-  p2tr: { input: 58, output: 43 },
-  'p2tr-bip86': { input: 58, output: 43 },
-};
-
-// Conservative dust limit: change below this is folded into the fee rather
-// than creating an output relay policy may reject.
-const DUST_THRESHOLD = 546;
 // A broadcast that has not answered by now is treated as unknown, not failed.
 const BROADCAST_TIMEOUT_MS = 30_000;
 
@@ -292,17 +279,13 @@ export default class TransactionService {
       return { psbt: null, error: 'No UTXOs found for the given address.' };
     }
 
-    if (!feeRate) {
-      const feeRates = await this.getFeeRates();
-      feeRate = feeRates?.economyFee || (this.network == TESTNET ? 2 : 5);
-    }
+    feeRate = await this.resolveFeeRate(feeRate);
 
     const psbt = new bitcoin.Psbt({ network: this.network });
     const inputs: Array<{ txid: string; vout: number; valueSats: number }> = [];
     const outputs: Array<{ address: string; valueSats: number; isChange: boolean }> = [];
 
     let inputSum = 0;
-    let inputSize = 0;
 
     const outputScript = bitcoin.address.toOutputScript(address, this.network);
     for (const utxo of utxos as any[]) {
@@ -311,7 +294,6 @@ export default class TransactionService {
       switch (spend.type) {
         case 'p2wpkh':
           psbt.addInput({ ...base, witnessUtxo });
-          inputSize += P2WPKH_INPUT_SIZE;
           break;
         case 'p2sh-p2wpkh':
           psbt.addInput({
@@ -319,7 +301,6 @@ export default class TransactionService {
             witnessUtxo,
             redeemScript: bitcoin.payments.p2wpkh({ pubkey: spend.pubkey, network: this.network }).output,
           });
-          inputSize += SPEND_SIZES['p2sh-p2wpkh'].input;
           break;
         case 'p2pkh': {
           // A legacy input signs over the whole previous transaction, not the
@@ -339,7 +320,6 @@ export default class TransactionService {
             };
           }
           psbt.addInput({ ...base, nonWitnessUtxo: previous });
-          inputSize += SPEND_SIZES.p2pkh.input;
           break;
         }
         case 'p2tr':
@@ -347,11 +327,9 @@ export default class TransactionService {
           // only when it carries tapInternalKey, and signs with whichever key
           // matches the output key, which here is the untweaked key.
           psbt.addInput({ ...base, witnessUtxo, tapInternalKey: toXOnly(spend.pubkey) });
-          inputSize += SPEND_SIZES.p2tr.input;
           break;
         case 'p2tr-bip86':
           psbt.addInput({ ...base, witnessUtxo, tapInternalKey: toXOnly(spend.pubkey) });
-          inputSize += SPEND_SIZES['p2tr-bip86'].input;
           break;
       }
       inputs.push({ txid: utxo.txid, vout: utxo.vout, valueSats: utxo.value });
@@ -364,40 +342,45 @@ export default class TransactionService {
     });
     outputs.push({ address: recipientAddress, valueSats: amountSats, isChange: false });
 
-    // Fee is estimated for the tx shape actually produced: with a change
-    // output when the change is worth keeping, without one when the
-    // remainder is dust (in which case it is folded into the fee).
-    // P2WPKH keeps the historical estimate exactly; the other types count
-    // the recipient's real output script and their own change output.
-    const overhead = 10;
-    const recipientOutputSize =
-      spend.type === 'p2wpkh'
-        ? P2WPKH_OUTPUT_SIZE
-        : 9 + bitcoin.address.toOutputScript(recipientAddress, this.network).length;
-    const changeOutputSize = spend.type === 'p2wpkh' ? P2WPKH_OUTPUT_SIZE : SPEND_SIZES[spend.type].output;
-    const feeWithChange = Math.ceil((inputSize + recipientOutputSize + changeOutputSize + overhead) * feeRate);
-    const feeWithoutChange = Math.ceil((inputSize + recipientOutputSize + overhead) * feeRate);
+    const plan = planBtcPayment({
+      spendType: spend.type,
+      inputCount: inputs.length,
+      inputSum,
+      amountSats,
+      feeRate,
+      recipientScriptLength: this.recipientScriptLength(spend.type, recipientAddress),
+    });
 
-    const change = inputSum - amountSats - feeWithChange;
-
-    if (change >= DUST_THRESHOLD) {
-      psbt.addOutput({
-        address: address,
-        value: change,
-      });
-      outputs.push({ address, valueSats: change, isChange: true });
-    } else if (inputSum - amountSats - feeWithoutChange < 0) {
+    if (!plan.sufficient) {
       return {
         psbt: null,
         error:
-          `Insufficient funds: inputs total ${inputSum} sats, need ${amountSats + feeWithoutChange} sats ` +
-          `(${amountSats} + ${feeWithoutChange} fee at ${feeRate} sat/vB)`,
+          `Insufficient funds: inputs total ${inputSum} sats, need ${plan.requiredSats} sats ` +
+          `(${amountSats} + ${plan.feeSats} fee at ${feeRate} sat/vB)`,
       };
     }
-    // else: sub-dust remainder is left to the miner as fee
+    if (plan.hasChange) {
+      psbt.addOutput({
+        address: address,
+        value: plan.changeSats,
+      });
+      outputs.push({ address, valueSats: plan.changeSats, isChange: true });
+    }
 
     const feeSats = inputSum - outputs.reduce((sum, output) => sum + output.valueSats, 0);
     return { psbt, inputs, outputs, feeSats, feeRate, error: null };
+  }
+
+  /** The fee rate a payment uses: the one given, or the economy rate (with a fixed fallback) when 0. */
+  private async resolveFeeRate(feeRate: number): Promise<number> {
+    if (feeRate) return feeRate;
+    const feeRates = await this.getFeeRates();
+    return feeRates?.economyFee || (this.network == TESTNET ? 2 : 5);
+  }
+
+  /** Output script length the size estimate counts for the recipient (P2WPKH uses a fixed size). */
+  private recipientScriptLength(spendType: BtcSpendType, recipientAddress: string): number {
+    return spendType === 'p2wpkh' ? 0 : bitcoin.address.toOutputScript(recipientAddress, this.network).length;
   }
 
   /**
