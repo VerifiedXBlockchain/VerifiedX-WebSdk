@@ -16,6 +16,7 @@ const require = createRequire(import.meta.url);
 
 const KEY = '47412619788fecb0ea0b152d1398e5ec742223d14dd8f46121b80cc0b1260ba5';
 const ADDRESS = 'xQJTEE4H9H97SEGTx78esUJR8BkKLYktvB';
+const BASE_ADDRESS = '0xbb7953F39cb79b00915ee275000D047e5FBB462b';
 
 async function check(label, sdk) {
   const client = new sdk.VfxClient('testnet');
@@ -30,6 +31,9 @@ async function check(label, sdk) {
     const sealed = await sdk.encryptVfxShh(client.publicFromPrivate(KEY), 'smoke');
     if ((await sdk.decryptVfxShh(sealed, KEY)) !== 'smoke') throw new Error(`${label}: VFX-SHH round trip failed`);
   }
+  // Bfly's Base account for KEY, as Bfly's own code derives it.
+  const base = await sdk.deriveBaseKeypair(KEY);
+  if (base.address !== BASE_ADDRESS) throw new Error(`${label}: Base address ${base.address}, expected ${BASE_ADDRESS}`);
   // The Node entry exports the Bitcoin client under `btc`.
   const btcAddress = new sdk.btc.BtcClient('testnet').addressFromPrivate(KEY).address;
   if (typeof btcAddress !== 'string' || !btcAddress.startsWith('tb1')) {
