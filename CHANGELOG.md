@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Vault restore codes written by Core restore.** Core writes each key with `BigInteger.ToString("x")`: 65 hex digits when the top digit is 8 to f, fewer than 64 for a small key. `reserveKeypairFromRestoreCode` required exactly 64 and refused most Core codes; it now reads each key as an unsigned hex number. Every code accepted before restores the same vault.
+- **A pasted vault or recovery key no longer gives a wrong address.** `vaultKeypairFromPrivateKey` and the recovery key of `recoverReserveAccount` read a 65-digit, `0x`-prefixed or wrapped key as the key it is (before, the node and browser builds each derived a different wrong address), and throw `InvalidVaultKeyError` for anything that is not a private key.
+
+### Added
+
+- **`BtcClient.quoteTransaction(sender, recipient, amountSats, feeRate?, options?)`** → `IBtcSendQuote`: the fee, virtual size, input count, change and whether the balance covers a send, before anything is signed or broadcast. It spends every UTXO, as the send does, through the same size and fee function (`planBtcPayment`), so the quote is what the send charges. `sender` is a WIF, a `BtcSigner` or the sending address.
+- **`recoveryKeypairFromPrivateKey(key)`** on `KeypairService` and `VfxClient`, and **`InvalidVaultKeyError`** in the Node and browser builds.
+
 ## 9.1.1
 
 ### Changed
