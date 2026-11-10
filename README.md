@@ -178,6 +178,19 @@ const password = "secure-password";
 const btcKeypair = btcClient.generateEmailKeypair(email, password, 0);
 ```
 
+### Base (EVM) account for a VFX key
+
+`deriveBaseKeypair` gives the EVM account Bfly derives from a VFX private key, so another app can open the same Base, Polygon or Polymarket account. The EVM private key is SHA-256 of `base-wallet-v1|` followed by the 32 raw key bytes; the result is the same on both VFX networks and every EVM chain. It takes the key as 64 hex characters, optionally prefixed with `0x` and/or the CLI's `00`, and throws on anything else.
+
+```typescript
+import { deriveBaseKeypair } from 'vfx-web-sdk';
+import { Wallet } from 'ethers';
+
+const { address, publicKey, privateKey } = await deriveBaseKeypair(vfxPrivateKey);
+// address: EIP-55 checksummed; publicKey: uncompressed, 0x04…; privateKey: 0x + 64 hex
+const wallet = new Wallet(privateKey); // the SDK does not depend on ethers; bring your own signer
+```
+
 ## API Reference
 
 ### VFX Client

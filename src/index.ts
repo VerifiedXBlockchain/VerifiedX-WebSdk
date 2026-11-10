@@ -157,6 +157,9 @@ export {
 } from './client/nft-api-client';
 export { parseVfxShhMessage, formatVfxShhMessage, decryptVfxShh, encryptVfxShh } from './services/vfx-shh';
 export type { VfxShhMessage } from './services/vfx-shh';
+// Bfly's Base (EVM) account for a VFX key
+export { deriveBaseKeypair } from './services/base-wallet';
+export type { BaseKeypair } from './services/base-wallet';
 export type { VfxNft, NftListQuery, NftEvolveStage } from './client/nft-api-client';
 export {
   nftMintPayload,

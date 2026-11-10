@@ -1,0 +1,152 @@
+{
+  "_testOnly": "TEST-ONLY throwaway keys, made from SHA-256('vfx-base-keypair-test-only|<label>') or fixed patterns. Never fund or reuse them.",
+  "source": "Captured by running butterfly-web src/lib/baseWallet.ts deriveBaseKeypair (commit 92c1658, ethers 6.15.0) on 2026-11-09, mainnet and testnet both (identical). Regenerate only from that code, never from the SDK.",
+  "derivation": "privateKey = 0x || hex(SHA-256(utf8('base-wallet-v1|') || 32 raw VFX private key bytes)); address = EIP-55 of keccak256(uncompressed public key without 04)[12:]; publicKey = uncompressed, 0x04-prefixed",
+  "vectors": [
+    {
+      "label": "plain lowercase",
+      "vfxPrivateKey": "36ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "privateKey": "0x45cf16164a0909f660334e17812ed5ded184def3dcd5bea349ec9da6a1374b54",
+      "address": "0xF86Da1152150F3E5918c169f878eC94D59079826",
+      "publicKey": "0x040bded2b5cec72dde5a8bf03254c2ef429ce57020f98703e34f47d03bd98f7e40d619d2b987ecc18c3673abb32e353e8bcb1fa1cd28cd931077122c77bb64ed2d"
+    },
+    {
+      "label": "0x prefix",
+      "vfxPrivateKey": "0x597813cca63081527202ffdca6c51dfedb1a201eb7a796a105a6c08a12e13580",
+      "privateKey": "0x41a3ecc1fae9d34ec06e130b44cd7e9a27aef75e2a1bb7d38206e1f4ac1c0d8f",
+      "address": "0x8bFF5D633c692BCF3FC12bC27d781A9ECCFCEC23",
+      "publicKey": "0x049ed6756feaa6cc91ca1870ea221dd2808c49fc0c25010252833f3b183daba843a39970c67762a88fb25f39d9d0947720f90d73d452835823730db141ba0c519e"
+    },
+    {
+      "label": "uppercase hex",
+      "vfxPrivateKey": "AA274856B3E577048C1822D6CB66E9E7A199F1A2EC97B58A1A451F4438F8D2CE",
+      "privateKey": "0x3c98fb31d0e5e93f908a3ea0bb3ec11825f1f1f9954d5857617b66f880257014",
+      "address": "0x28E34DcA3A6960EfcAd8Ef7BDD1652CC6A4FA3a4",
+      "publicKey": "0x045374451196998d3ad0d2c9cbb52b108139251e61d6dbefe55cb1123e76bdb4e5b533bca141a7a6fa3a4b7fa7e107724a4aa58e6845dafad21d22ea469c09fb6d"
+    },
+    {
+      "label": "mixed case",
+      "vfxPrivateKey": "a28FdF5161634CbA1329eD5E03372B1Fb1001A1C7A13211C35fDfD23c2371707",
+      "privateKey": "0x69c0059837e74fd728678c79f7434ca3132301cebecc0e028ec2abf351d7b829",
+      "address": "0xCBE88a07F298549f9e026c16cc75D5C3EF4E1188",
+      "publicKey": "0x0478d09e7e76b0b90a3a2cf0093f4d48b7288d8d80b43941b5a3846fa4411f773ace253dc7617b93de3138309671b63c01ee4f72cf98c157509cf21fbb673553c8"
+    },
+    {
+      "label": "00 prefix (SDK generatePrivateKey form, 66 chars)",
+      "vfxPrivateKey": "003a10394d50599ae2df28cd3e490480f73f99d9f84e13139e8d89c3e70b76382d",
+      "privateKey": "0x44cfb17116ce0e6cab649505eff640d0181853bc046d0b8394df42d3f52f0bc0",
+      "address": "0xcA99D6E2178aDEE679e4A18Fd31BaD938Fb02e49",
+      "publicKey": "0x042af8d21edea2a433414b73c351de33bf5ed1ce4c937b89fc52f8085a20e2667bfb4ab6c6feaeed0df2b8f2bc17995f4d8809fc13aae9ebdd65807e7de1b0028d"
+    },
+    {
+      "label": "0x00 prefix",
+      "vfxPrivateKey": "0x007813d4cb3a378e990e06da6005df79e347758db71217c4604b462894b4039bf2",
+      "privateKey": "0xb5eeeb279fe21c02dd4497dd30f644be49e4c571ec6bf89d02cebfe9fcb9bd44",
+      "address": "0xc0B57caC2438D7B1eacE13a15E9D214Cb5419389",
+      "publicKey": "0x04f76c6563cd79e16abf250d6277dd2472bf2162fd6002cb04bd386d94a44005192573af7721589875515bf84b86e527e3a7f21039b1706ae3696d0e7fe28570a5"
+    },
+    {
+      "label": "uppercase hex with 00 prefix",
+      "vfxPrivateKey": "0036ED9ADF35F21D854D45BA7B9D148E644807FCE75BF17781F36EE687C58C3EA7",
+      "privateKey": "0x45cf16164a0909f660334e17812ed5ded184def3dcd5bea349ec9da6a1374b54",
+      "address": "0xF86Da1152150F3E5918c169f878eC94D59079826",
+      "publicKey": "0x040bded2b5cec72dde5a8bf03254c2ef429ce57020f98703e34f47d03bd98f7e40d619d2b987ecc18c3673abb32e353e8bcb1fa1cd28cd931077122c77bb64ed2d"
+    },
+    {
+      "label": "first byte zero, 64 chars (00 kept)",
+      "vfxPrivateKey": "00c5fef99001b6c3145629ad50be03a21c2ecd0be1d253b89e4056cc02aebe15",
+      "privateKey": "0x81e9ba3f9cdc75911ee894552638bf76d4853b2e381f06d0b72a5dd633a68295",
+      "address": "0x5252De373Ed2f651190e2bdfcBce9eC97F636ca6",
+      "publicKey": "0x041e584cec4ddba25598c735855e5fd95ddb151aad935e3ba0ce854d457075380f453ce5a19deafa26f51be0f794a965334b306a0c15768643e62c822b80fcf3cc"
+    },
+    {
+      "label": "first byte zero with 00 prefix (66 chars)",
+      "vfxPrivateKey": "0000c5fef99001b6c3145629ad50be03a21c2ecd0be1d253b89e4056cc02aebe15",
+      "privateKey": "0x81e9ba3f9cdc75911ee894552638bf76d4853b2e381f06d0b72a5dd633a68295",
+      "address": "0x5252De373Ed2f651190e2bdfcBce9eC97F636ca6",
+      "publicKey": "0x041e584cec4ddba25598c735855e5fd95ddb151aad935e3ba0ce854d457075380f453ce5a19deafa26f51be0f794a965334b306a0c15768643e62c822b80fcf3cc"
+    },
+    {
+      "label": "0x, 00 prefix and first byte zero",
+      "vfxPrivateKey": "0x0000c5fef99001b6c3145629ad50be03a21c2ecd0be1d253b89e4056cc02aebe15",
+      "privateKey": "0x81e9ba3f9cdc75911ee894552638bf76d4853b2e381f06d0b72a5dd633a68295",
+      "address": "0x5252De373Ed2f651190e2bdfcBce9eC97F636ca6",
+      "publicKey": "0x041e584cec4ddba25598c735855e5fd95ddb151aad935e3ba0ce854d457075380f453ce5a19deafa26f51be0f794a965334b306a0c15768643e62c822b80fcf3cc"
+    },
+    {
+      "label": "scalar one",
+      "vfxPrivateKey": "0000000000000000000000000000000000000000000000000000000000000001",
+      "privateKey": "0x1e95a2256b1c13776e6990461bd35aca6c5cb99d42f0d996be7ac7e5089c1733",
+      "address": "0xAce57349384492D04565751DFE98A5E37DE854bE",
+      "publicKey": "0x04bab5e72378cfcd14f4e703058e267846232781e3c912f71ef87464a6689811744f0187280a175b561ddf6ceba4fcbdc90fd63d42f2693a1cae71a52dea21b092"
+    },
+    {
+      "label": "all zero",
+      "vfxPrivateKey": "0000000000000000000000000000000000000000000000000000000000000000",
+      "privateKey": "0x1afcc09a4e5330fb865c72ef648a848f33d6ea8db7533baaffaa66a8c787cbc9",
+      "address": "0xe1A5943f0F2A74E0f7Ee6872CE5A25eB8884Abc7",
+      "publicKey": "0x049e47ed8e6c915cc1b22e1105e8ec24ad27fc427f93fb2f8437eafbd716f1e05bdae1ab5ccd173beaba733f8cfdbc72de72ab6e49f74fe2fe1571f6cf34a6005f"
+    },
+    {
+      "label": "all ff (above the curve order; hashed, so still valid)",
+      "vfxPrivateKey": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "privateKey": "0x6a9d076929f90760767d783a8585d16630736abe9f63ea3ea602ec2723ed578d",
+      "address": "0x607aCf07fB0D217334D8d81cf2Cbf76C7105e4C4",
+      "publicKey": "0x044f947741a00cf145ecdce4300f68ba83762cab0383c8c9348b2bf626fd1963d92a935250e00539e6784e461c7f3f9fe67a864e3a5c5b46919f3c687c431e2c37"
+    },
+    {
+      "label": "curve order n",
+      "vfxPrivateKey": "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+      "privateKey": "0xb57d02a5433fddca549ddccb7ccfcfc2eb91a95335fbbd6fd613beef53d92a45",
+      "address": "0x05bD2b36b383771dF16565A4F7458f6003aBf2B9",
+      "publicKey": "0x046ee9404e31453b8dff17d5bad933192fea59e2135665735632cc31d7cbc92dedffb85b0ce39a5eb9ac36b4750d3545ea426a3ad906eb1b2861a5e290fc274ce8"
+    }
+  ],
+  "invalid": [
+    {
+      "label": "empty",
+      "vfxPrivateKey": "",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 0"
+    },
+    {
+      "label": "63 chars",
+      "vfxPrivateKey": "6ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 63"
+    },
+    {
+      "label": "65 chars",
+      "vfxPrivateKey": "36ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7a",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 65"
+    },
+    {
+      "label": "non-hex character",
+      "vfxPrivateKey": "g6ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key: must contain only hexadecimal characters"
+    },
+    {
+      "label": "uppercase 0X prefix (not stripped)",
+      "vfxPrivateKey": "0X36ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 66"
+    },
+    {
+      "label": "double 0x",
+      "vfxPrivateKey": "0x0x36ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 66"
+    },
+    {
+      "label": "surrounding whitespace",
+      "vfxPrivateKey": " 36ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7 ",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 66"
+    },
+    {
+      "label": "01 prefix (only 00 is stripped)",
+      "vfxPrivateKey": "0136ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 66"
+    },
+    {
+      "label": "0000 prefix (68 chars, 00 is stripped only from 66)",
+      "vfxPrivateKey": "000036ed9adf35f21d854d45ba7b9d148e644807fce75bf17781f36ee687c58c3ea7",
+      "error": "Invalid VFX private key length: expected 64 hex characters, got 68"
+    }
+  ]
+}
