@@ -1,4 +1,4 @@
-import CryptoJS from 'crypto-js';
+import { sha256Hex } from '../crypto';
 
 /**
  * Client-side port of Core's transaction hash (`Models/Transaction.cs`
@@ -230,7 +230,7 @@ export function transactionHashPreimage(tx: HashableTransaction): string {
 }
 
 function sha256Utf8Hex(text: string): string {
-  return CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(text)).toString(CryptoJS.enc.Hex);
+  return sha256Hex(text);
 }
 
 /** `HashingService.GenerateHash` applied twice to a preimage. */

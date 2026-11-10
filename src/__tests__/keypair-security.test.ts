@@ -1,4 +1,3 @@
-import CryptoJS from 'crypto-js';
 import KeypairService from '../services/keypair-service';
 import { BrowserKeypairService } from '../browser/services/keypair-service';
 import { Network } from '../constants';
@@ -8,12 +7,15 @@ const nodeService = new KeypairService(Network.Mainnet);
 const browserService = new BrowserKeypairService(Network.Mainnet);
 
 describe('generatePrivateKey uses a CSPRNG', () => {
-  test('never calls CryptoJS.lib.WordArray.random (Math.random-based in crypto-js 3.x)', () => {
-    const spy = jest.spyOn(CryptoJS.lib.WordArray, 'random');
+  test('draws from crypto.getRandomValues and never from Math.random', () => {
+    const csprng = jest.spyOn(globalThis.crypto, 'getRandomValues');
+    const mathRandom = jest.spyOn(Math, 'random');
     nodeService.generatePrivateKey();
     browserService.generatePrivateKey();
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
+    expect(csprng).toHaveBeenCalled();
+    expect(mathRandom).not.toHaveBeenCalled();
+    csprng.mockRestore();
+    mathRandom.mockRestore();
   });
 
   test.each([
@@ -24,7 +26,7 @@ describe('generatePrivateKey uses a CSPRNG', () => {
       const privateKey = generate();
       expect(privateKey).toHaveLength(66);
       expect(privateKey.startsWith('00')).toBe(true);
-      expect(isValidPrivateKey(CryptoJS.enc.Hex.parse(normalizePrivateKey(privateKey)))).toBe(true);
+      expect(isValidPrivateKey(normalizePrivateKey(privateKey))).toBe(true);
     }
   });
 
@@ -69,17 +71,17 @@ describe('isValidPrivateKey', () => {
   const order = 'fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141';
 
   test('rejects zero', () => {
-    expect(isValidPrivateKey(CryptoJS.enc.Hex.parse('0'.repeat(64)))).toBe(false);
+    expect(isValidPrivateKey('0'.repeat(64))).toBe(false);
   });
 
   test('rejects the curve order and above', () => {
-    expect(isValidPrivateKey(CryptoJS.enc.Hex.parse(order))).toBe(false);
-    expect(isValidPrivateKey(CryptoJS.enc.Hex.parse('f'.repeat(64)))).toBe(false);
+    expect(isValidPrivateKey(order)).toBe(false);
+    expect(isValidPrivateKey('f'.repeat(64))).toBe(false);
   });
 
   test('accepts order - 1 and 1', () => {
     const orderMinusOne = 'fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140';
-    expect(isValidPrivateKey(CryptoJS.enc.Hex.parse(orderMinusOne))).toBe(true);
-    expect(isValidPrivateKey(CryptoJS.enc.Hex.parse('0'.repeat(63) + '1'))).toBe(true);
+    expect(isValidPrivateKey(orderMinusOne)).toBe(true);
+    expect(isValidPrivateKey('0'.repeat(63) + '1')).toBe(true);
   });
 });

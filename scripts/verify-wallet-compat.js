@@ -64,14 +64,13 @@ for (let i = 0; i < 100; i++) {
 }
 
 // 3. Email seed path: SDK vs wallet seedToPrivate
-const CryptoJS = require('crypto-js');
 function sdkSeedPrep(email, password) {
   email = email.toLowerCase();
   let seed = `${email}|${password}|`;
   seed = `${seed}${seed.length}|!@${(password.length * 7 + email.length) * 7}`;
   seed = `${seed}${3 * password.length}3571`;
   seed = `${seed}${seed}`;
-  for (let i = 0; i <= 50; i++) seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+  for (let i = 0; i <= 50; i++) seed = crypto.createHash('sha256').update(seed, 'utf8').digest('hex');
   return seed;
 }
 for (const v of vectors.email) {

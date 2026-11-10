@@ -1,7 +1,7 @@
-import CryptoJS from 'crypto-js';
 import * as bip39 from 'bip39';
 import KeypairService from '../../services/keypair-service';
 import { isValidPrivateKey } from '../utils';
+import { bytesToHex, sha256, sha256Hex } from '../../crypto';
 import { Network } from '../../constants';
 import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../../types';
 
@@ -9,14 +9,28 @@ import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../../
  * Browser-facing keypair service.
  *
  * Key generation, public-key/address derivation and signing delegate to the
- * canonical KeypairService: its dependency chain (elliptic, secp256k1's
- * pure-JS build, crypto-js, bip32) is fully browser-bundleable, and using a
- * single implementation guarantees browser output is byte-identical to
+ * canonical KeypairService: its dependency chain (@noble/curves,
+ * @noble/hashes, bip32) is fully browser-bundleable, and using a single
+ * implementation guarantees browser output is byte-identical to
  * Node/CLI/web-wallet output. The previous @noble/secp256k1-based signing
  * path here broke with noble v3 ("hashes.sha256 not set") and, even when
  * wired, produced a different signature encoding than the rest of the
  * ecosystem.
  */
+/**
+ * The bytes the pre-v3.1.0 browser derivations hashed. They passed a byte
+ * array to crypto-js's `WordArray.create`, which reads each element as a
+ * 32-bit word: every byte was hashed as 00 00 00 <byte>. Kept exactly, so
+ * keys made then can still be recovered.
+ */
+function legacyWordBytes(bytes: Uint8Array): Uint8Array {
+  const words = new Uint8Array(bytes.length * 4);
+  bytes.forEach((byte, i) => {
+    words[i * 4 + 3] = byte;
+  });
+  return words;
+}
+
 export class BrowserKeypairService {
   network: Network;
   private inner: KeypairService;
@@ -76,9 +90,8 @@ export class BrowserKeypairService {
     combined.set(seedArray);
     combined.set(indexBytes, seedArray.length);
 
-    const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
     // Prepend 00 for CLI BigInteger compatibility
-    return '00' + hash.toString(CryptoJS.enc.Hex);
+    return '00' + bytesToHex(sha256(legacyWordBytes(combined)));
   }
 
   /**
@@ -112,7 +125,7 @@ export class BrowserKeypairService {
     seed = `${seed}${seed}`;
 
     for (let i = 0; i <= 50; i++) {
-      seed = CryptoJS.SHA256(seed).toString(CryptoJS.enc.Hex);
+      seed = sha256Hex(seed);
     }
 
     const seedBytes = new TextEncoder().encode(seed);
@@ -127,11 +140,9 @@ export class BrowserKeypairService {
     combined.set(seedBytes);
     combined.set(indexBytes, seedBytes.length);
 
-    const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(Array.from(combined)));
-    const privateKey = hash.toString(CryptoJS.enc.Hex);
+    const privateKey = bytesToHex(sha256(legacyWordBytes(combined)));
 
-    const privateKeyWordArray = CryptoJS.enc.Hex.parse(privateKey);
-    if (!isValidPrivateKey(privateKeyWordArray)) {
+    if (!isValidPrivateKey(privateKey)) {
       throw new Error('Generated private key is invalid');
     }
 

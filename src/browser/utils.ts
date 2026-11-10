@@ -1,4 +1,3 @@
-import CryptoJS from 'crypto-js';
 import { ADNR_NAME_MAX_LENGTH, Network } from '../constants';
 import { VfxAddress } from '../types';
 
@@ -46,31 +45,6 @@ export function generateRandomStringSecure(length: number, charset: string): str
     // Fallback to non-secure version if crypto is unavailable
     return generateRandomString(length, charset);
   }
-}
-
-export function wordArrayToByteArray(wordArray: CryptoJS.lib.WordArray): Uint8Array {
-  const len = wordArray.words.length;
-
-  const u8_array = new Uint8Array(len << 2);
-  let offset = 0;
-  for (let i = 0; i < len; i++) {
-    const word = wordArray.words[i];
-    u8_array[offset++] = word >> 24;
-    u8_array[offset++] = (word >> 16) & 0xff;
-    u8_array[offset++] = (word >> 8) & 0xff;
-    u8_array[offset++] = word & 0xff;
-  }
-  return u8_array;
-}
-
-export function byteArrayToWordArray(ba: Uint8Array): CryptoJS.lib.WordArray {
-  const wa: number[] = [];
-
-  for (let i = 0; i < ba.length; i++) {
-    wa[(i / 4) | 0] |= ba[i] << (24 - 8 * i);
-  }
-
-  return CryptoJS.lib.WordArray.create(wa, ba.length);
 }
 
 export function hexToBn(hex: string): bigint {
@@ -167,10 +141,6 @@ export function bnToArray(hex: string): Uint8Array {
   return u8;
 }
 
-export function hexToString(hex: string): CryptoJS.lib.WordArray {
-  return CryptoJS.enc.Hex.parse(hex);
-}
-
 // Browser-compatible replacement for Buffer.from().toString('hex')
 export function arrayToHex(uint8: Uint8Array): string {
   return Array.from(uint8)
@@ -221,9 +191,13 @@ export function normalizePrivateKey(privateKeyHex: string): string {
 
 const SECP256K1_ORDER = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
 
-export function isValidPrivateKey(privateKey: CryptoJS.lib.WordArray): boolean {
-  const privateKeyHex = privateKey.toString(CryptoJS.enc.Hex);
-  if (privateKeyHex.length !== 64) {
+/** Whether a private key (64 hex characters, or 32 bytes) is a valid secp256k1 scalar: 0 < key < n. */
+export function isValidPrivateKey(privateKey: string | Uint8Array): boolean {
+  const privateKeyHex =
+    typeof privateKey === 'string'
+      ? privateKey
+      : Buffer.from(privateKey.buffer, privateKey.byteOffset, privateKey.byteLength).toString('hex');
+  if (!/^[0-9a-fA-F]{64}$/.test(privateKeyHex)) {
     return false;
   }
   const key = BigInt('0x' + privateKeyHex);

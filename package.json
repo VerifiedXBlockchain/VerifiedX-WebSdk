@@ -61,18 +61,17 @@
   "homepage": "https://github.com/VerifiedXBlockchain/VerifiedX-WebSdk#readme",
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
     "bip32": "^4.0.0",
     "bip39": "3.0.2",
     "bitcoinjs-lib": "^6.1.7",
     "bs58": "^5.0.0",
-    "crypto-js": "^3.1.9-1",
     "ecpair": "^2.1.0",
-    "elliptic": "^6.5.4",
     "readable-stream": "^4.7.0",
     "regtest-client": "^0.2.1"
   },
   "devDependencies": {
-    "@types/crypto-js": "^4.1.1",
     "@types/elliptic": "^6.4.14",
     "@types/jest": "29.2.4",
     "@types/node": "18.19.86",
@@ -80,6 +79,7 @@
     "@typescript-eslint/parser": "5.47.1",
     "browserify": "^17.0.0",
     "dotenv": "^16.0.3",
+    "elliptic": "^6.5.4",
     "esbuild": "^0.17.10",
     "eslint": "8.30.0",
     "eslint-plugin-jest": "27.1.7",
