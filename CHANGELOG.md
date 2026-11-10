@@ -1,5 +1,11 @@
 # Changelog
 
+## 9.1.1 (unreleased)
+
+### Added
+
+- **`deriveBaseKeypair(vfxPrivateKey)`**: the Base (EVM) account Bfly derives from a VFX key, ported from Bfly's `src/lib/baseWallet.ts` with its key normalizer unchanged. Resolves to `{ address, publicKey, privateKey }` (EIP-55 address, uncompressed `0x04` public key, `0x` private key), the same on both networks. No ethers dependency: build a `Wallet` from `privateKey` to sign. Pinned against Bfly's own output (14 keys, 9 refused inputs). In the Node and browser builds.
+
 ## 9.1.0 (unreleased)
 
 ### Added
