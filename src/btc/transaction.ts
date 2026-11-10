@@ -5,7 +5,7 @@ import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
 import { BTC_TO_SATOSHI_MULTIPLIER, defaultApiBaseUrl } from './constants';
 import { BtcBroadcastUnknownError } from './errors';
-import type { IBroadcastCheck as BroadcastCheck } from './types';
+import type { IBroadcastCheck as BroadcastCheck, IBtcSendQuote } from './types';
 import { BtcSigner, assertBtcSignerAddress } from './signer';
 import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
 import { planBtcPayment } from './payment-plan';
@@ -381,6 +381,58 @@ export default class TransactionService {
   /** Output script length the size estimate counts for the recipient (P2WPKH uses a fixed size). */
   private recipientScriptLength(spendType: BtcSpendType, recipientAddress: string): number {
     return spendType === 'p2wpkh' ? 0 : bitcoin.address.toOutputScript(recipientAddress, this.network).length;
+  }
+
+  /**
+   * What paying `amountSats` from `fromAddress` (spending as `spendType`)
+   * would cost, before anything is signed or broadcast. Reads the address's
+   * UTXOs (and the recommended fee rates when `feeRate` is 0) and nothing
+   * else; it spends every UTXO, as `buildPayment` does, and uses the same
+   * arithmetic, so a send built from the same UTXOs and fee rate pays exactly
+   * `feeSats`. A P2PKH send also checks each UTXO against its previous
+   * transaction and stops on a mismatch; the quote does not fetch those.
+   */
+  public async quoteTransaction(
+    fromAddress: string,
+    spendType: BtcSpendType,
+    recipientAddress: string,
+    amountSats: number,
+    feeRate = 0,
+  ): Promise<IBtcSendQuote> {
+    if (!Number.isSafeInteger(amountSats) || amountSats <= 0) {
+      throw new Error(`quoteTransaction: amountSats must be a positive whole number of satoshis, got ${amountSats}`);
+    }
+    if (!Number.isFinite(feeRate) || feeRate < 0) {
+      throw new Error(`quoteTransaction: invalid feeRate ${feeRate}`);
+    }
+    bitcoin.address.toOutputScript(fromAddress, this.network);
+    const recipientScriptLength = this.recipientScriptLength(spendType, recipientAddress);
+    const utxos = (await this.getUtxos(fromAddress)) as Array<{ value: number }>;
+    const resolvedFeeRate = await this.resolveFeeRate(feeRate);
+    const inputTotalSats = utxos.reduce((sum, utxo) => sum + utxo.value, 0);
+    const plan = planBtcPayment({
+      spendType,
+      inputCount: utxos.length,
+      inputSum: inputTotalSats,
+      amountSats,
+      feeRate: resolvedFeeRate,
+      recipientScriptLength,
+    });
+    return {
+      fromAddress,
+      addressType: spendType,
+      recipientAddress,
+      amountSats,
+      feeRate: resolvedFeeRate,
+      feeSats: plan.feeSats,
+      vsize: plan.vsize,
+      inputCount: utxos.length,
+      inputTotalSats,
+      changeSats: plan.changeSats,
+      hasChange: plan.hasChange,
+      sufficient: plan.sufficient,
+      requiredSats: plan.sufficient ? amountSats + plan.feeSats : plan.requiredSats,
+    };
   }
 
   /**
