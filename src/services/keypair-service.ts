@@ -24,6 +24,7 @@ import {
 import { Network, RESERVE_ADDRESS_PREFIX } from '../constants';
 import { Keypair, LegacyVaultSource, ReserveKeypair, VaultKeypair } from '../types';
 import { parseVfxSignature } from './vfx-signature';
+import { canonicalVaultKeyHex } from './vault-keys';
 
 // Address version bytes. A reserve address carries a three-byte prefix and
 // drops the last two bytes of the RIPEMD-160 hash so the whole thing still
@@ -256,9 +257,14 @@ export class KeypairService {
     throw new Error('Could not generate a reserve address');
   }
 
-  /** The vault for a vault private key, without inventing a recovery key for it. */
+  /**
+   * The vault for a vault private key, without inventing a recovery key for
+   * it. The key is read as an unsigned hex number (see `canonicalVaultKeyHex`:
+   * Core's 65-digit form, missing leading zeros, `0x`, whitespace); anything
+   * else throws InvalidVaultKeyError.
+   */
   public vaultKeypairFromPrivateKey(vaultPrivateKey: string): VaultKeypair {
-    const privateKey = normalizePrivateKey(vaultPrivateKey.toLowerCase());
+    const privateKey = canonicalVaultKeyHex(vaultPrivateKey, 'vault', 'vaultKeypairFromPrivateKey');
     const address = this.reserveAddressFromPrivate(privateKey);
     if (!address.startsWith(RESERVE_ADDRESS_PREFIX)) {
       throw new Error(
@@ -276,6 +282,22 @@ export class KeypairService {
   public newRecoveryKey(): Keypair {
     const privateKey = this.generatePrivateKey();
     return { privateKey, publicKey: this.publicFromPrivate(privateKey), address: this.addressFromPrivate(privateKey) };
+  }
+
+  /**
+   * The recovery account for a recovery private key someone pasted or kept,
+   * read as an unsigned hex number like `vaultKeypairFromPrivateKey` (Core's
+   * 65-digit form, missing leading zeros, `0x`, whitespace, a key wrapped
+   * over lines). Anything else throws InvalidVaultKeyError rather than giving
+   * the address of a misread key. `privateKey` comes back as `00` + 64 digits.
+   */
+  public recoveryKeypairFromPrivateKey(recoveryPrivateKey: string): Keypair {
+    const privateKey = canonicalVaultKeyHex(recoveryPrivateKey, 'recovery', 'recoveryKeypairFromPrivateKey');
+    return {
+      privateKey: '00' + privateKey,
+      publicKey: this.publicFromPrivate(privateKey),
+      address: this.addressFromPrivate(privateKey),
+    };
   }
 
   /**
@@ -394,6 +416,12 @@ export class KeypairService {
    * code, not re-derived, because the CLI generates it independently. (A
    * restore code carries both keys, so it must be stored away from the vault
    * key for the recovery key to protect anything.)
+   *
+   * Each key is read as an unsigned hex number, so the forms Core writes
+   * (`BigInteger.ToString("x")`: a leading `0` when the top digit is 8 to f,
+   * fewer than 64 digits for a small key) restore the same vault as the
+   * 64-digit form. A key that is not hex or not a valid secp256k1 scalar
+   * throws InvalidVaultKeyError.
    */
   public reserveKeypairFromRestoreCode(restoreCode: string): ReserveKeypair {
     const decoded = Buffer.from(restoreCode.trim(), 'base64').toString('utf-8');
@@ -403,11 +431,8 @@ export class KeypairService {
     if (parts.length < 2 || !parts[0] || !parts[1]) {
       throw new Error('Invalid restore code: expected base64 of "<privateKey>//<recoveryPrivateKey>"');
     }
-    const privateKey = normalizePrivateKey(parts[0].replace(/\s/g, '').toLowerCase());
-    const recoveryPrivateKey = normalizePrivateKey(parts[1].replace(/\s/g, '').toLowerCase());
-    if (!/^[0-9a-f]{64}$/.test(privateKey) || !/^[0-9a-f]{64}$/.test(recoveryPrivateKey)) {
-      throw new Error('Invalid restore code: keys are not hex');
-    }
+    const privateKey = canonicalVaultKeyHex(parts[0], 'vault', 'Invalid restore code');
+    const recoveryPrivateKey = canonicalVaultKeyHex(parts[1], 'recovery', 'Invalid restore code');
     const address = this.reserveAddressFromPrivate(privateKey);
     if (!address.startsWith(RESERVE_ADDRESS_PREFIX)) {
       throw new Error(`Invalid restore code: reserve address ${address} does not start with ${RESERVE_ADDRESS_PREFIX}`);

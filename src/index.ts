@@ -179,6 +179,9 @@ export {
   normalizeRecoveryPhrase,
   walletDerivationText,
 } from './services/wallet-derivation';
+// Vault and recovery private keys read as Core reads them
+export { InvalidVaultKeyError } from './services/vault-keys';
+export type { VaultKeyRole } from './services/vault-keys';
 export { VFX_API_BASE_URL_MAINNET, VFX_API_BASE_URL_TESTNET, VFX_API_BASE_URL_DEVNET } from './constants';
 export {
   TOKEN_BASE_ADDRESS,

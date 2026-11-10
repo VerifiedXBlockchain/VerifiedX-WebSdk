@@ -59,10 +59,12 @@ import {
   SigningRequest,
   SigningTransaction,
   approveIntent,
+  isSigner,
   newFlowId,
   resolveSigner,
   signMessages,
 } from '../signer';
+import { canonicalVaultKeyHex } from '../services/vault-keys';
 import { CORE_TX_TYPE_NAMES, hashPreimage } from '../services/transaction-hash';
 import { vbtcContractHasNoMedia } from '../services/vbtc-media';
 import { liveResumableWithdrawalsFor, resumableWithdrawalsFor } from '../services/vbtc-withdrawal-state';
@@ -731,6 +733,15 @@ export class VfxClient {
   /** A new random recovery key. Store it apart from the wallet; register only its address. */
   public newRecoveryKey = (): Keypair => {
     return this.keypairService.newRecoveryKey();
+  };
+
+  /**
+   * The recovery account for a pasted recovery private key, read as Core
+   * reads it (65-digit Core text, missing leading zeros, `0x`, whitespace).
+   * Throws InvalidVaultKeyError for anything that is not a private key.
+   */
+  public recoveryKeypairFromPrivateKey = (recoveryPrivateKey: string): Keypair => {
+    return this.keypairService.recoveryKeypairFromPrivateKey(recoveryPrivateKey);
   };
 
   /** A recovery key from a dedicated passkey's PRF output (see KeypairService for the rp_id caveat). */
@@ -3547,7 +3558,7 @@ export class VfxClient {
     if (!recoveryInput) {
       throw new Error('recoverReserveAccount requires a recoverySigner when the signer is not a ReserveKeypair');
     }
-    const recovery = this.resolve(recoveryInput);
+    const recovery = this.resolve(this.withCanonicalRecoveryKey(recoveryInput));
     const recoveryAddress = params.recoveryAddress ?? recovery.address;
     if (recovery.address !== recoveryAddress) {
       throw new Error(
@@ -3613,6 +3624,20 @@ export class VfxClient {
       ...(approvedFlowId && { flowId: approvedFlowId, approved: true }),
     });
     return txBuilder.process(this.dryRun);
+  }
+
+  /**
+   * A recovery keypair with its private key read as Core reads it, so a
+   * 65-digit or wrapped key signs for its real address instead of a misread
+   * one. A Signer is passed through: it holds its own key.
+   */
+  private withCanonicalRecoveryKey(
+    input: KeypairOrSigner | { privateKey: string },
+  ): KeypairOrSigner | { privateKey: string } {
+    if (isSigner(input)) return input;
+    const privateKey = (input as { privateKey?: unknown }).privateKey;
+    if (typeof privateKey !== 'string' || privateKey.length === 0) return input;
+    return { ...input, privateKey: '00' + canonicalVaultKeyHex(privateKey, 'recovery', 'recoverReserveAccount') };
   }
 
   private resolveReserve(signer: KeypairOrSigner, label: string): ResolvedSigner {
