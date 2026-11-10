@@ -1,14 +1,12 @@
-import CryptoJS from 'crypto-js';
-import EC from 'elliptic';
-import { arrayToHex, byteArrayToWordArray, hexStringToByteArray, wordArrayToByteArray } from '../utils';
+import { keccak_256 } from '@noble/hashes/sha3.js';
+import { publicKeyFromPrivate, sha256, utf8Bytes } from '../crypto';
+import { arrayToHex, hexStringToByteArray } from '../utils';
 
 /**
  * Base (EVM) account derivation, ported byte for byte from Bfly
  * (butterfly-web src/lib/baseWallet.ts). Changing anything here moves every
  * Bfly user's Base, Polygon and Polymarket funds to a different address.
  */
-
-const secp256k1Curve = new EC.ec('secp256k1');
 
 /** Keeps the EVM key apart from every other key derived from the VFX key. */
 const BASE_DOMAIN_SEPARATOR = 'base-wallet-v1|';
@@ -44,12 +42,12 @@ function normalizeVfxPrivateKey(vfxPrivateKey: string): string {
 }
 
 function keccak256(bytes: Uint8Array): Uint8Array {
-  // crypto-js 3.x SHA3 is the original Keccak padding, which is what Ethereum uses.
-  return wordArrayToByteArray(CryptoJS.SHA3(byteArrayToWordArray(bytes), { outputLength: 256 }));
+  // Ethereum's Keccak-256 (the original padding), not NIST SHA3-256.
+  return keccak_256(bytes);
 }
 
 function toChecksumAddress(lowercaseHex: string): string {
-  const hash = arrayToHex(keccak256(Uint8Array.from(Buffer.from(lowercaseHex, 'utf-8'))));
+  const hash = arrayToHex(keccak256(utf8Bytes(lowercaseHex)));
   let checksummed = '0x';
   for (let i = 0; i < lowercaseHex.length; i++) {
     checksummed += parseInt(hash[i], 16) >= 8 ? lowercaseHex[i].toUpperCase() : lowercaseHex[i];
@@ -63,7 +61,7 @@ export function evmAccountFromPrivateKey(privateKeyHex: string): BaseKeypair {
   if (scalar === BigInt(0) || scalar >= SECP256K1_ORDER) {
     throw new Error('EVM private key is outside the secp256k1 range');
   }
-  const uncompressed = secp256k1Curve.keyFromPrivate(privateKeyHex, 'hex').getPublic(false, 'hex');
+  const uncompressed = arrayToHex(publicKeyFromPrivate(hexStringToByteArray(privateKeyHex)));
   const addressHex = arrayToHex(keccak256(hexStringToByteArray(uncompressed.slice(2))).slice(12));
   return {
     address: toChecksumAddress(addressHex),
@@ -81,7 +79,7 @@ export function evmAccountFromPrivateKey(privateKeyHex: string): BaseKeypair {
  */
 export async function deriveBaseKeypair(vfxPrivateKey: string): Promise<BaseKeypair> {
   const keyBytes = hexStringToByteArray(normalizeVfxPrivateKey(vfxPrivateKey));
-  const separatorBytes = Uint8Array.from(Buffer.from(BASE_DOMAIN_SEPARATOR, 'utf-8'));
-  const digest = CryptoJS.SHA256(byteArrayToWordArray(Uint8Array.from([...separatorBytes, ...keyBytes])));
-  return evmAccountFromPrivateKey(arrayToHex(wordArrayToByteArray(digest)));
+  const separatorBytes = utf8Bytes(BASE_DOMAIN_SEPARATOR);
+  const digest = sha256(Uint8Array.from([...separatorBytes, ...keyBytes]));
+  return evmAccountFromPrivateKey(arrayToHex(digest));
 }

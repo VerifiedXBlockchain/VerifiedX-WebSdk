@@ -1,4 +1,4 @@
-import CryptoJS from 'crypto-js';
+import { sha256Hex } from '../crypto';
 import { RESERVE_ADDRESS_PREFIX, RESERVE_BASE_ADDRESS } from '../constants';
 import { Transaction } from '../types';
 
@@ -29,7 +29,7 @@ export function canCallBackReserveTransaction(
 const BACKUP_PREFIX = 'vfxvault1-';
 
 function checksum(privateKeyHex: string): string {
-  return CryptoJS.SHA256(`${BACKUP_PREFIX}${privateKeyHex}`).toString(CryptoJS.enc.Hex).slice(0, 8);
+  return sha256Hex(`${BACKUP_PREFIX}${privateKeyHex}`).slice(0, 8);
 }
 
 /**
