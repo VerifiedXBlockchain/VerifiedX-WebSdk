@@ -89,6 +89,12 @@ export interface IBtcSendQuote {
   vsize: number;
   /** Every UTXO of the address is spent (there is no coin selection). */
   inputCount: number;
+  /**
+   * Of those, the ones whose Esplora `status.confirmed` is not true (still in
+   * the mempool). Always set by `quoteTransaction`; optional only so code that
+   * builds an IBtcSendQuote itself still compiles.
+   */
+  unconfirmedInputs?: number;
   inputTotalSats: number;
   /** The change output's value; 0 when there is none (change below dust goes to the fee). */
   changeSats: number;
@@ -97,6 +103,19 @@ export interface IBtcSendQuote {
   sufficient: boolean;
   /** Amount plus fee: what the inputs must cover. */
   requiredSats: number;
+}
+
+/** A coin as `quoteBtcPayment` and `quoteTransaction`'s `options.utxos` read it: Esplora's UTXO shape, of which only `value` and `status.confirmed` are used. */
+export interface IBtcQuoteUtxo {
+  value: number;
+  status?: { confirmed?: boolean };
+}
+
+/** `quoteBtcPayment`'s result: `IBtcSendQuote` without the sending address, and with no recipient (null) before one is entered. */
+export interface IBtcPaymentQuote
+  extends Omit<IBtcSendQuote, 'fromAddress' | 'recipientAddress' | 'unconfirmedInputs'> {
+  recipientAddress: string | null;
+  unconfirmedInputs: number;
 }
 
 export interface IBroadcastTxResponse {
@@ -173,6 +192,7 @@ export interface ITransactionService {
     recipientAddress: string,
     amountSats: number,
     feeRate?: number,
+    utxos?: ReadonlyArray<IBtcQuoteUtxo>,
   ): Promise<IBtcSendQuote>;
   broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>;
   checkBroadcast(signedTxHex: string): Promise<IBroadcastCheck>;
@@ -231,7 +251,7 @@ export interface IBtcClient {
       recipientAddress: string,
       amountSats: number,
       feeRate?: number,
-      options?: { addressType?: BtcSpendType },
+      options?: { addressType?: BtcSpendType; utxos?: ReadonlyArray<IBtcQuoteUtxo> },
     ) => Promise<IBtcSendQuote>;
     broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
     sendBtc: (
@@ -265,6 +285,8 @@ export type {
   IBroadcastCheck as BroadcastCheck,
   IFeeRates as FeeRates,
   IUTXO as UTXO,
+  IBtcQuoteUtxo as BtcQuoteUtxo,
+  IBtcPaymentQuote as BtcPaymentQuote,
   IKeypairService as KeypairService,
   ITransactionService as TransactionService,
   IAccountService as AccountService,

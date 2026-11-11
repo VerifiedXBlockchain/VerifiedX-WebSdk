@@ -1,5 +1,13 @@
 # Changelog
 
+## 9.1.3
+
+### Added
+
+- **`btc.quoteBtcPayment({ utxos, spendType, recipientAddress?, amountSats, feeRate, network })`** → `BtcPaymentQuote`: the quote of a Bitcoin payment from UTXOs the caller already has, synchronous and with no network I/O, for a send form to call on every keystroke. It goes through the same recipient sizing and `planBtcPayment` as the send, so it is what the send charges for those coins and fee rate. Every spend type; `amountSats` may be 0; with no recipient (null or omitted) the recipient output is sized as P2WPKH, which is what a P2WPKH sender counts for any recipient; `feeRate` must be above 0. Returns `quoteTransaction`'s fields except `fromAddress`, plus `unconfirmedInputs`. In the Node and browser builds.
+- **`quoteTransaction(…, { utxos })`**: quotes the given coins instead of fetching the sender's (the fee rates are still fetched when `feeRate` is 0). Everything else is unchanged.
+- **`IBtcSendQuote.unconfirmedInputs`** (optional in the type, always set by `quoteTransaction`): the inputs whose Esplora `status.confirmed` is not true.
+
 ## 9.1.2
 
 ### Fixed

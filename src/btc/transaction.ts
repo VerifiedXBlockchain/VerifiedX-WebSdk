@@ -5,10 +5,11 @@ import * as bitcoin from 'bitcoinjs-lib';
 import ecc from '@bitcoinerlab/secp256k1';
 import { BTC_TO_SATOSHI_MULTIPLIER, defaultApiBaseUrl } from './constants';
 import { BtcBroadcastUnknownError } from './errors';
-import type { IBroadcastCheck as BroadcastCheck, IBtcSendQuote } from './types';
+import type { IBroadcastCheck as BroadcastCheck, IBtcQuoteUtxo, IBtcSendQuote } from './types';
 import { BtcSigner, assertBtcSignerAddress } from './signer';
 import { BtcSpendType, addressForSpendType, toXOnly } from './address-types';
 import { planBtcPayment } from './payment-plan';
+import { quoteBtcPayment, recipientScriptLength } from './quote';
 import { newFlowId } from '../signer';
 
 const ECPair = ECPairFactory(ecc);
@@ -348,7 +349,7 @@ export default class TransactionService {
       inputSum,
       amountSats,
       feeRate,
-      recipientScriptLength: this.recipientScriptLength(spend.type, recipientAddress),
+      recipientScriptLength: recipientScriptLength(spend.type, recipientAddress, this.network),
     });
 
     if (!plan.sufficient) {
@@ -379,17 +380,6 @@ export default class TransactionService {
   }
 
   /**
-   * Output script length the size estimate counts for the recipient (P2WPKH
-   * uses a fixed size). The recipient is checked for every spend type: an
-   * address that is invalid, or for another network, throws here rather than
-   * getting a quote the send would then refuse.
-   */
-  private recipientScriptLength(spendType: BtcSpendType, recipientAddress: string): number {
-    const script = bitcoin.address.toOutputScript(recipientAddress, this.network);
-    return spendType === 'p2wpkh' ? 0 : script.length;
-  }
-
-  /**
    * What paying `amountSats` from `fromAddress` (spending as `spendType`)
    * would cost, before anything is signed or broadcast. Reads the address's
    * UTXOs (and the recommended fee rates when `feeRate` is 0) and nothing
@@ -397,6 +387,8 @@ export default class TransactionService {
    * arithmetic, so a send built from the same UTXOs and fee rate pays exactly
    * `feeSats`. A P2PKH send also checks each UTXO against its previous
    * transaction and stops on a mismatch; the quote does not fetch those.
+   * With `utxos`, those coins are quoted and the address's UTXOs are not
+   * fetched. The arithmetic is `quoteBtcPayment`'s.
    */
   public async quoteTransaction(
     fromAddress: string,
@@ -404,6 +396,7 @@ export default class TransactionService {
     recipientAddress: string,
     amountSats: number,
     feeRate = 0,
+    utxos?: ReadonlyArray<IBtcQuoteUtxo>,
   ): Promise<IBtcSendQuote> {
     if (!Number.isSafeInteger(amountSats) || amountSats <= 0) {
       throw new Error(`quoteTransaction: amountSats must be a positive whole number of satoshis, got ${amountSats}`);
@@ -412,33 +405,18 @@ export default class TransactionService {
       throw new Error(`quoteTransaction: invalid feeRate ${feeRate}`);
     }
     bitcoin.address.toOutputScript(fromAddress, this.network);
-    const recipientScriptLength = this.recipientScriptLength(spendType, recipientAddress);
-    const utxos = (await this.getUtxos(fromAddress)) as Array<{ value: number }>;
+    recipientScriptLength(spendType, recipientAddress, this.network);
+    const coins = utxos ?? ((await this.getUtxos(fromAddress)) as IBtcQuoteUtxo[]);
     const resolvedFeeRate = await this.resolveFeeRate(feeRate);
-    const inputTotalSats = utxos.reduce((sum, utxo) => sum + utxo.value, 0);
-    const plan = planBtcPayment({
+    const quote = quoteBtcPayment({
+      utxos: coins,
       spendType,
-      inputCount: utxos.length,
-      inputSum: inputTotalSats,
-      amountSats,
-      feeRate: resolvedFeeRate,
-      recipientScriptLength,
-    });
-    return {
-      fromAddress,
-      addressType: spendType,
       recipientAddress,
       amountSats,
       feeRate: resolvedFeeRate,
-      feeSats: plan.feeSats,
-      vsize: plan.vsize,
-      inputCount: utxos.length,
-      inputTotalSats,
-      changeSats: plan.changeSats,
-      hasChange: plan.hasChange,
-      sufficient: plan.sufficient,
-      requiredSats: plan.sufficient ? amountSats + plan.feeSats : plan.requiredSats,
-    };
+      network: this.network,
+    });
+    return { ...quote, fromAddress, recipientAddress };
   }
 
   /**
