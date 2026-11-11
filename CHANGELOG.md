@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 9.1.2
 
 ### Fixed
 
+- **A Bitcoin quote refuses a recipient the send would refuse.** `quoteTransaction` skipped the recipient check for a P2WPKH sender, so an invalid or wrong-network recipient got a quote with `sufficient: true`. The recipient is now checked for every spend type.
 - **Vault restore codes written by Core restore.** Core writes each key with `BigInteger.ToString("x")`: 65 hex digits when the top digit is 8 to f, fewer than 64 for a small key. `reserveKeypairFromRestoreCode` required exactly 64 and refused most Core codes; it now reads each key as an unsigned hex number. Every code accepted before restores the same vault.
 - **A pasted vault or recovery key no longer gives a wrong address.** `vaultKeypairFromPrivateKey` and the recovery key of `recoverReserveAccount` read a 65-digit, `0x`-prefixed or wrapped key as the key it is (before, the node and browser builds each derived a different wrong address), and throw `InvalidVaultKeyError` for anything that is not a private key.
 
