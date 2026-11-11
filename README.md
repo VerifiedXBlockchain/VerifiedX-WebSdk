@@ -488,6 +488,7 @@ createTransaction(sender: string | BtcSigner, recipientAddress: string, amount: 
 quoteTransaction(sender: string | BtcSigner, recipientAddress: string, amountSats: number, feeRate?: number, options?): Promise<IBtcSendQuote>
 // ^ what the send would charge (fee, vsize, inputs, change, sufficient), nothing signed or broadcast;
 //   sender may also be the address. Every UTXO is spent, so the fee counts every input.
+//   options: { addressType?, utxos? }; with utxos (and a fee rate) it makes no request.
 broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
 sendBtc(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
 checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>
@@ -495,6 +496,27 @@ checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>
 // Utility methods
 getRawTransaction(txId: string): Promise<Buffer>
 ```
+
+#### Quoting a send from coins already in hand (`btc.quoteBtcPayment`)
+
+A send form that already holds the sender's UTXOs can quote on every keystroke with `btc.quoteBtcPayment`: synchronous, no network I/O, and the same sizing and arithmetic `createTransaction` uses, so the fee is what the send charges for those coins at that rate. It returns the fields of `quoteTransaction`'s quote except `fromAddress`, plus `unconfirmedInputs`.
+
+```typescript
+import { btc } from 'vfx-web-sdk';
+
+const utxos = await (await fetch(`${esplora}/address/${address}/utxo`)).json(); // once, not per keystroke
+const quote = btc.quoteBtcPayment({
+  utxos, // Esplora's shape; only value and status.confirmed are read
+  spendType: 'p2tr', // every type the SDK spends from
+  recipientAddress: null, // none entered yet: sized as a P2WPKH output (31 vB)
+  amountSats: 0, // 0 is allowed here, to show the fee before an amount is typed
+  feeRate: 5, // sat/vB, above 0 (no economy-rate lookup)
+  network: 'testnet',
+});
+// quote.feeSats, vsize, inputCount, unconfirmedInputs, changeSats, hasChange, sufficient, requiredSats
+```
+
+A Max send is `inputTotalSats` minus the fee of a quote without change. A recipient that is given must be a valid address on the network, or it throws. `quoteTransaction(sender, recipient, amountSats, feeRate, { utxos })` gives the same numbers in the async form and skips its UTXO fetch.
 
 #### Signing Bitcoin with an external key (`BtcSigner`)
 

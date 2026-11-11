@@ -15,6 +15,7 @@ import type {
   IBroadcastTxResponse,
   IBroadcastCheck,
   IFeeRates,
+  IBtcQuoteUtxo,
   IBtcSendQuote,
   BtcClientOptions,
 } from './types';
@@ -184,16 +185,28 @@ export default class BtcClient {
    * called). It may also be the sending address itself, whose spend type is
    * read from the address. The amount `sendBtc` charges for `amount` BTC is
    * `Math.round(amount * 1e8)` sats.
+   *
+   * `options.utxos` quotes those coins (Esplora's UTXO shape) instead of
+   * fetching the sender's: a caller that already has them makes no request
+   * when it also passes a fee rate. For a quote with no I/O at all, on every
+   * keystroke, a zero amount or no recipient yet, use `btc.quoteBtcPayment`.
    */
   async quoteTransaction(
     sender: string | BtcSigner,
     recipientAddress: string,
     amountSats: number,
     feeRate = 0,
-    options: { addressType?: BtcSpendType } = {},
+    options: { addressType?: BtcSpendType; utxos?: ReadonlyArray<IBtcQuoteUtxo> } = {},
   ): Promise<IBtcSendQuote> {
     const { address, spendType } = this.spendingAddress(sender, options.addressType);
-    return this.transactionService.quoteTransaction(address, spendType, recipientAddress, amountSats, feeRate);
+    return this.transactionService.quoteTransaction(
+      address,
+      spendType,
+      recipientAddress,
+      amountSats,
+      feeRate,
+      options.utxos,
+    );
   }
 
   /** The address a sender spends from and its spend type, as the send resolves them. */

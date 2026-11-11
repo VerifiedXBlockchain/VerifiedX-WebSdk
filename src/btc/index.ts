@@ -30,6 +30,9 @@ export type { BtcClientOptions } from './client';
 // Default export - the main client
 export default BtcClient;
 
+// A Bitcoin payment's fee from coins already in hand (no network I/O)
+export { quoteBtcPayment } from './quote';
+
 // Address types a key can spend from
 export { addressForSpendType } from './address-types';
 export type { BtcSpendType, BitcoinNetworkInput } from './address-types';

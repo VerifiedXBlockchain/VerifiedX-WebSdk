@@ -45,6 +45,9 @@ export class BrowserBtcClient extends OriginalBtcClient {
 export { BrowserBtcClient as BtcClient };
 export default BrowserBtcClient;
 
+// A Bitcoin payment's fee from coins already in hand (no network I/O)
+export { quoteBtcPayment } from '../btc/quote';
+
 // Address types a key can spend from
 export { addressForSpendType } from '../btc/address-types';
 export type { BtcSpendType, BitcoinNetworkInput } from '../btc/address-types';
