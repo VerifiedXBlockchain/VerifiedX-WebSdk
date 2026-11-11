@@ -285,6 +285,37 @@ describe('recoverReserveAccount', () => {
     );
   });
 
+  test('a recovery key in Core text form or wrapped over lines signs for its real address', async () => {
+    const recoveryKey = vault.recoveryPrivateKey.slice(2);
+    // '0' + 64 digits is what Core writes for a key whose top digit is 8 to f;
+    // as a number it is the same key whatever the top digit.
+    const forms = ['0' + recoveryKey, `${recoveryKey.slice(0, 32)}\n${recoveryKey.slice(32)}`];
+    for (const privateKey of forms) {
+      const { calls } = installPipeline();
+      await client.recoverReserveAccount(vaultSigner(), {
+        recoverySigner: { privateKey, publicKey: vault.recoveryPublicKey, address: vault.recoveryAddress },
+      });
+      const data = sentTransaction(calls).Data as {
+        RecoveryAddress: string;
+        RecoverySigScript: string;
+        SignatureTime: number;
+      };
+      expect(data.RecoveryAddress).toBe(vault.recoveryAddress);
+      expect(data.RecoverySigScript).toBe(
+        keypairService.getSignature(`${data.SignatureTime}${vault.recoveryAddress}`, vault.recoveryPrivateKey),
+      );
+    }
+  });
+
+  test('refuses a recovery key that is not a private key', async () => {
+    global.fetch = jest.fn() as unknown as typeof fetch;
+    await expect(
+      client.recoverReserveAccount(vaultSigner(), {
+        recoverySigner: { privateKey: 'not a key', publicKey: vault.recoveryPublicKey, address: vault.recoveryAddress },
+      }),
+    ).rejects.toThrow(expect.objectContaining({ name: 'InvalidVaultKeyError', role: 'recovery' }));
+  });
+
   test('refuses a missing recovery signer or one that does not own the stated recovery address', async () => {
     global.fetch = jest.fn() as unknown as typeof fetch;
     await expect(client.recoverReserveAccount(vaultSigner())).rejects.toThrow(/requires a recoverySigner/);

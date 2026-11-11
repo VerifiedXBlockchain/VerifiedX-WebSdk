@@ -70,6 +70,35 @@ export interface ICreateTxResponse {
   error: string | null;
 }
 
+/**
+ * What a payment would cost, from `BtcClient.quoteTransaction`, worked out
+ * with the same UTXOs, sizes and arithmetic `createTransaction` uses. Nothing
+ * is signed or broadcast to get it.
+ */
+export interface IBtcSendQuote {
+  fromAddress: string;
+  /** The spend type the sizes are for. An address-only Taproot sender quotes as 'p2tr' (same sizes as 'p2tr-bip86'). */
+  addressType: BtcSpendType;
+  recipientAddress: string;
+  amountSats: number;
+  /** sat/vB used: the one given, or the economy rate the send would fetch when 0. */
+  feeRate: number;
+  /** What the transaction pays. When `sufficient` is false, the least fee it would need. */
+  feeSats: number;
+  /** Estimated virtual size of the transaction that would be built. */
+  vsize: number;
+  /** Every UTXO of the address is spent (there is no coin selection). */
+  inputCount: number;
+  inputTotalSats: number;
+  /** The change output's value; 0 when there is none (change below dust goes to the fee). */
+  changeSats: number;
+  hasChange: boolean;
+  /** Whether the inputs cover amount plus fee. */
+  sufficient: boolean;
+  /** Amount plus fee: what the inputs must cover. */
+  requiredSats: number;
+}
+
 export interface IBroadcastTxResponse {
   success: boolean;
   result: string | null;
@@ -138,6 +167,13 @@ export interface ITransactionService {
     feeRate?: number,
     flowId?: string,
   ): Promise<ICreateTxResponse>;
+  quoteTransaction(
+    fromAddress: string,
+    spendType: BtcSpendType,
+    recipientAddress: string,
+    amountSats: number,
+    feeRate?: number,
+  ): Promise<IBtcSendQuote>;
   broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>;
   checkBroadcast(signedTxHex: string): Promise<IBroadcastCheck>;
 }
@@ -190,6 +226,13 @@ export interface IBtcClient {
       feeRate?: number,
       options?: { addressType?: BtcSpendType },
     ) => Promise<ICreateTxResponse>;
+    quoteTransaction: (
+      sender: string | BtcSigner,
+      recipientAddress: string,
+      amountSats: number,
+      feeRate?: number,
+      options?: { addressType?: BtcSpendType },
+    ) => Promise<IBtcSendQuote>;
     broadcastTransaction: (transactionHex: string) => Promise<IBroadcastTxResponse>;
     sendBtc: (
       sender: string | BtcSigner,

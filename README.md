@@ -392,7 +392,11 @@ const recovery = client.newRecoveryKey();                     // random; store i
 // or: client.recoveryKeyFromPasskeyPrf(prfOutput)           // a dedicated passkey's PRF output (HKDF)
 // or: the address of an account in another wallet / hardware wallet
 client.vaultKeypairFromPrivateKey(key)              // an existing vault key
+client.recoveryKeypairFromPrivateKey(key)           // a pasted recovery key
 client.reserveKeypairFromRestoreCode(code)          // CLI / wallet restore code (both keys)
+// These read each key as a hex number, as Core does: Core's 65-digit text,
+// missing leading zeros, 0x and whitespace are fine; anything else throws
+// InvalidVaultKeyError instead of deriving a wrong address.
 client.reserveAddressFromPublic(publicKeyHex)       // xRBX address of an HSM key
 
 // Finding vaults the Flutter web wallet made. LEGACY: their recovery key is
@@ -481,6 +485,9 @@ getTransactions(address: string, limit?: number, before?: string | null): Promis
 // Transaction operations
 getFeeRates(): Promise<IFeeRates | null>
 createTransaction(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<ICreateTxResponse>
+quoteTransaction(sender: string | BtcSigner, recipientAddress: string, amountSats: number, feeRate?: number, options?): Promise<IBtcSendQuote>
+// ^ what the send would charge (fee, vsize, inputs, change, sufficient), nothing signed or broadcast;
+//   sender may also be the address. Every UTXO is spent, so the fee counts every input.
 broadcastTransaction(transactionHex: string): Promise<IBroadcastTxResponse>
 sendBtc(sender: string | BtcSigner, recipientAddress: string, amount: number, feeRate?: number): Promise<string | null> // amount in BTC
 checkBroadcast(signedTxHex: string): Promise<BroadcastCheck>

@@ -302,6 +302,47 @@ if (result.success) {
 }
 ```
 
+### `quoteTransaction(sender, toAddress, amountSats, feeRate?, options?)`
+
+What `createTransaction` / `sendBtc` would charge, before anything is signed or broadcast. It reads the sender's UTXOs (and the recommended fee rates when `feeRate` is 0) and nothing else. A send spends **every** UTXO of the address (there is no coin selection), and the quote counts them all with the same sizes and arithmetic, so a send from the same UTXOs at the same fee rate pays exactly `feeSats`.
+
+**Parameters:**
+- `sender` (string | BtcSigner): what the send takes (a WIF, or a `BtcSigner`, whose `approve` is not called), or the sending address itself (its spend type is read from the address)
+- `toAddress` (string): Recipient's address
+- `amountSats` (number): Amount in satoshis, a whole number. `sendBtc(…, amount)` charges `Math.round(amount * 1e8)` sats.
+- `feeRate` (number, optional): sat/vB. Pass the rate you will send with; 0 fetches the economy rate, which can move before the send fetches it again.
+- `options.addressType` (optional): which address of a WIF to spend from (default `'p2wpkh'`), as for `createTransaction`
+
+**Returns:** `Promise<IBtcSendQuote>`
+
+```typescript
+{
+  fromAddress: string;
+  addressType: BtcSpendType;  // an address-only Taproot sender quotes as 'p2tr' (same sizes as 'p2tr-bip86')
+  recipientAddress: string;
+  amountSats: number;
+  feeRate: number;            // the rate used
+  feeSats: number;            // what the transaction pays; when !sufficient, the least fee it would need
+  vsize: number;              // estimated virtual size
+  inputCount: number;         // every UTXO of the address
+  inputTotalSats: number;
+  changeSats: number;         // 0 when there is no change output (change below dust goes to the fee)
+  hasChange: boolean;
+  sufficient: boolean;        // whether the inputs cover amount + fee
+  requiredSats: number;       // amount + fee
+}
+```
+
+A P2PKH send also checks each UTXO against its previous transaction and stops on a mismatch; the quote does not fetch those transactions.
+
+**Example:**
+```typescript
+const quote = await client.quoteTransaction(wif, "bc1qrecipient...", 50_000, 12);
+if (!quote.sufficient) throw new Error(`Needs ${quote.requiredSats} sats, has ${quote.inputTotalSats}`);
+console.log(`${quote.inputCount} inputs, ${quote.vsize} vB, fee ${quote.feeSats} sats`);
+await client.sendBtc(wif, "bc1qrecipient...", quote.amountSats / 1e8, quote.feeRate);
+```
+
 ### `broadcastTransaction(rawTransaction)`
 
 Broadcasts a raw transaction to the Bitcoin network.

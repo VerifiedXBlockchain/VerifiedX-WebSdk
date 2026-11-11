@@ -1,10 +1,12 @@
 import KeypairService from './keypair';
 import TransactionService from './transaction';
 import AccountService from './account';
-import { BtcSigner, isBtcSigner, signBtcMessage } from './signer';
+import { BtcSigner, assertBtcSignerAddress, isBtcSigner, signBtcMessage } from './signer';
 import { newFlowId } from '../signer';
-import type { BtcSpendType } from './address-types';
+import { BtcSpendType, addressForSpendType } from './address-types';
 import * as bitcoin from 'bitcoinjs-lib';
+import ecc from '@bitcoinerlab/secp256k1';
+import { ECPairFactory } from 'ecpair';
 import type {
   IBtcKeypair,
   IAccountInfo,
@@ -13,10 +15,31 @@ import type {
   IBroadcastTxResponse,
   IBroadcastCheck,
   IFeeRates,
+  IBtcSendQuote,
   BtcClientOptions,
 } from './types';
 
 export type { BtcClientOptions };
+
+const ECPair = ECPairFactory(ecc);
+
+/** The spend type an address's output script is, or null when the text is not an address on `network`. */
+function spendTypeOfAddress(text: string, network: bitcoin.Network): BtcSpendType | null {
+  let script: Buffer;
+  try {
+    script = bitcoin.address.toOutputScript(text, network);
+  } catch {
+    return null;
+  }
+  if (script.length === 22 && script[0] === 0x00 && script[1] === 0x14) return 'p2wpkh';
+  if (script.length === 23 && script[0] === 0xa9) return 'p2sh-p2wpkh';
+  if (script.length === 25 && script[0] === 0x76) return 'p2pkh';
+  if (script.length === 34 && script[0] === 0x51 && script[1] === 0x20) return 'p2tr';
+  throw new Error(`quoteTransaction: ${text} is not an address type the SDK spends from`);
+}
+
+/** Spend types that share an output script form (the two Taproot types). */
+const spendFamily = (type: BtcSpendType): string => (type === 'p2tr-bip86' ? 'p2tr' : type);
 
 export default class BtcClient {
   private keypairService: KeypairService;
@@ -144,6 +167,64 @@ export default class BtcClient {
       return this.transactionService.createTransactionWithSigner(sender, recipientAddress, amount, feeRate);
     }
     return this.transactionService.createTransaction(sender, recipientAddress, amount, feeRate, options);
+  }
+
+  /**
+   * What `createTransaction` / `sendBtc` would charge for paying `amountSats`
+   * (satoshis, a whole number) to `recipientAddress`, without signing or
+   * broadcasting anything: the fee, virtual size, number of inputs, change
+   * and whether the balance covers it. Every UTXO of the sender is spent, as
+   * the send does, with the same sizes and arithmetic, so a send with the
+   * same UTXOs and `feeRate` pays exactly `feeSats`. Pass the fee rate you
+   * will send with; 0 fetches the economy rate, which may move before the
+   * send fetches it again.
+   *
+   * `sender` is what the send takes: a WIF (with `options.addressType`,
+   * default 'p2wpkh') or a BtcSigner (its own `addressType`; `approve` is not
+   * called). It may also be the sending address itself, whose spend type is
+   * read from the address. The amount `sendBtc` charges for `amount` BTC is
+   * `Math.round(amount * 1e8)` sats.
+   */
+  async quoteTransaction(
+    sender: string | BtcSigner,
+    recipientAddress: string,
+    amountSats: number,
+    feeRate = 0,
+    options: { addressType?: BtcSpendType } = {},
+  ): Promise<IBtcSendQuote> {
+    const { address, spendType } = this.spendingAddress(sender, options.addressType);
+    return this.transactionService.quoteTransaction(address, spendType, recipientAddress, amountSats, feeRate);
+  }
+
+  /** The address a sender spends from and its spend type, as the send resolves them. */
+  private spendingAddress(
+    sender: string | BtcSigner,
+    addressType: BtcSpendType | undefined,
+  ): { address: string; spendType: BtcSpendType } {
+    if (isBtcSigner(sender)) {
+      const spendType = sender.addressType ?? 'p2wpkh';
+      if (addressType && addressType !== spendType) {
+        throw new Error(
+          `quoteTransaction: options.addressType ${addressType} differs from the BtcSigner's ${spendType}; set it on the signer`,
+        );
+      }
+      assertBtcSignerAddress(sender, this.bitcoinNetwork);
+      return { address: sender.address, spendType };
+    }
+    const fromAddress = spendTypeOfAddress(sender, this.bitcoinNetwork);
+    if (fromAddress) {
+      if (addressType && spendFamily(addressType) !== spendFamily(fromAddress)) {
+        throw new Error(`quoteTransaction: ${sender} is not a ${addressType} address`);
+      }
+      return { address: sender, spendType: addressType ?? fromAddress };
+    }
+    const spendType = addressType ?? 'p2wpkh';
+    const keyPair = ECPair.fromWIF(sender, this.bitcoinNetwork);
+    const address = addressForSpendType(keyPair.publicKey, spendType, this.bitcoinNetwork);
+    if (!address) {
+      throw new Error(`quoteTransaction: could not get the ${spendType} address of this key`);
+    }
+    return { address, spendType };
   }
 
   /**

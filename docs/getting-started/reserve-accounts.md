@@ -45,6 +45,7 @@ Other ways to get a vault:
 
 ```typescript
 client.vaultKeypairFromPrivateKey(key);              // an existing vault key
+client.recoveryKeypairFromPrivateKey(key);           // a pasted recovery key
 client.reserveKeypairFromRestoreCode(code);          // a CLI or wallet restore code (both keys)
 client.reserveAddressFromPublic(publicKeyHex);       // the xRBX address of an HSM-held key
 client.restoreLegacyWebWalletVault(mainPrivateKey);  // LEGACY: a Flutter web-wallet vault, no theft protection
