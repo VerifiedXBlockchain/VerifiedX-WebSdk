@@ -378,9 +378,15 @@ export default class TransactionService {
     return feeRates?.economyFee || (this.network == TESTNET ? 2 : 5);
   }
 
-  /** Output script length the size estimate counts for the recipient (P2WPKH uses a fixed size). */
+  /**
+   * Output script length the size estimate counts for the recipient (P2WPKH
+   * uses a fixed size). The recipient is checked for every spend type: an
+   * address that is invalid, or for another network, throws here rather than
+   * getting a quote the send would then refuse.
+   */
   private recipientScriptLength(spendType: BtcSpendType, recipientAddress: string): number {
-    return spendType === 'p2wpkh' ? 0 : bitcoin.address.toOutputScript(recipientAddress, this.network).length;
+    const script = bitcoin.address.toOutputScript(recipientAddress, this.network);
+    return spendType === 'p2wpkh' ? 0 : script.length;
   }
 
   /**
