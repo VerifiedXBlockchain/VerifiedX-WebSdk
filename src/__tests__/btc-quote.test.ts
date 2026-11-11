@@ -166,6 +166,13 @@ describe('quoteTransaction edge cases', () => {
     await expect(client.quoteTransaction(WIF, P2WPKH_RECIPIENT, 0, 5)).rejects.toThrow(/whole number/);
   });
 
+  test('refuses a recipient that is not an address, or is for another network', async () => {
+    fund(address, [100_000]);
+    await expect(client.quoteTransaction(WIF, 'not-an-address', 1_000, 5)).rejects.toThrow();
+    // A mainnet address, quoted on testnet.
+    await expect(client.quoteTransaction(WIF, 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', 1_000, 5)).rejects.toThrow();
+  });
+
   test('refuses an addressType the address is not', async () => {
     fund(address, [100_000]);
     await expect(
