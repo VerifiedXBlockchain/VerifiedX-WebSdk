@@ -8,7 +8,8 @@ import { coreDataString, coreDecimalString, HashableTransaction } from './transa
  *   `/raw/validate-signature`, `/raw/verify`), as every SDK before 9.1 did.
  * - `both` (default): the SDK builds the transaction and its hash itself, and
  *   also asks `/raw/hash` and throws TransactionHashMismatchError when the
- *   two differ. Nothing is signed on a mismatch.
+ *   server's hash matches neither the re-serialised nor the verbatim form of
+ *   Data (see transaction-hash.ts). Nothing is signed on a mismatch.
  * - `local`: the SDK builds it alone. Only the nonce and the send go to the
  *   server (and `/raw/verify` when `preflight` is on).
  */

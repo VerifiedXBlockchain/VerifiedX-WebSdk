@@ -93,8 +93,9 @@ export {
   hashPreimage,
   transactionHash,
   transactionHashPreimage,
+  verbatimDataString,
 } from '../services/transaction-hash';
-export type { HashableTransaction } from '../services/transaction-hash';
+export type { HashableTransaction, HashDataForm, TransactionHashOptions } from '../services/transaction-hash';
 export { TransactionHashMismatchError, localTransactionFee } from '../services/tx-build-session';
 export type { HashMode } from '../services/tx-build-session';
 export { verifySignature } from '../services/keypair-service';

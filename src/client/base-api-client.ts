@@ -5,6 +5,15 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * The text of a JSON request body. The local transaction hash reads a
+ * transaction's Data back out of this same serialisation, so the two cannot
+ * drift apart.
+ */
+export function jsonRequestBody(params: Record<string, unknown>): string {
+  return JSON.stringify(params);
+}
+
+/**
  * Error thrown for non-2xx API responses and for requests that got no
  * response at all (see VfxNetworkError). `status` is the HTTP status when one
  * was received, undefined for transport-level failures. The message keeps the
@@ -122,7 +131,7 @@ export class BaseApiClient {
     } else {
       // Set body and headers for other methods
       init.headers = { ...headers, 'Content-Type': 'application/json' };
-      init.body = JSON.stringify(params);
+      init.body = jsonRequestBody(params);
     }
 
     const response = await fetchOrThrow(url, init);

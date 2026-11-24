@@ -113,6 +113,9 @@ new VfxClient('mainnet', { hashMode: 'both' }); // default
 - `'both'` (default): built in the SDK, then checked against Spyglass
   `/raw/hash`; any difference throws `TransactionHashMismatchError` before
   anything is signed. Use this to gain confidence in the local build.
+  The server's hash is accepted when it matches Data either re-serialised
+  (every network today) or as sent (nodes past Core's
+  `RawDataVerbatimHeight`), and the transaction is signed over that hash.
 - `'local'`: built in the SDK alone. A send makes two calls (nonce, send), or
   one when the client sent from that address before and has its next nonce.
 - `'server'`: Spyglass builds everything, exactly as before 9.1.
