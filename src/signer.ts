@@ -8,8 +8,9 @@ import { sha256Hex as sha256HexOfUtf8 } from './crypto';
 /**
  * The fields of a VFX transaction as they are signed. `Hash` is the digest
  * input (`signDigest` receives SHA-256 of it); a signer that wants to refuse
- * blind signing recomputes it from these fields with `transactionHash`, or
- * from `hashPreimage` with `hashPreimage()`.
+ * blind signing recomputes it from `hashPreimage` with `hashPreimage()`, or
+ * from these fields with `transactionHash` (with `{ dataForm: 'verbatim' }`
+ * on a network that hashes Data as sent; either form may be the one signed).
  */
 export interface SigningTransaction {
   Hash: string;

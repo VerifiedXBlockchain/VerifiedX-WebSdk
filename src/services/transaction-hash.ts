@@ -1,3 +1,4 @@
+import { jsonRequestBody } from '../client/base-api-client';
 import { sha256Hex } from '../crypto';
 
 /**
@@ -5,20 +6,29 @@ import { sha256Hex } from '../crypto';
  * GetHashPreimage / GetHash, origin/testnet 2026-11-08), so a transaction can
  * be built, shown and checked without asking the server for its hash.
  *
- * Core does not hash the JSON the client sends. The fields travel
- * SDK -> Spyglass (Python) -> node (Newtonsoft), and the node hashes what it
- * deserialized:
+ * Core does not hash the JSON text of the whole transaction. The request
+ * travels SDK -> Spyglass -> node; Spyglass forwards it to the node as sent,
+ * except that it writes a whole-number top-level Amount or Fee as "N.0". The
+ * node hashes the fields it deserialized:
  *
  *   - Amount and Fee are C# decimals, and decimal.ToString() keeps scale.
- *     Spyglass writes both as Python floats (`_fix_decimals`), the node reads
- *     the float text into a decimal, and Amount is then normalised so a whole
- *     number reads "1.0". The result is the plain decimal expansion of the
- *     number's shortest round-trip digits, with ".0" on whole numbers.
- *   - Data is re-serialised by the node with Newtonsoft (`RawData`:
- *     `JToken.ToString(Formatting.None)`), after Python has turned every
- *     JSON number with a point or exponent into a float. So floats inside
- *     Data are written the .NET way ("1E-05"), integers as written, and
- *     strings with Newtonsoft's escaping.
+ *     The node reads the JSON number text into a decimal, and a whole number
+ *     reads "1.0". The result is the plain decimal expansion of the number's
+ *     shortest round-trip digits (what JSON.stringify writes), with ".0" on
+ *     whole numbers.
+ *   - Data has two forms, depending on the node's height:
+ *       - re-serialised (every network today): the node parses Data with
+ *         Newtonsoft's defaults, which read every JSON number with a point or
+ *         an exponent as a double, and writes it back (`RawData`:
+ *         `JToken.ToString(Formatting.None)`). So floats inside Data are
+ *         written the .NET way ("1E-05"), integers as written, and strings
+ *         with Newtonsoft's escaping (`coreDataString`).
+ *       - verbatim (from Core's `RawDataVerbatimHeight`): an object or array
+ *         Data is the exact JSON text of that value in the request body, and
+ *         a string Data is the string itself (`verbatimDataString`). Null,
+ *         missing, number and boolean Data read as before.
+ *     The SDK does not know the height, so `RawTransactionService` accepts
+ *     the node's hash when it matches either form.
  *   - TransactionType is the enum NAME, and UnlockTime is appended only when
  *     it is not null (0 is appended).
  *
@@ -127,8 +137,8 @@ function plainExpansion(digits: string, exponent: number): string {
 }
 
 /**
- * Amount or Fee as the node's decimal.ToString() writes it after the
- * Spyglass float round trip: 1 -> "1.0", 0 -> "0.0", 0.00002 -> "0.00002".
+ * Amount or Fee as the node's decimal.ToString() writes it:
+ * 1 -> "1.0", 0 -> "0.0", 0.00002 -> "0.00002".
  */
 export function coreDecimalString(value: number): string {
   if (!Number.isFinite(value)) {
@@ -192,7 +202,8 @@ function nodeJson(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') {
     // JSON.stringify writes whole numbers below 1e21 without a point or an
-    // exponent, which Python keeps as int; anything else becomes a float.
+    // exponent, which Newtonsoft reads as an integer; anything else it reads
+    // as a double.
     const written = JSON.stringify(value);
     return /[.eE]/.test(written) ? dotnetDouble(value) : written;
   }
@@ -210,7 +221,7 @@ function nodeJson(value: unknown): string {
   throw new Error(`Cannot hash a ${typeof value} inside Data`);
 }
 
-/** The Data string the node hashes; empty for null or missing Data. */
+/** The Data string the node hashes in the re-serialised form; empty for null or missing Data. */
 export function coreDataString(data: unknown): string {
   if (data === null || data === undefined) {
     return '';
@@ -218,14 +229,63 @@ export function coreDataString(data: unknown): string {
   return nodeJson(JSON.parse(JSON.stringify(data)));
 }
 
+const DATA_FIELD_PREFIX = '{"Data":';
+
+/**
+ * The Data string the node hashes in the verbatim form (from Core's
+ * `RawDataVerbatimHeight`): for an object or array, the exact JSON text the
+ * SDK puts in the request body for it (taken from the same serialisation as
+ * the request); for a string, the string itself. Null for null, missing,
+ * number and boolean Data, which the node reads as before (`coreDataString`).
+ */
+export function verbatimDataString(data: unknown): string | null {
+  if (data === null || data === undefined) {
+    return null;
+  }
+  const body = jsonRequestBody({ Data: data });
+  if (!body.startsWith(DATA_FIELD_PREFIX)) {
+    // Data the serialisation leaves out of the body (a function, say).
+    return null;
+  }
+  const text = body.slice(DATA_FIELD_PREFIX.length, -1);
+  // What the node receives decides the form, so a value with a toJSON is
+  // judged by what it serialises to.
+  const sent: unknown = JSON.parse(text);
+  if (typeof sent === 'string') {
+    return sent;
+  }
+  return sent !== null && typeof sent === 'object' ? text : null;
+}
+
+/**
+ * Which form of Data a preimage uses; see the comment at the top of this
+ * file. 'reserialised' (the default) is what every network hashes today.
+ */
+export type HashDataForm = 'reserialised' | 'verbatim';
+
+export interface TransactionHashOptions {
+  dataForm?: HashDataForm;
+}
+
+function dataString(data: unknown, dataForm: HashDataForm): string {
+  if (dataForm === 'verbatim') {
+    const verbatim = verbatimDataString(data);
+    if (verbatim !== null) {
+      return verbatim;
+    }
+  }
+  return coreDataString(data);
+}
+
 /** `Transaction.GetHashPreimage()`: the exact text the hash is computed over. */
-export function transactionHashPreimage(tx: HashableTransaction): string {
+export function transactionHashPreimage(tx: HashableTransaction, options: TransactionHashOptions = {}): string {
   if (PRIVATE_TX_TYPES.has(tx.TransactionType)) {
     throw new Error(`Transaction type ${tx.TransactionType} uses the private hash and cannot be hashed locally`);
   }
+  const data = dataString(tx.Data, options.dataForm ?? 'reserialised');
   const preimage =
     `${tx.Timestamp}${tx.FromAddress}${tx.ToAddress}${coreDecimalString(tx.Amount)}${coreDecimalString(tx.Fee)}` +
-    `${tx.Nonce}${coreTxTypeName(tx.TransactionType)}${coreDataString(tx.Data)}`;
+    `${tx.Nonce}${coreTxTypeName(tx.TransactionType)}${data}`;
   return tx.UnlockTime === null || tx.UnlockTime === undefined ? preimage : `${preimage}${tx.UnlockTime}`;
 }
 
@@ -239,6 +299,6 @@ export function hashPreimage(preimage: string): string {
 }
 
 /** `Transaction.GetHash()`: what the node signs and verifies. */
-export function transactionHash(tx: HashableTransaction): string {
-  return hashPreimage(transactionHashPreimage(tx));
+export function transactionHash(tx: HashableTransaction, options: TransactionHashOptions = {}): string {
+  return hashPreimage(transactionHashPreimage(tx, options));
 }

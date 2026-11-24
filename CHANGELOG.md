@@ -1,5 +1,16 @@
 # Changelog
 
+## 9.1.4
+
+### Changed
+
+- **`hashMode: 'both'` accepts the node's hash with Data as sent.** From Core's `RawDataVerbatimHeight` (not set on testnet or mainnet yet) the node hashes an object or array Data as the exact JSON text of the request body, and a string Data as the string itself, instead of re-serialising it. The local check now accepts the server's hash when it matches either form, and the transaction is signed over the hash the server returned; a hash matching neither still throws `TransactionHashMismatchError` before anything is signed. Nothing changes on a network below that height. `'local'` mode, which does not ask the server, still signs the re-serialised hash.
+
+### Added
+
+- **`verbatimDataString(data)`**: Data as a node past that height hashes it (taken from the same serialisation as the request body), or null for null, missing, number and boolean Data, which it reads as before.
+- **`transactionHash(tx, { dataForm })`** and **`transactionHashPreimage(tx, { dataForm })`**: `dataForm: 'verbatim'` hashes that form; the default, `'reserialised'`, is unchanged. Types `HashDataForm` and `TransactionHashOptions`.
+
 ## 9.1.3
 
 ### Added

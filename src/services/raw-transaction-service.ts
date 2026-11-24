@@ -11,7 +11,12 @@ import {
 import KeypairService, { verifySignature } from './keypair-service';
 import { assertRecipientOnNetwork, isNameRecipient } from './recipient';
 import { parseVfxSignature } from './vfx-signature';
-import { canHashLocally, transactionHash, transactionHashPreimage } from './transaction-hash';
+import {
+  canHashLocally,
+  hashPreimage as hashOfPreimage,
+  transactionHash,
+  transactionHashPreimage,
+} from './transaction-hash';
 import {
   DEFAULT_HASH_MODE,
   HashMode,
@@ -186,7 +191,8 @@ export class RawTransactionService {
    * session's server-clock offset, the fee from the size formula, the hash
    * from Core's preimage; the nonce still comes from the server unless
    * 'local' has one cached from this session's last send. 'both' also asks
-   * `/raw/hash` and refuses to go on when the answers differ.
+   * `/raw/hash` and refuses to go on when its answer matches neither local
+   * form of the hash.
    */
   private async build(client: RawTransactionApiClient): Promise<void> {
     if (this.hashMode === 'server') {
@@ -213,7 +219,16 @@ export class RawTransactionService {
     if (this.hashMode === 'both') {
       const serverHash = await client.getHash(this.updateTransactionData());
       if (serverHash !== this.hash) {
-        throw new TransactionHashMismatchError(this.hash, serverHash, this.hashPreimage);
+        // A node past Core's RawDataVerbatimHeight hashes Data as sent rather
+        // than re-serialised. The SDK does not know the height, so either
+        // form is accepted, and the transaction is signed over the one the
+        // node uses. A hash matching neither is still refused.
+        const verbatimPreimage = transactionHashPreimage(fields, { dataForm: 'verbatim' });
+        if (hashOfPreimage(verbatimPreimage) !== serverHash) {
+          throw new TransactionHashMismatchError(this.hash, serverHash, this.hashPreimage);
+        }
+        this.hashPreimage = verbatimPreimage;
+        this.hash = serverHash;
       }
     }
   }
